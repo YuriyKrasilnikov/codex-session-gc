@@ -1,0 +1,42 @@
+--- a/codex-rs/state/src/runtime/goals.rs
++++ b/codex-rs/state/src/runtime/goals.rs
+@@ -473,6 +473,15 @@
+         &self,
+         thread_id: ThreadId,
+     ) -> anyhow::Result<Option<crate::ThreadGoal>> {
++        let mut connection = self.pool.acquire().await?;
++        Self::delete_thread_goal_in(&mut connection, thread_id).await
++    }
++
++    /// Executes native goal cleanup on the caller's retained connection.
++    pub async fn delete_thread_goal_in(
++        connection: &mut sqlx::SqliteConnection,
++        thread_id: ThreadId,
++    ) -> anyhow::Result<Option<crate::ThreadGoal>> {
+         let row = sqlx::query(
+             r#"
+ DELETE FROM thread_goals
+@@ -490,10 +499,22 @@
+             "#,
+         )
+         .bind(thread_id.to_string())
+-        .fetch_optional(self.pool.as_ref())
++        .fetch_optional(connection)
+         .await?;
+ 
+         row.map(|row| thread_goal_from_row(&row)).transpose()
++    }
++
++    /// Removes selected closed-work continuation state on the caller's retained transaction.
++    pub async fn delete_thread_goal_deferral_in(
++        connection: &mut sqlx::SqliteConnection,
++        thread_id: ThreadId,
++    ) -> anyhow::Result<()> {
++        sqlx::query("DELETE FROM thread_goal_continuation_deferrals WHERE thread_id=?")
++            .bind(thread_id.to_string())
++            .execute(connection)
++            .await?;
++        Ok(())
+     }
+ 
+     pub async fn account_thread_goal_usage(

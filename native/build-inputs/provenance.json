@@ -1,0 +1,458 @@
+{
+  "archive_sha256": "79c8ea8547e1dd9969f63ef6b76a4fb0d1a024ef36c0c627fbcd2ffb658d9312",
+  "archive_url": "https://codeload.github.com/openai/codex/tar.gz/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+  "build_qualification": {
+    "build_settings": {
+      "cargo": "1.99.1 (5f94df478 2026-08-27)",
+      "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "compiler_commit": "58cf8f9c35b355199727627d07ae34a4e2846d67",
+      "debug": 0,
+      "edition": "2024",
+      "incremental": false,
+      "jobs": 2,
+      "native_compilers": {
+        "c": "GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1)",
+        "cxx": "GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1)"
+      },
+      "path_remapping": {
+        "c_and_cxx": "CFLAGS and CXXFLAGS use -ffile-prefix-map for the same roots, including AWS-LC assertion locations.",
+        "environment": "Only inherited PATH, HOME and optional RUSTUP_HOME are preserved; Cargo profile/cache/target and C/C++ compilers/remapping flags are explicit. No ambient wrapper, target, compiler flags or optional build metadata is inherited.",
+        "normalized_roots": [
+          "/usr/src/codex-session-gc",
+          "/usr/src/codex-session-gc/cargo-home",
+          "/usr/src/codex-session-gc/build",
+          "/usr/src/codex-session-gc/build-root"
+        ],
+        "rust": "--remap-path-prefix for source, Cargo cache and generated target roots, with parent mappings before nested roots."
+      },
+      "production_features": [],
+      "profile": "dev",
+      "target": "x86_64-unknown-linux-gnu"
+    },
+    "contract_sha256": "890ad434de974c6848ab27ac7b934b83d96ea1d437551ce774ef281a8b2e0026",
+    "helper_bytes": 81913024,
+    "helper_sha256": "6ca072bf606733acd180031a34a55c9c6581c4b749dd8374a7a12c81d0d4efa5",
+    "partitions": [
+      {
+        "cases": 62,
+        "exit_code": 0,
+        "kind": "native-contract",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_sha256": "8b8f24d063f72838e73d070b721dc190ce4bd6d3e0cdcf41a8d683d8af9f305e",
+        "test_source": "native/helper/tests/current_contract.py",
+        "test_source_sha256": "0a50c873853808f754dfe3af0e25969f642cd0b5e9c9219a6142cd6d266541f7"
+      },
+      {
+        "cases": 24,
+        "exit_code": 0,
+        "kind": "physical-manifest",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_sha256": "e846823a681f4b2549a4f737f6db03b70ec596dd36787fd4dfce2f821d7415a5",
+        "test_source": "native/helper/tests/physical_rollouts.py",
+        "test_source_sha256": "fa0aa0b13e9a0d2175a32c8b8f1ef8acc9f6527ecd1a902fa0bd65f9089e3bad"
+      },
+      {
+        "cases": 2,
+        "exit_code": 0,
+        "kind": "board-schema-and-effects",
+        "result_sha256": "810e849fa9c09c4f3694cbdf58a693c47f5ccf631f9c17d2ea5cdd38d09cbf65",
+        "schema_rows": 12,
+        "schema_rows_json_sha256": "44f2e7d75a6a5118cf85d143756b3c5db67c40983c0e1f3ab7156b07cf10287c",
+        "witness": "Reconstructed disposable fresh-board and exact-known-predecessor official-SQL-upgrade witness.",
+        "witness_source_sha256": "8a4acd16a01a1b5c9dd1fc40b908479150e77f8f037c90096ab11567522de512"
+      }
+    ],
+    "patch_targets": [
+      {
+        "bytes": 20593,
+        "path": "codex-rs/ext/agent-message-board/src/local.rs",
+        "sha256": "841879f7b4064ad25e83e1dc16b738718b10fd7b0f00e437857b3688b2e39466"
+      },
+      {
+        "bytes": 6217,
+        "path": "codex-rs/ext/agent-message-board/src/local/lifecycle.rs",
+        "sha256": "96ea5175b66772e094ae9e672c60e21436142a98945a4057f99cc678e31094f6"
+      },
+      {
+        "bytes": 6558,
+        "path": "codex-rs/rollout/src/lib.rs",
+        "sha256": "4def8563cdc72c958fd454e18feeafb1a4721b9f7e31eee2bb48a721dc50cb28"
+      },
+      {
+        "bytes": 1714,
+        "path": "codex-rs/rollout/src/maintenance.rs",
+        "sha256": "1eef9aa431011ed3a04c4ecceae86e803d8fa1b04199ded7e6848c5d2d7cbfe3"
+      },
+      {
+        "bytes": 18490,
+        "path": "codex-rs/rollout/src/metadata.rs",
+        "sha256": "26b6331518e9432595a6e347243281a71623e67f65133991991b2fdfa5902967"
+      },
+      {
+        "bytes": 7537,
+        "path": "codex-rs/rollout/src/writer_lock.rs",
+        "sha256": "d1d0f04cbef0710a98763c0e726ac249a0a055c0f9c204ac86850ea448ac739b"
+      },
+      {
+        "bytes": 5155,
+        "path": "codex-rs/rollout/src/writer_lock_tests.rs",
+        "sha256": "958eb4edb01f7679ec76e95615198e9a4117833affc9cd79ad0140093a498db5"
+      },
+      {
+        "bytes": 56360,
+        "path": "codex-rs/state/src/runtime/goals.rs",
+        "sha256": "596112c163f621b8f52c25f83b88172593a18acfb0f548093637dec01a2fd12d"
+      },
+      {
+        "bytes": 194847,
+        "path": "codex-rs/state/src/runtime/memories.rs",
+        "sha256": "e4c4c3a893d9e78ca27d624f03f561cb3929689dfb625a511aed0992a52ff241"
+      },
+      {
+        "bytes": 7788,
+        "path": "codex-rs/state/src/runtime/queued_items.rs",
+        "sha256": "f0dc06c562fe01baa75b49099823ca2d5ce056b62da7b5d9bec0f77148283371"
+      },
+      {
+        "bytes": 141253,
+        "path": "codex-rs/state/src/runtime/threads.rs",
+        "sha256": "880054b0cfdad5db316006d0fe3c09e114ab837f2ccad7a46defb3baa2ae45b3"
+      },
+      {
+        "bytes": 21562,
+        "path": "codex-rs/state/src/sqlite.rs",
+        "sha256": "1d293d3ec621c26d1449341819b0d9be90746edd336ecb8b2f59fcd36a84e3a8"
+      },
+      {
+        "bytes": 6562,
+        "path": "codex-rs/state/src/sqlite_tests.rs",
+        "sha256": "4b4a5ff5ce3e1fe46da840d276cbd60f02e73f815c569c7145b6e231e94c4de7"
+      },
+      {
+        "bytes": 1501,
+        "path": "codex-rs/thread-store/Cargo.toml",
+        "sha256": "5d3de879b8dc935c510ee093816b01d6ec2c889340184f818923d18238e57f9e"
+      },
+      {
+        "bytes": 4529,
+        "path": "codex-rs/thread-store/src/lib.rs",
+        "sha256": "cdee0ca24d6244979840a211ff9432e43d17b717d5170516b8d69b78f9cf5535"
+      },
+      {
+        "bytes": 71899,
+        "path": "codex-rs/thread-store/src/local/bounded_cleanup.rs",
+        "sha256": "e60aaf912255b9e5c8adda6eba26c1e2808a2c34d767032b1cdda912285e4274"
+      },
+      {
+        "bytes": 33916,
+        "path": "codex-rs/thread-store/src/local/delete_thread.rs",
+        "sha256": "ddbfe31aee19bbe2264a829e6b514b825d6049e4d7af9f8d15c8734685750276"
+      },
+      {
+        "bytes": 83982,
+        "path": "codex-rs/thread-store/src/local/mod.rs",
+        "sha256": "7209a7883af42e1cdac5405df4274363b4f635a00da6c28c013080cd26c650cf"
+      },
+      {
+        "bytes": 20368,
+        "path": "codex-rs/thread-store/src/local/thread_history.rs",
+        "sha256": "7511b89ce285b71008ba908d7343946fc4498d50feb738639b3dd186e1a09f52"
+      },
+      {
+        "bytes": 97279,
+        "path": "codex-rs/thread-store/src/local/update_thread_metadata.rs",
+        "sha256": "ac17f2ca7ef950b8c3214b581dfccfb14454981d0f0893a001b3fd13e7a321fd"
+      }
+    ],
+    "patch_targets_manifest_encoding": "UTF-8 JSON array with sorted object keys, indent 2 and one trailing newline.",
+    "patch_targets_manifest_sha256": "6fd3917b0c8387aa287140e410a30c7b8ad3a268639501944cd1c7239008ead6",
+    "qualification_boundary": "Bounded native storage cleanup of explicitly selected closed work, with no related in-flight fork, resume or publication. Unrelated work continues. Exact schema, ownership, physical manifests and selected file/SQL effects are checked; no full live Core lifecycle or whole-history integrity claim. Application and installed-artifact acceptance are separate.",
+    "qualification_identity": "2f8d94c7d0d601951cc34ae72a2d49753a4056beb5e1c53033c944711be57714"
+  },
+  "commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+  "compatibility_backports": [
+    {
+      "patches": [
+        "board-schema-0164.patch",
+        "transaction-owned-board-delete.patch"
+      ],
+      "repository": "https://github.com/openai/codex",
+      "scope": "Exact board_templates and nullable channels.description schema plus selected-root template deletion; original pinned source and archive remain unchanged.",
+      "source_files": [
+        {
+          "path": "codex-rs/message-board/src/local/pool.rs",
+          "sha256": "cdc57c450d4adc2cb9de03af51f08290bf474887ff4ee4842430aaeaff71f81d"
+        },
+        {
+          "path": "codex-rs/message-board/src/local/lifecycle.rs",
+          "sha256": "e065a2c070b2012bbbf19bbd372e8a866f7c6c4870f4d94fdabb72e620736fe5"
+        }
+      ],
+      "source_ref": "rust-v0.164.0"
+    }
+  ],
+  "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13); Cargo 1.99.1 (5f94df478 2026-08-27); Edition 2024",
+  "current_delivery_inputs": {
+    "manifest": {
+      "archive_sha256": "79c8ea8547e1dd9969f63ef6b76a4fb0d1a024ef36c0c627fbcd2ffb658d9312",
+      "inputs": [
+        {
+          "bytes": 285856,
+          "path": "native/helper/Cargo.lock",
+          "sha256": "f9eb8b64d4efd5b007a66a4ae3ae504ee851938ec24af3c4c1824dd344499f10"
+        },
+        {
+          "bytes": 1603,
+          "path": "native/helper/Cargo.toml",
+          "sha256": "2a37f0699c01f2b86c46e16305238be26f0b03ccaec05f18f9113afecf2de988"
+        },
+        {
+          "bytes": 86,
+          "path": "native/helper/rust-toolchain.toml",
+          "sha256": "f715f440167e20fd8ea9afa0498c3d1ab80174cfcb8cbc895f106a34d907a1e1"
+        },
+        {
+          "bytes": 42571,
+          "path": "native/helper/src/fixture.rs",
+          "sha256": "27f99745295ca37c998bbc076f16819aa0b8d3be9e47642dbce027302d7ef218"
+        },
+        {
+          "bytes": 46,
+          "path": "native/helper/src/lib.rs",
+          "sha256": "5dc26b94f160337a2b91a875afd4e857665bd790038a8d8e12980d2aac34d510"
+        },
+        {
+          "bytes": 2548,
+          "path": "native/helper/src/main.rs",
+          "sha256": "f0c461883e8c6381dd4cf2966c50a6cf9e34b22a6fc0cb21abc7a3ab28f6e7f6"
+        },
+        {
+          "bytes": 702,
+          "path": "native/patches/board-schema-0164.patch",
+          "sha256": "89e7dfa6be9032be77165f132d806fa32db5171e968428a6f6f92a8f2a9021e2"
+        },
+        {
+          "bytes": 1204,
+          "path": "native/patches/bounded-writer-tests.patch",
+          "sha256": "e0e166765b724964831b631e14884cd73abf10c22b8d2b3a340115cf0863a0df"
+        },
+        {
+          "bytes": 1007,
+          "path": "native/patches/bounded-writer.patch",
+          "sha256": "3aa621141f13beca69634566cd7fdf39b86700f5b2f544f99de8fbb2a8bb8ee8"
+        },
+        {
+          "bytes": 2156,
+          "path": "native/patches/existing-cleanup-pool-tests.patch",
+          "sha256": "0bb80ce7341180b50d938b2fd06e75604c0ae99adb15fc3c6d95d20959e9dedd"
+        },
+        {
+          "bytes": 5989,
+          "path": "native/patches/existing-cleanup-pool.patch",
+          "sha256": "ba6f5c7690906d94e5912bc180e856d5e849c2df0e54896cf5bc5a7dbee31cfa"
+        },
+        {
+          "bytes": 2155,
+          "path": "native/patches/existing-cleanup-store.patch",
+          "sha256": "8fd463236a450d33ead9e0f26f7347f662f82721c6cdbe93fe3f9490e1d24f71"
+        },
+        {
+          "bytes": 540,
+          "path": "native/patches/native-file-delete-entry.patch",
+          "sha256": "a362e2fb2408afe3093d11352072df42a3a9ba5c18f5d2d771825549c6051a49"
+        },
+        {
+          "bytes": 5836,
+          "path": "native/patches/native-operation-registration.patch",
+          "sha256": "355c89553267b7fb218b200c91251e3bc8ea279854664b4df10c7565fc372fcb"
+        },
+        {
+          "bytes": 73826,
+          "path": "native/patches/native-operation.patch",
+          "sha256": "7a1f07391ab36b9033bf28e5986d5b604b8bc500baddb1aea34e39f0fba04617"
+        },
+        {
+          "bytes": 3077,
+          "path": "native/patches/transaction-owned-board-delete.patch",
+          "sha256": "d88a708ff3799ecbd526f01fe045fc318039a057c0e1ee6107e58e9eb73a618e"
+        },
+        {
+          "bytes": 1443,
+          "path": "native/patches/transaction-owned-goal-delete.patch",
+          "sha256": "c0d9f1a168977c103fabf241f672da4890e660263049c1234dcce1a3aaa559b1"
+        },
+        {
+          "bytes": 2444,
+          "path": "native/patches/transaction-owned-history-delete.patch",
+          "sha256": "9a89fd165e8b2f155b5ea9c8029f0adce6ec9c0df423564d0c581fc4e7af7694"
+        },
+        {
+          "bytes": 1834,
+          "path": "native/patches/transaction-owned-memory-delete.patch",
+          "sha256": "0b091f3ee87e7ec3a3397cb5fea507791b4f3e434b6991bcd396b4ec12ecf5ce"
+        },
+        {
+          "bytes": 856,
+          "path": "native/patches/transaction-owned-queue-delete.patch",
+          "sha256": "486a43e1ed460be2382f6ee1b0d5e8a4292318136cd66080d1bf6dd269adbb82"
+        },
+        {
+          "bytes": 4442,
+          "path": "native/patches/transaction-owned-state-delete.patch",
+          "sha256": "23f538d5ea4c8dc536496a1e2ddc7d0a38a6eba3be633a1d6aa44cc8f6e9573e"
+        }
+      ]
+    },
+    "manifest_encoding": "UTF-8 JSON with sorted keys, indent 2 and one trailing newline; provenance, qualification and distribution metadata are sealed separately.",
+    "manifest_sha256": "79faa67e13f740b7d889c028ee296fea36ccf605962582caba04e198312530d9",
+    "scope": "Exact helper source, Cargo, toolchain and patch inputs used for the qualified production executable."
+  },
+  "repository": "https://github.com/openai/codex",
+  "retained_sources": [
+    {
+      "bytes": 7528,
+      "path": "codex-rs/thread-store/src/local/paginated_fork.rs",
+      "sha256": "6ac306f8f8ddb83e977467f778cd18a7f67c083793784f4d70e9df13d24fd85c"
+    },
+    {
+      "bytes": 14704,
+      "path": "codex-rs/thread-store/src/local/archive_thread.rs",
+      "sha256": "d159197c4e6929ac7793be2a013d5c873ea0278c50bb3ed4da82df3bedfbc289"
+    },
+    {
+      "bytes": 11637,
+      "path": "codex-rs/thread-store/src/local/unarchive_thread.rs",
+      "sha256": "9c2eb01bf1407139377266b711618d6553140467d88975b914065bf587f3721f"
+    },
+    {
+      "bytes": 95275,
+      "path": "codex-rs/thread-store/src/local/update_thread_metadata.rs",
+      "sha256": "8a69b1de198101a4e28ab239fad7d31c0e78d5af06cfd16da7479c8fc80662fd"
+    },
+    {
+      "bytes": 2494,
+      "path": "codex-rs/thread-store/src/local/create_thread.rs",
+      "sha256": "4922b71932503b834814f51ee634332cbe76f64e313cc2e96cf58773a8473e77"
+    },
+    {
+      "bytes": 43577,
+      "path": "codex-rs/thread-store/src/types.rs",
+      "sha256": "579d2087f4517fbb113e4ed042c93b78a5a93af6f54d4a375fcbff0b1be744e9"
+    },
+    {
+      "bytes": 11741,
+      "path": "codex-rs/agent-graph-store/src/local.rs",
+      "sha256": "61f8f2b4f142f19e9e5fc4854fe6c2ada51019c9c27c9620b5916495fd59cd1f"
+    },
+    {
+      "bytes": 21643,
+      "path": "codex-rs/thread-store/src/store.rs",
+      "sha256": "503bbbd451f6930486f1f29c55d8c4008e6b5f823b31c6b168ba11920d0e4688"
+    },
+    {
+      "bytes": 37666,
+      "path": "codex-rs/thread-store/src/thread_metadata_sync.rs",
+      "sha256": "e7e749d02de7cfb0add36b71c64b2dd58e0040a48769c62a4e2079911388addc"
+    },
+    {
+      "bytes": 1501,
+      "path": "codex-rs/rollout/src/maintenance.rs",
+      "sha256": "abdbd690732aaee671609fc0540c9e845a15116c0de183b0dd976d560f55c404"
+    },
+    {
+      "bytes": 66173,
+      "path": "codex-rs/thread-store/src/local/read_thread.rs",
+      "sha256": "7f44115d6332636272133b184d55a835598d182ad054201c00239d626e135f32"
+    },
+    {
+      "bytes": 8222,
+      "path": "codex-rs/thread-store/src/local/model_context.rs",
+      "sha256": "a6273a9d0194b37e270ef4ce06dbbfe1ec8ba9f20de6f4bc61ef71e89e2fb7f7"
+    },
+    {
+      "bytes": 53262,
+      "path": "codex-rs/thread-store/src/local/rollout_migration.rs",
+      "sha256": "39658739bcf8a95ac2deba358ab7724eaa0c243abbd36d54f3d39a33bc52d2f9"
+    },
+    {
+      "bytes": 14970,
+      "path": "codex-rs/thread-store/src/local/rollout_migration/startup.rs",
+      "sha256": "8bb4dad3a7af7ed7c15174564e0570be96f6d9073b3566b07d5a92b1e1e356df"
+    },
+    {
+      "bytes": 9137,
+      "path": "codex-rs/thread-store/src/local/rollout_migration/publish.rs",
+      "sha256": "01c97e9a0309422cbfb5f02dc0a1d61d459264c462d3628415044d70ff7d5d85"
+    },
+    {
+      "bytes": 139235,
+      "path": "codex-rs/state/src/runtime/threads.rs",
+      "sha256": "015a39c7524b452da4e0de80f84694715cf5de90474a2f82ef192dd2d5333a5e"
+    },
+    {
+      "bytes": 20163,
+      "path": "codex-rs/thread-store/src/local/thread_history.rs",
+      "sha256": "3dbb26bde497ce88068c83e936bb638614cda1c5e40222af91e3bc83c2474a1e"
+    },
+    {
+      "bytes": 10651,
+      "path": "codex-rs/rollout/src/session_index.rs",
+      "sha256": "921be45f67751fd25c2a893a88199a952f7fcf45b050983835a72da9bc1e13bc"
+    },
+    {
+      "bytes": 27302,
+      "path": "codex-rs/state/src/runtime.rs",
+      "sha256": "e255590191d988e85fc1c0048196e2a57c35e37b12a71b363dfd9254b14bc234"
+    },
+    {
+      "bytes": 14004,
+      "path": "codex-rs/thread-store/src/local/helpers.rs",
+      "sha256": "74592931f837777ba80c576de0606261608305baaecf45f691ea95516ddccf66"
+    },
+    {
+      "bytes": 82346,
+      "path": "codex-rs/thread-store/src/local/mod.rs",
+      "sha256": "47b23304ba738da71a0449ebbd96001628f9bbbb1caa4bf13b37e54eff4422d0"
+    },
+    {
+      "bytes": 33894,
+      "path": "codex-rs/thread-store/src/local/delete_thread.rs",
+      "sha256": "c42ee0cef1780ec3e2928dee280f6b28f51cf89431301405512e353e9bb4ba5a"
+    },
+    {
+      "bytes": 4426,
+      "path": "codex-rs/ext/agent-message-board/src/local/lifecycle.rs",
+      "sha256": "421766bf667c30bb70ee30cd2806f6f968b4994c004a19b9df70cab90175bcdb"
+    },
+    {
+      "bytes": 1762,
+      "path": "codex-rs/state/src/runtime/memory_versions.rs",
+      "sha256": "b01c3f7ae6e8116f5c505156378a52a21ef06f2a9dcff7a9f9f6d0cc86f02a1a"
+    },
+    {
+      "bytes": 55533,
+      "path": "codex-rs/state/src/runtime/goals.rs",
+      "sha256": "11640e2a48cbd3d109f22d31695dba2ddb11f9aff9543d774d34f261fd1f48f4"
+    },
+    {
+      "bytes": 7435,
+      "path": "codex-rs/state/src/runtime/queued_items.rs",
+      "sha256": "f522d6d83b353a9ceb041266e2650f438e1a07414c3251c33b60ca7a1b65ff2c"
+    },
+    {
+      "bytes": 3593,
+      "path": "codex-rs/state/src/migrations.rs",
+      "sha256": "08f20a50dfecc5543189ff415ccc9471aacaf36fa2ffd07e5e148fa93437234c"
+    },
+    {
+      "bytes": 252303,
+      "path": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+      "sha256": "2c40a6db590c9823a6775b28c2e125544583246318ce038166d28fb57a10ab29"
+    },
+    {
+      "bytes": 6875,
+      "path": "codex-rs/rollout/src/writer_lock.rs",
+      "sha256": "e9a49bef7540dc688de8243d6df1ee9a24cf328c082934b1352d8bebef857468"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+--- a/codex-rs/ext/agent-message-board/src/local.rs
++++ b/codex-rs/ext/agent-message-board/src/local.rs
+@@ -61,5 +61,6 @@
+ const SCHEMA: &str = "
++CREATE TABLE IF NOT EXISTS board_templates (board TEXT PRIMARY KEY NOT NULL, template TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS deleted_boards (board TEXT PRIMARY KEY NOT NULL);
+ CREATE TABLE IF NOT EXISTS channels (
+- board TEXT NOT NULL, name TEXT NOT NULL, name_search TEXT NOT NULL, created_at TEXT NOT NULL, timestamp INTEGER NOT NULL, author TEXT NOT NULL,
++ board TEXT NOT NULL, name TEXT NOT NULL, name_search TEXT NOT NULL, created_at TEXT NOT NULL, timestamp INTEGER NOT NULL, author TEXT NOT NULL, description TEXT,
+  PRIMARY KEY(board,name)

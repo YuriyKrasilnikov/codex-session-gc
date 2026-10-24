@@ -1,0 +1,66 @@
+--- a/codex-rs/thread-store/src/local/thread_history.rs
++++ b/codex-rs/thread-store/src/local/thread_history.rs
+@@ -241,6 +241,34 @@
+     transaction.commit().await.map_err(thread_history_error)
+ }
+ 
++pub(super) async fn delete_thread_in(
++    connection: &mut sqlx::SqliteConnection,
++    thread_id: ThreadId,
++) -> ThreadStoreResult<()> {
++    let thread_id = thread_id.to_string();
++    sqlx::query("DELETE FROM thread_items WHERE thread_id = ?")
++        .bind(thread_id.as_str())
++        .execute(&mut *connection)
++        .await
++        .map_err(thread_history_delete_error)?;
++    sqlx::query("DELETE FROM thread_realtime_items WHERE thread_id = ?")
++        .bind(thread_id.as_str())
++        .execute(&mut *connection)
++        .await
++        .map_err(thread_history_delete_error)?;
++    sqlx::query("DELETE FROM thread_turns WHERE thread_id = ?")
++        .bind(thread_id.as_str())
++        .execute(&mut *connection)
++        .await
++        .map_err(thread_history_delete_error)?;
++    sqlx::query("DELETE FROM thread_history_projection_state WHERE thread_id = ?")
++        .bind(thread_id.as_str())
++        .execute(&mut *connection)
++        .await
++        .map_err(thread_history_delete_error)?;
++    Ok(())
++}
++
+ pub(super) async fn delete_thread(
+     store: &LocalThreadStore,
+     thread_id: ThreadId,
+@@ -258,27 +286,7 @@
+         .begin_with("BEGIN IMMEDIATE")
+         .await
+         .map_err(thread_history_delete_error)?;
+-    let thread_id = thread_id.to_string();
+-    sqlx::query("DELETE FROM thread_items WHERE thread_id = ?")
+-        .bind(thread_id.as_str())
+-        .execute(&mut *transaction)
+-        .await
+-        .map_err(thread_history_delete_error)?;
+-    sqlx::query("DELETE FROM thread_realtime_items WHERE thread_id = ?")
+-        .bind(thread_id.as_str())
+-        .execute(&mut *transaction)
+-        .await
+-        .map_err(thread_history_delete_error)?;
+-    sqlx::query("DELETE FROM thread_turns WHERE thread_id = ?")
+-        .bind(thread_id.as_str())
+-        .execute(&mut *transaction)
+-        .await
+-        .map_err(thread_history_delete_error)?;
+-    sqlx::query("DELETE FROM thread_history_projection_state WHERE thread_id = ?")
+-        .bind(thread_id.as_str())
+-        .execute(&mut *transaction)
+-        .await
+-        .map_err(thread_history_delete_error)?;
++    delete_thread_in(&mut transaction, thread_id).await?;
+     transaction
+         .commit()
+         .await

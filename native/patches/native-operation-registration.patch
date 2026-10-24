@@ -1,0 +1,159 @@
+--- a/codex-rs/thread-store/Cargo.toml
++++ b/codex-rs/thread-store/Cargo.toml
+@@ -12,7 +12,13 @@
+ [lints]
+ workspace = true
+ 
++[features]
++fixtures = []
++
+ [dependencies]
++codex-agent-message-board-extension = { path = "../ext/agent-message-board" }
++sha2 = { workspace = true }
++uuid = { workspace = true }
+ chrono = { workspace = true, features = ["serde"] }
+ codex-app-server-protocol = { workspace = true }
+ codex-extension-items = { workspace = true }
+@@ -26,6 +32,7 @@
+ codex-utils-path = { workspace = true }
+ codex-utils-path-uri = { workspace = true }
+ futures = { workspace = true }
++libc = { workspace = true }
+ pulldown-cmark = { workspace = true }
+ serde = { workspace = true, features = ["derive"] }
+ serde_json = { workspace = true }
+--- a/codex-rs/thread-store/src/lib.rs
++++ b/codex-rs/thread-store/src/lib.rs
+@@ -117,3 +117,8 @@
+ pub use types::TimelinePage;
+ pub use types::TurnPage;
+ pub use types::UpdateThreadMetadataParams;
++
++pub use local::{
++    CleanupOutcome, CleanupOwnershipScope, CleanupStatus, CleanupWireVersion,
++    ClosedWorkCleanupRequest, ClosedWorkPhysicalIdentity, ClosedWorkTarget, DatabaseEffectBound,
++};
+--- a/codex-rs/rollout/src/maintenance.rs
++++ b/codex-rs/rollout/src/maintenance.rs
+@@ -20,6 +20,11 @@
+     _file: File,
+ }
+ 
++/// Returns the native maintenance lock path without creating storage.
++pub fn rollout_maintenance_lock_path(codex_home: &Path) -> std::path::PathBuf {
++    codex_home.join(".tmp").join(ROLLOUT_MAINTENANCE_LOCK)
++}
++
+ /// Try to exclude rollout compression and migration for one Codex home.
+ pub fn try_acquire_rollout_maintenance_lock(
+     codex_home: &Path,
+--- a/codex-rs/rollout/src/lib.rs
++++ b/codex-rs/rollout/src/lib.rs
+@@ -138,6 +138,7 @@
+ pub use metadata::builder_from_items;
+ pub use metadata::forked_from_ordinal_exclusive;
+ pub use metadata::rollout_id_from_path;
++pub use metadata::rollout_owner_from_path;
+ pub use model_context::ModelContextScan;
+ pub use model_context::ModelContextScanProgress;
+ pub use persistence_metrics::RolloutPersistenceBatchMeasurement;
+@@ -170,3 +171,5 @@
+ 
+ #[cfg(test)]
+ mod tests;
++
++pub use maintenance::rollout_maintenance_lock_path;
+--- a/codex-rs/thread-store/src/local/update_thread_metadata.rs
++++ b/codex-rs/thread-store/src/local/update_thread_metadata.rs
+@@ -224,6 +224,8 @@
+     .await;
+ 
+     if let Some(name) = name {
++        #[cfg(feature = "fixtures")]
++        publication_fixture_checkpoint(thread_id, "before-name-publication")?;
+         append_thread_name(
+             store.config.codex_home.as_path(),
+             thread_id,
+@@ -522,6 +524,8 @@
+             if let Some(daybreak_enabled) = patch.daybreak_enabled {
+                 metadata.daybreak_enabled = Some(daybreak_enabled);
+             }
++            #[cfg(feature = "fixtures")]
++            publication_fixture_checkpoint(thread_id, "before-upsert")?;
+             let upsert_result = state_db.upsert_thread(&metadata).await;
+             if existing.is_none()
+                 && metadata.project_id.is_some()
+@@ -2456,3 +2460,51 @@
+         serde_json::from_str(&last_line).expect("json line")
+     }
+ }
++
++#[cfg(feature = "fixtures")]
++fn publication_fixture_checkpoint(
++    thread_id: ThreadId,
++    point: &str,
++) -> Result<(), ThreadStoreError> {
++    let control = match std::env::var("CODEX_STORAGE_FIXTURE_PUBLICATION") {
++        Ok(control) => control,
++        Err(std::env::VarError::NotPresent) => return Ok(()),
++        Err(error) => {
++            return Err(ThreadStoreError::Internal {
++                message: error.to_string(),
++            });
++        }
++    };
++    let control: serde_json::Value =
++        serde_json::from_str(&control).map_err(|err| ThreadStoreError::Internal {
++            message: err.to_string(),
++        })?;
++    if control["thread_id"].as_str() != Some(thread_id.to_string().as_str())
++        || control["point"].as_str() != Some(point)
++    {
++        return Ok(());
++    }
++    let directory = std::path::PathBuf::from(control["directory"].as_str().ok_or_else(|| {
++        ThreadStoreError::Internal {
++            message: "fixture publication directory is absent".to_owned(),
++        }
++    })?);
++    if !directory.is_absolute() || !directory.is_dir() {
++        return Err(ThreadStoreError::Internal {
++            message: "fixture publication directory must exist".to_owned(),
++        });
++    }
++    std::fs::write(directory.join("ready"), point).map_err(|err| ThreadStoreError::Internal {
++        message: err.to_string(),
++    })?;
++    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
++    while !directory.join("continue").exists() {
++        if std::time::Instant::now() >= deadline {
++            return Err(ThreadStoreError::Internal {
++                message: "fixture publication timed out".to_owned(),
++            });
++        }
++        std::thread::sleep(std::time::Duration::from_millis(5));
++    }
++    Ok(())
++}
+--- a/codex-rs/rollout/src/metadata.rs
++++ b/codex-rs/rollout/src/metadata.rs
+@@ -10,6 +10,7 @@
+ use chrono::Timelike;
+ use chrono::Utc;
+ use codex_protocol::RolloutId;
++use codex_protocol::ThreadId;
+ use codex_protocol::protocol::AskForApproval;
+ use codex_protocol::protocol::SandboxPolicy;
+ use codex_protocol::protocol::SessionMeta;
+@@ -114,6 +115,11 @@
+ pub fn rollout_id_from_path(rollout_path: &Path) -> Option<RolloutId> {
+     let file_name = rollout_path.file_name()?.to_str()?;
+     Some(RolloutFileName::parse(file_name)?.rollout_id())
++}
++
++/// Returns the stable logical owner encoded by the native canonical filename parser.
++pub fn rollout_owner_from_path(rollout_path: &Path) -> Option<ThreadId> {
++    Some(RolloutFileName::parse(rollout_path.file_name()?.to_str()?)?.thread_id())
+ }
+ 
+ /// Reads the logical fork cutoff without mistaking a revert's history base for its parent.

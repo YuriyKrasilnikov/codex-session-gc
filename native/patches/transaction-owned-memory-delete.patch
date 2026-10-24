@@ -1,0 +1,59 @@
+--- a/codex-rs/state/src/runtime/memories.rs
++++ b/codex-rs/state/src/runtime/memories.rs
+@@ -297,10 +297,19 @@
+     }
+ 
+     pub(super) async fn delete_thread_memory(&self, thread_id: ThreadId) -> anyhow::Result<()> {
++        let mut tx = self.pool.begin().await?;
++        Self::delete_thread_memory_in(&mut tx, thread_id).await?;
++        tx.commit().await?;
++        Ok(())
++    }
++
++    /// Executes native memory cleanup under a caller-owned database transaction.
++    pub async fn delete_thread_memory_in(
++        connection: &mut sqlx::SqliteConnection,
++        thread_id: ThreadId,
++    ) -> anyhow::Result<()> {
+         let now = Utc::now().timestamp();
+         let thread_id = thread_id.to_string();
+-        let mut tx = self.pool.begin().await?;
+-
+         let existing_output = sqlx::query(
+             r#"
+ SELECT selected_for_phase2
+@@ -309,7 +318,7 @@
+             "#,
+         )
+         .bind(thread_id.as_str())
+-        .fetch_optional(&mut *tx)
++        .fetch_optional(&mut *connection)
+         .await?;
+         let was_selected_for_phase2 = existing_output
+             .map(|row| row.try_get::<i64, _>("selected_for_phase2"))
+@@ -323,7 +332,7 @@
+             "#,
+         )
+         .bind(thread_id.as_str())
+-        .execute(&mut *tx)
++        .execute(&mut *connection)
+         .await?
+         .rows_affected();
+ 
+@@ -335,14 +344,13 @@
+         )
+         .bind(JOB_KIND_MEMORY_STAGE1)
+         .bind(thread_id.as_str())
+-        .execute(&mut *tx)
++        .execute(&mut *connection)
+         .await?;
+ 
+         if deleted_rows > 0 && was_selected_for_phase2 {
+-            enqueue_global_consolidation_with_executor(&mut *tx, now).await?;
++            enqueue_global_consolidation_with_executor(&mut *connection, now).await?;
+         }
+ 
+-        tx.commit().await?;
+         Ok(())
+     }
+ 

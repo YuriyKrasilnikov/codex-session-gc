@@ -1,0 +1,1840 @@
+--- /dev/null
++++ b/codex-rs/thread-store/src/local/bounded_cleanup.rs
+@@ -0,0 +1,1837 @@
++#![deny(unsafe_op_in_unsafe_fn, clippy::unwrap_used, clippy::as_conversions)]
++//! A single guarded physical-manifest cleanup operation for independently qualified callers.
++
++use super::LocalThreadStore;
++use chrono::{DateTime, Utc};
++use codex_agent_message_board_extension::LocalAgentMessageBoard;
++use codex_protocol::protocol::{SessionSource, SubAgentSource, ThreadHistoryMode};
++use codex_protocol::{SessionId, ThreadId};
++use codex_rollout::try_acquire_rollout_maintenance_lock;
++use codex_state::{GoalStore, MemoryStore, SqliteQueueStore, StateRuntime};
++use serde::{Deserialize, Serialize};
++use sha2::{Digest, Sha256};
++use sqlx::{Row, Sqlite, SqlitePool, Transaction};
++use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
++use std::path::PathBuf;
++use std::time::Duration;
++use uuid::Uuid;
++
++pub const CONTENT_TYPE: &str = "application/vnd.codex-session-gc.legacy-native-request+json";
++
++/// Physical SQL row identifiers in the caller's approved native effect bound.
++/// Queue revision bookkeeping and a target board tombstone are separately declared.
++#[derive(Clone, Debug, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct DatabaseEffectBound {
++    pub path: PathBuf,
++    pub rows: BTreeMap<String, Vec<i64>>,
++    pub queue_bookkeeping: bool,
++    pub board_tombstone: Option<ThreadId>,
++}
++
++/// Complete caller-selected parent and agent ownership, distinct from removal permission.
++#[derive(Clone, Debug, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct CleanupOwnershipScope {
++    pub root_thread_id: ThreadId,
++    pub thread_ids: Vec<ThreadId>,
++}
++
++/// Logical provenance is independent from physical identity and spawn ownership.
++#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
++#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
++pub enum CleanupParentRelation {
++    Root {},
++    Spawn {
++        parent_thread_id: ThreadId,
++    },
++    GuardianAssociation {
++        associated_parent_thread_id: ThreadId,
++    },
++}
++
++fn required_option<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
++where
++    D: serde::Deserializer<'de>,
++    T: Deserialize<'de>,
++{
++    Option::<T>::deserialize(deserializer)
++}
++
++/// One logical owner and its complete, immutable prepared physical manifest.
++#[derive(Clone, Debug, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ClosedWorkTarget {
++    pub thread_id: ThreadId,
++    pub current_rollout_path: PathBuf,
++    pub current_rollout_id: ThreadId,
++    pub parent_relation: CleanupParentRelation,
++    pub source: SessionSource,
++    #[serde(deserialize_with = "required_option")]
++    pub agent_role: Option<String>,
++    pub provider: String,
++    pub updated_at_ms: i64,
++    pub archived: bool,
++    pub rollouts: Vec<ClosedWorkRollout>,
++}
++
++#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
++#[serde(rename_all = "lowercase")]
++pub enum RolloutRepresentation {
++    Plain,
++    Zstd,
++}
++
++#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
++#[serde(deny_unknown_fields)]
++pub struct CleanupHistoryPrefix {
++    pub provider_rollout_id: ThreadId,
++    pub end_ordinal_exclusive: u64,
++    pub end_byte_offset: u64,
++}
++
++#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
++#[serde(deny_unknown_fields)]
++pub struct CleanupLogicalFork {
++    pub forked_from_id: ThreadId,
++    #[serde(deserialize_with = "required_option")]
++    pub forked_from_ordinal_exclusive: Option<u64>,
++}
++
++#[derive(Clone, Debug, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ClosedWorkRollout {
++    pub rollout_id: ThreadId,
++    pub representation: RolloutRepresentation,
++    pub rollout_path: PathBuf,
++    pub physical_identity: ClosedWorkPhysicalIdentity,
++    pub header_sha256: [u8; 32],
++    pub history_mode: ThreadHistoryMode,
++    #[serde(deserialize_with = "required_option")]
++    pub history_prefix: Option<CleanupHistoryPrefix>,
++    #[serde(deserialize_with = "required_option")]
++    pub logical_fork: Option<CleanupLogicalFork>,
++}
++
++/// Physical file identity checked without reading historical bodies.
++#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
++#[serde(deny_unknown_fields)]
++pub struct ClosedWorkPhysicalIdentity {
++    pub dev: u64,
++    pub ino: u64,
++    pub size: u64,
++    pub mtime_ns: i64,
++    pub ctime_ns: i64,
++}
++
++/// The only supported cleanup wire. Deserialization rejects other versions.
++#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
++#[serde(try_from = "u32", into = "u32")]
++pub enum CleanupWireVersion {
++    Current,
++}
++impl TryFrom<u32> for CleanupWireVersion {
++    type Error = String;
++    fn try_from(value: u32) -> std::result::Result<Self, Self::Error> {
++        match value {
++            6 => Ok(Self::Current),
++            value => Err(format!("unsupported closed-work request version: {value}")),
++        }
++    }
++}
++impl From<CleanupWireVersion> for u32 {
++    fn from(value: CleanupWireVersion) -> Self {
++        match value {
++            CleanupWireVersion::Current => 6,
++        }
++    }
++}
++
++/// Removes one explicitly selected closed-work batch under full ownership.
++#[derive(Clone, Debug, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct ClosedWorkCleanupRequest {
++    pub version: CleanupWireVersion,
++    pub journal: PathBuf,
++    pub attempt_id: Uuid,
++    pub unit_id: Uuid,
++    pub codex_home: PathBuf,
++    pub sqlite_home: PathBuf,
++    /// Store default only; each target provider is independently validated.
++    pub provider: String,
++    pub cutoff: DateTime<Utc>,
++    pub ownership_scope: CleanupOwnershipScope,
++    pub deletion_scope: Vec<ThreadId>,
++    pub targets: Vec<ClosedWorkTarget>,
++    pub databases: Vec<DatabaseEffectBound>,
++    pub guard_paths: BTreeSet<PathBuf>,
++    #[cfg(feature = "fixtures")]
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub fixture_control: Option<serde_json::Value>,
++}
++
++#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
++#[serde(rename_all = "lowercase")]
++pub enum CleanupStatus {
++    Confirmed,
++    Refused,
++    Partial,
++    Unknown,
++}
++
++#[derive(Debug, Serialize, Deserialize)]
++pub struct CleanupOutcome {
++    pub request_sha256: [u8; 32],
++    pub status: CleanupStatus,
++    pub detail: String,
++    pub removed_rollouts: Vec<PathBuf>,
++    pub committed_databases: Vec<PathBuf>,
++    /// Preserves this index path if present, without asserting file existence.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub preserved_name_index: Option<PathBuf>,
++}
++
++#[derive(Clone, Copy)]
++enum Kind {
++    State,
++    Logs,
++    Queue,
++    Goals,
++    Memory,
++    History,
++    Board,
++}
++
++struct OwnedDatabase {
++    path: PathBuf,
++    kind: Kind,
++    pool: SqlitePool,
++    transaction: Transaction<'static, Sqlite>,
++}
++
++#[derive(Debug)]
++enum CleanupFailure {
++    Admission(String),
++    Observation(String),
++    Commit(String),
++}
++impl std::fmt::Display for CleanupFailure {
++    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            Self::Admission(detail) | Self::Observation(detail) | Self::Commit(detail) => {
++                formatter.write_str(detail)
++            }
++        }
++    }
++}
++impl From<&str> for CleanupFailure {
++    fn from(detail: &str) -> Self {
++        Self::Admission(detail.to_owned())
++    }
++}
++impl From<String> for CleanupFailure {
++    fn from(detail: String) -> Self {
++        Self::Admission(detail)
++    }
++}
++type Result<T> = std::result::Result<T, CleanupFailure>;
++fn error(error: impl std::fmt::Display) -> CleanupFailure {
++    CleanupFailure::Observation(error.to_string())
++}
++fn require(condition: bool, detail: &str) -> Result<()> {
++    if condition {
++        Ok(())
++    } else {
++        Err(CleanupFailure::Admission(detail.to_owned()))
++    }
++}
++
++impl LocalThreadStore {
++    /// Executes one caller-admitted dispatch. A pending receipt is not a replay grant.
++    /// Callers must use their existing one-shot launcher and terminal-evidence journal.
++    pub async fn cleanup_once(&self, bytes: &[u8]) -> CleanupOutcome {
++        let mut outcome = CleanupOutcome {
++            request_sha256: Sha256::digest(bytes).into(),
++            status: CleanupStatus::Refused,
++            detail: String::new(),
++            removed_rollouts: Vec::new(),
++            committed_databases: Vec::new(),
++            preserved_name_index: None,
++        };
++        match self.cleanup_closed_work_owned(bytes, &mut outcome).await {
++            Ok(()) => {
++                outcome.status = CleanupStatus::Confirmed;
++                if outcome.detail.is_empty() {
++                    outcome.detail = "validated native effect bound committed".to_owned();
++                }
++            }
++            Err(detail) => {
++                if outcome.status != CleanupStatus::Unknown
++                    && (!outcome.removed_rollouts.is_empty()
++                        || !outcome.committed_databases.is_empty())
++                {
++                    outcome.status = CleanupStatus::Partial;
++                }
++                outcome.detail = detail.to_string();
++            }
++        }
++        outcome
++    }
++
++    async fn cleanup_closed_work_owned(
++        &self,
++        bytes: &[u8],
++        outcome: &mut CleanupOutcome,
++    ) -> Result<()> {
++        let request: ClosedWorkCleanupRequest = serde_json::from_slice(bytes).map_err(error)?;
++        require(
++            request.codex_home == self.config.codex_home
++                && request.sqlite_home == self.config.sqlite.home()
++                && request.provider == self.config.default_model_provider_id
++                && !request.provider.is_empty(),
++            "storage identity changed",
++        )?;
++        let (ownership_ids, selected_ids) = validate_batch_selection(&request)?;
++        validate_intent(self, &request, bytes, outcome.request_sha256).await?;
++        require(
++            std::fs::canonicalize(&request.codex_home).map_err(error)? == request.codex_home
++                && std::fs::canonicalize(&request.sqlite_home).map_err(error)?
++                    == request.sqlite_home,
++            "storage homes must be canonical",
++        )?;
++        let coordinator = std::sync::Arc::new(
++            codex_rollout::WriterLockCoordinator::new_for_bounded_cleanup(&request.codex_home),
++        );
++        let mut guard_paths: BTreeSet<_> = ownership_ids
++            .iter()
++            .flat_map(|id| coordinator.cleanup_lock_paths(*id))
++            .collect();
++        guard_paths.insert(codex_rollout::rollout_maintenance_lock_path(
++            &request.codex_home,
++        ));
++        require(
++            guard_paths.is_subset(&request.guard_paths),
++            "native base guard paths exceed approved bound",
++        )?;
++        for extra in request.guard_paths.difference(&guard_paths) {
++            let name = extra
++                .file_name()
++                .and_then(|name| name.to_str())
++                .and_then(|name| name.strip_suffix(".lock"))
++                .ok_or("invalid supplemental writer guard path")?;
++            let id = ThreadId::from_string(name).map_err(error)?;
++            require(
++                *extra
++                    == request
++                        .codex_home
++                        .join("thread-writer-locks")
++                        .join(format!("{id}.lock")),
++                "supplemental writer guard path is not canonical",
++            )?;
++        }
++        let _maintenance = try_acquire_rollout_maintenance_lock(&request.codex_home)
++            .map_err(error)?
++            .ok_or_else(|| "native maintenance is busy".to_owned())?;
++        let mut lifecycles = Vec::new();
++        let mut local_writers = Vec::new();
++        let mut writers = Vec::new();
++        for id in &ownership_ids {
++            lifecycles.push(self.live_writer_locks.lock_lifecycle(*id).await);
++            local_writers.push(self.live_writer_locks.lock(*id).await);
++            require(
++                !self.live_recorders.lock().await.contains_key(id),
++                "loaded writer is active",
++            )?;
++            writers.push(coordinator.acquire(*id).map_err(error)?);
++        }
++        // Native ownership stays held, but long filesystem work holds no SQLite
++        // write transaction. SQL is freshly validated only after those reads.
++        let physical_targets: Vec<_> = request
++            .targets
++            .iter()
++            .flat_map(|target| target.rollouts.iter().map(move |rollout| (target, rollout)))
++            .collect();
++        let bounded_targets = physical_targets
++            .iter()
++            .map(|(target, rollout)| validate_bounded_target(&request, target, rollout))
++            .collect::<Result<Vec<_>>>()?;
++        #[cfg(feature = "fixtures")]
++        fixture_checkpoint(&request, "during_heavy_reads")?;
++        let (preserved_zero_files, mut retained_guardians) =
++            validate_batch_history_dependencies(&request, &bounded_targets)?;
++        retained_guardians.sort_by_key(|guardian| guardian.checked.metadata.meta.id.to_string());
++        for guardian in &retained_guardians {
++            guard_paths.extend(coordinator.cleanup_lock_paths(guardian.checked.metadata.meta.id));
++        }
++        // Bind every derived writer path before creating a supplemental lock file.
++        require(
++            guard_paths == request.guard_paths,
++            "retained guardian writer paths differ from the approved guard bound",
++        )?;
++        let mut guarded_owners: HashSet<_> = ownership_ids.iter().copied().collect();
++        for guardian in &retained_guardians {
++            let id = guardian.checked.metadata.meta.id;
++            if guarded_owners.insert(id) {
++                lifecycles.push(self.live_writer_locks.lock_lifecycle(id).await);
++                local_writers.push(self.live_writer_locks.lock(id).await);
++                require(
++                    !self.live_recorders.lock().await.contains_key(&id),
++                    "retained guardian writer is loaded",
++                )?;
++                writers.push(coordinator.acquire(id).map_err(error)?);
++            }
++            // Header capture preceded supplemental ownership; reject any intervening change.
++            guardian.checked.recheck(&guardian.path)?;
++        }
++        #[cfg(feature = "fixtures")]
++        fixture_checkpoint(&request, "after_history_walk")?;
++        let mut databases = self.open_cleanup_databases().await?;
++        let state = databases
++            .iter_mut()
++            .find(|database| matches!(database.kind, Kind::State))
++            .ok_or("authoritative existing state is required")?;
++        validate_ownership_closure(
++            &mut state.transaction,
++            &request.ownership_scope,
++            &selected_ids,
++        )
++        .await?;
++        validate_retained_guardians(&mut state.transaction, &request, &retained_guardians).await?;
++        for target in &request.targets {
++            validate_state_identity(&mut state.transaction, target).await?;
++            validate_selected_parent_relation(&mut state.transaction, &request, target).await?;
++        }
++        let selected_json = serde_json::to_string(
++            &selected_ids
++                .iter()
++                .map(ToString::to_string)
++                .collect::<Vec<_>>(),
++        )
++        .map_err(error)?;
++        let history_ids = history_effect_ids(&request);
++        let history_json = serde_json::to_string(
++            &history_ids
++                .iter()
++                .map(ToString::to_string)
++                .collect::<Vec<_>>(),
++        )
++        .map_err(error)?;
++        let retained_child: bool = sqlx::query_scalar(
++            "SELECT EXISTS(SELECT 1 FROM thread_spawn_edges WHERE parent_thread_id IN (SELECT value FROM json_each(?)) AND child_thread_id NOT IN (SELECT value FROM json_each(?)))",
++        ).bind(&selected_json).bind(&selected_json).fetch_one(&mut *state.transaction).await.map_err(error)?;
++        require(
++            !retained_child,
++            "retained spawn descendants protect the selected parent",
++        )?;
++        let approved: BTreeSet<_> = request
++            .databases
++            .iter()
++            .map(|bound| bound.path.clone())
++            .collect();
++        let actual: BTreeSet<_> = databases
++            .iter()
++            .map(|database| database.path.clone())
++            .collect();
++        require(
++            approved.len() == request.databases.len() && approved == actual,
++            "native database set changed or repeats a bound",
++        )?;
++        for database in &mut databases {
++            validate_batch_database(
++                database,
++                &request,
++                &selected_json,
++                &history_json,
++                &selected_ids,
++            )
++            .await?;
++        }
++        let mut refreshed: BTreeSet<_> = self
++            .config
++            .sqlite
++            .runtime_db_paths()
++            .into_iter()
++            .filter(|entry| entry.path.exists())
++            .map(|entry| entry.path)
++            .collect();
++        let board_path = LocalAgentMessageBoard::cleanup_database_path(&self.config.sqlite);
++        if board_path.exists() {
++            refreshed.insert(board_path);
++        }
++        require(
++            refreshed == actual,
++            "native database set changed during preflight",
++        )?;
++        for ((_, rollout), checked) in physical_targets.iter().zip(&bounded_targets) {
++            checked.recheck(&rollout.rollout_path)?;
++        }
++        for preserved in &preserved_zero_files {
++            preserved.recheck()?;
++        }
++        for guardian in &retained_guardians {
++            guardian.checked.recheck(&guardian.path)?;
++        }
++        let board_present = databases
++            .iter()
++            .any(|database| matches!(database.kind, Kind::Board));
++        // Historical names are intentionally not rewritten or opened for mutation.
++        outcome.preserved_name_index = Some(request.codex_home.join("session_index.jsonl"));
++        #[cfg(feature = "fixtures")]
++        fixture_checkpoint(&request, "before_effects")?;
++        for database in &mut databases {
++            let effect_ids = if matches!(database.kind, Kind::History) {
++                &history_ids
++            } else {
++                &selected_ids
++            };
++            for id in effect_ids {
++                match database.kind {
++                    Kind::State | Kind::Board => {}
++                    Kind::Logs => {
++                        StateRuntime::delete_thread_logs_in(&mut database.transaction, *id)
++                            .await
++                            .map_err(error)?;
++                    }
++                    Kind::Queue => {
++                        SqliteQueueStore::delete_thread_queue_in(&mut database.transaction, *id)
++                            .await
++                            .map_err(error)?;
++                        sqlx::query("DELETE FROM queued_thread_revisions WHERE thread_id=?")
++                            .bind(id.to_string())
++                            .execute(&mut *database.transaction)
++                            .await
++                            .map_err(error)?;
++                    }
++                    Kind::Goals => {
++                        GoalStore::delete_thread_goal_in(&mut database.transaction, *id)
++                            .await
++                            .map_err(error)?;
++                        GoalStore::delete_thread_goal_deferral_in(&mut database.transaction, *id)
++                            .await
++                            .map_err(error)?;
++                    }
++                    Kind::Memory => {
++                        MemoryStore::delete_thread_memory_in(&mut database.transaction, *id)
++                            .await
++                            .map_err(error)?
++                    }
++                    Kind::History => {
++                        super::thread_history::delete_thread_in(&mut database.transaction, *id)
++                            .await
++                            .map_err(error)?
++                    }
++                }
++            }
++            if matches!(database.kind, Kind::Board)
++                && selected_ids.contains(&request.ownership_scope.root_thread_id)
++            {
++                LocalAgentMessageBoard::delete_board_rows_in(
++                    &mut database.transaction,
++                    &[SessionId::from(request.ownership_scope.root_thread_id)],
++                )
++                .await
++                .map_err(error)?;
++            }
++        }
++        for ((_, rollout), checked) in physical_targets.iter().zip(&bounded_targets) {
++            checked.recheck(&rollout.rollout_path)?;
++            let removed = super::delete_thread::delete_rollout_path(self, &rollout.rollout_path)
++                .map_err(|failure| {
++                    outcome.status = CleanupStatus::Unknown;
++                    error(failure)
++                })?;
++            require(removed, "target disappeared before physical mutation")?;
++            outcome.removed_rollouts.push(rollout.rollout_path.clone());
++            #[cfg(feature = "fixtures")]
++            fixture_checkpoint(&request, "after_physical")?;
++            std::fs::File::open(
++                rollout
++                    .rollout_path
++                    .parent()
++                    .ok_or("selected rollout has no parent directory")?,
++            )
++            .and_then(|directory| directory.sync_all())
++            .map_err(error)?;
++        }
++        let state = databases
++            .iter_mut()
++            .find(|database| matches!(database.kind, Kind::State))
++            .ok_or("authoritative state disappeared from owned database set")?;
++        let supplemental_bound = request
++            .databases
++            .iter()
++            .find(|bound| bound.path == state.path)
++            .ok_or("authoritative state has no approved effect bound")?;
++        let expected_feedback = u64::try_from(
++            supplemental_bound
++                .rows
++                .get("guardian_review_feedback")
++                .ok_or("guardian feedback effect bound is absent")?
++                .len(),
++        )
++        .map_err(error)?;
++        let expected_receipts = u64::try_from(
++            supplemental_bound
++                .rows
++                .get("thread_read_receipts")
++                .ok_or("thread read receipt effect bound is absent")?
++                .len(),
++        )
++        .map_err(error)?;
++        let removed_supplemental = StateRuntime::delete_thread_state61_supplemental_rows_in(
++            &mut state.transaction,
++            &selected_ids,
++        )
++        .await
++        .map_err(error)?;
++        require(
++            removed_supplemental == (expected_feedback, expected_receipts),
++            "native supplemental state effects differ from the approved bound",
++        )?;
++        require(
++            StateRuntime::delete_thread_state_rows_in(&mut state.transaction, &selected_ids)
++                .await
++                .map_err(error)?
++                == u64::try_from(selected_ids.len()).map_err(error)?,
++            "native state identity changed",
++        )?;
++        databases.sort_by_key(|database| matches!(database.kind, Kind::State));
++        for database in databases {
++            let path = database.path;
++            if let Err(failure) = database.transaction.commit().await {
++                outcome.status = CleanupStatus::Unknown;
++                return Err(CleanupFailure::Commit(format!(
++                    "commit evidence is unknown for {}: {failure}",
++                    path.display()
++                )));
++            }
++            outcome.committed_databases.push(path);
++            #[cfg(feature = "fixtures")]
++            if outcome.committed_databases.len() == 1 {
++                fixture_checkpoint(&request, "after_first_commit")?;
++            }
++            database.pool.close().await;
++        }
++        outcome.detail = format!(
++            "validated native batch committed; historical names preserved if present; {}",
++            if !selected_ids.contains(&request.ownership_scope.root_thread_id) {
++                "parent board preserved"
++            } else if board_present {
++                "selected root board tombstone committed"
++            } else {
++                "board database absent: no board effects or tombstone"
++            }
++        );
++        Ok(())
++    }
++
++    async fn open_cleanup_databases(&self) -> Result<Vec<OwnedDatabase>> {
++        let mut databases = Vec::new();
++        let mut paths = self.config.sqlite.runtime_db_paths();
++        paths.sort_by_key(|entry| {
++            (
++                entry.path != self.config.sqlite.state_db_path(),
++                entry.path.clone(),
++            )
++        });
++        for entry in paths {
++            if !entry.path.exists() {
++                continue;
++            }
++            require(!entry.path.is_symlink(), "database alias is unsupported")?;
++            let kind = match entry.label {
++                "state DB" => Kind::State,
++                "log DB" => Kind::Logs,
++                "goals DB" => Kind::Goals,
++                "memories DB" | "memories v2 DB" => Kind::Memory,
++                "queue DB" => Kind::Queue,
++                "thread history DB" => Kind::History,
++                _ => {
++                    return Err(CleanupFailure::Admission(
++                        "unknown native database".to_owned(),
++                    ));
++                }
++            };
++            let (pool, mut transaction) = self
++                .config
++                .sqlite
++                .begin_existing_cleanup(&entry.path, Duration::from_millis(100))
++                .await
++                .map_err(error)?;
++            self.config
++                .sqlite
++                .validate_cleanup_schema(&entry.path, &mut transaction)
++                .await
++                .map_err(error)?;
++            databases.push(OwnedDatabase {
++                path: entry.path,
++                kind,
++                pool,
++                transaction,
++            });
++        }
++        let board_path = LocalAgentMessageBoard::cleanup_database_path(&self.config.sqlite);
++        if board_path.exists() {
++            require(
++                !board_path.is_symlink(),
++                "board database alias is unsupported",
++            )?;
++            let (pool, mut transaction) = self
++                .config
++                .sqlite
++                .begin_existing_cleanup(&board_path, Duration::from_millis(100))
++                .await
++                .map_err(error)?;
++            LocalAgentMessageBoard::validate_cleanup_schema(&mut transaction)
++                .await
++                .map_err(error)?;
++            databases.push(OwnedDatabase {
++                path: board_path,
++                kind: Kind::Board,
++                pool,
++                transaction,
++            });
++        }
++        Ok(databases)
++    }
++}
++
++const MAX_BOUNDED_HEADER_BYTES: u64 = 1024 * 1024;
++
++struct BoundedTarget {
++    file: std::fs::File,
++    identity: PhysicalIdentity,
++    metadata: codex_protocol::protocol::SessionMetaLine,
++}
++
++impl BoundedTarget {
++    fn recheck(&self, path: &std::path::Path) -> Result<()> {
++        require(
++            physical_identity_from_metadata(&self.file.metadata().map_err(error)?)?
++                == self.identity
++                && capture_physical_identity(path)? == self.identity,
++            "selected physical identity changed before unlink",
++        )
++    }
++}
++
++/// One retained physical member of a typed Guardian's history.
++/// Logical writer ownership is shared while every descriptor remains guarded.
++struct RetainedGuardian {
++    path: PathBuf,
++    checked: BoundedTarget,
++}
++
++async fn validate_retained_guardians(
++    connection: &mut sqlx::SqliteConnection,
++    request: &ClosedWorkCleanupRequest,
++    guardians: &[RetainedGuardian],
++) -> Result<()> {
++    let mut owners: HashMap<ThreadId, Vec<&RetainedGuardian>> = HashMap::new();
++    for guardian in guardians {
++        owners
++            .entry(guardian.checked.metadata.meta.id)
++            .or_default()
++            .push(guardian);
++    }
++    for (id, physical) in owners {
++        let row = sqlx::query("SELECT rollout_path,source,history_mode,model_provider,agent_role,archived FROM threads WHERE id=?")
++            .bind(id.to_string()).fetch_optional(&mut *connection).await.map_err(error)?
++            .ok_or("retained guardian state is absent")?;
++        let source: SessionSource =
++            serde_json::from_str(row.try_get::<&str, _>("source").map_err(error)?)
++                .map_err(error)?;
++        let archived: i64 = row.try_get("archived").map_err(error)?;
++        let raw_path = PathBuf::from(row.try_get::<String, _>("rollout_path").map_err(error)?);
++        let mut current = physical.iter().filter(|member| {
++            codex_rollout::plain_rollout_path(&raw_path)
++                == codex_rollout::plain_rollout_path(&member.path)
++        });
++        let member = current
++            .next()
++            .ok_or("retained guardian SQL current physical history is absent")?;
++        require(
++            current.next().is_none(),
++            "retained guardian SQL current physical history is ambiguous",
++        )?;
++        let meta = &member.checked.metadata.meta;
++        require(
++            source == meta.source
++                && matches!(archived, 0 | 1)
++                && row.try_get::<String, _>("history_mode").map_err(error)?
++                    == match meta.history_mode {
++                        ThreadHistoryMode::Legacy => "legacy",
++                        ThreadHistoryMode::Paginated => "paginated",
++                    }
++                && Some(row.try_get::<String, _>("model_provider").map_err(error)?)
++                    == meta.model_provider
++                && row
++                    .try_get::<Option<String>, _>("agent_role")
++                    .map_err(error)?
++                    == meta.agent_role
++                && member
++                    .path
++                    .starts_with(request.codex_home.join(if archived == 1 {
++                        codex_rollout::ARCHIVED_SESSIONS_SUBDIR
++                    } else {
++                        codex_rollout::SESSIONS_SUBDIR
++                    })),
++            "retained guardian SQL and current header provenance disagree",
++        )?;
++        let has_parent: bool = sqlx::query_scalar(
++            "SELECT EXISTS(SELECT 1 FROM thread_spawn_edges WHERE child_thread_id=?)",
++        )
++        .bind(id.to_string())
++        .fetch_one(&mut *connection)
++        .await
++        .map_err(error)?;
++        require(!has_parent, "retained guardian has an incoming spawn edge")?;
++        for member in physical {
++            member.checked.recheck(&member.path)?;
++        }
++    }
++    Ok(())
++}
++
++fn wire_identity(identity: &PhysicalIdentity) -> Result<ClosedWorkPhysicalIdentity> {
++    let nanoseconds = |value: (i64, i64)| {
++        value
++            .0
++            .checked_mul(1_000_000_000)
++            .and_then(|seconds| seconds.checked_add(value.1))
++            .ok_or_else(|| {
++                CleanupFailure::Admission("physical timestamp is outside the wire range".to_owned())
++            })
++    };
++    Ok(ClosedWorkPhysicalIdentity {
++        dev: identity.device,
++        ino: identity.inode,
++        size: identity.bytes,
++        mtime_ns: nanoseconds(identity.modified)?,
++        ctime_ns: nanoseconds(identity.changed)?,
++    })
++}
++
++fn open_bounded_history(path: &std::path::Path) -> Result<(std::fs::File, PhysicalIdentity)> {
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
++        let file = std::fs::OpenOptions::new()
++            .read(true)
++            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
++            .open(path)
++            .map_err(error)?;
++        let metadata = file.metadata().map_err(error)?;
++        let identity = physical_identity_from_metadata(&metadata)?;
++        require(
++            metadata.nlink() == 1 && capture_physical_identity(path)? == identity,
++            "bounded history is aliased or its path differs from the descriptor",
++        )?;
++        Ok((file, identity))
++    }
++    #[cfg(not(unix))]
++    {
++        let _ = path;
++        Err(CleanupFailure::Admission(
++            "bounded history identity is not qualified on this platform".to_owned(),
++        ))
++    }
++}
++
++/// Clamp physical reads before buffering or decoding, including decoder lookahead.
++struct HeaderInput<'a> {
++    file: &'a std::fs::File,
++    remaining: u64,
++    offset: u64,
++}
++impl std::io::Read for HeaderInput<'_> {
++    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
++        let limit = output
++            .len()
++            .min(4096)
++            .min(usize::try_from(self.remaining).map_err(std::io::Error::other)?);
++        if limit == 0 && !output.is_empty() {
++            return Err(std::io::Error::other(
++                "physical metadata prefix budget exhausted",
++            ));
++        }
++        #[cfg(unix)]
++        let count = {
++            use std::os::unix::fs::FileExt;
++            self.file.read_at(&mut output[..limit], self.offset)?
++        };
++        #[cfg(not(unix))]
++        let count = return Err(std::io::Error::other("bounded descriptors require Unix"));
++        let bytes = u64::try_from(count).map_err(std::io::Error::other)?;
++        self.remaining = self.remaining.saturating_sub(bytes);
++        self.offset = self
++            .offset
++            .checked_add(bytes)
++            .ok_or_else(|| std::io::Error::other("physical offset overflow"))?;
++        Ok(count)
++    }
++}
++
++fn bounded_header(
++    file: &std::fs::File,
++    representation: RolloutRepresentation,
++) -> Result<([u8; 32], codex_protocol::protocol::SessionMetaLine)> {
++    use std::io::{BufRead, Read};
++    let input = HeaderInput {
++        file,
++        remaining: 2 * 1024 * 1024,
++        offset: 0,
++    };
++    let reader: Box<dyn Read + '_> = match representation {
++        RolloutRepresentation::Plain => Box::new(input),
++        RolloutRepresentation::Zstd => {
++            let mut decoder = zstd::stream::read::Decoder::new(input).map_err(error)?;
++            decoder.window_log_max(21).map_err(error)?;
++            Box::new(decoder)
++        }
++    };
++    let mut bytes = Vec::new();
++    std::io::BufReader::with_capacity(4096, reader.take(MAX_BOUNDED_HEADER_BYTES + 1))
++        .read_until(b'\n', &mut bytes)
++        .map_err(error)?;
++    require(
++        u64::try_from(bytes.len()).map_err(error)? <= MAX_BOUNDED_HEADER_BYTES
++            && bytes.last() == Some(&b'\n'),
++        "history first line is missing or exceeds the bounded header limit",
++    )?;
++    let line = codex_rollout::parse_rollout_line_bytes(&bytes).map_err(error)?;
++    match line.item {
++        codex_rollout::RolloutItem::SessionMeta(metadata) => {
++            Ok((Sha256::digest(&bytes).into(), metadata))
++        }
++        _ => Err("history first line is not session metadata".into()),
++    }
++}
++
++fn path_representation(path: &std::path::Path) -> Result<RolloutRepresentation> {
++    match path.extension().and_then(|extension| extension.to_str()) {
++        Some("jsonl") => Ok(RolloutRepresentation::Plain),
++        Some("zst") if path.to_string_lossy().ends_with(".jsonl.zst") => {
++            Ok(RolloutRepresentation::Zstd)
++        }
++        _ => Err("unsupported rollout representation".into()),
++    }
++}
++
++fn metadata_prefix(meta: &codex_protocol::protocol::SessionMeta) -> Option<CleanupHistoryPrefix> {
++    meta.history_base.map(|base| CleanupHistoryPrefix {
++        provider_rollout_id: base.thread_id,
++        end_ordinal_exclusive: base.end_ordinal_exclusive,
++        end_byte_offset: base.end_byte_offset,
++    })
++}
++fn metadata_fork(meta: &codex_protocol::protocol::SessionMeta) -> Option<CleanupLogicalFork> {
++    meta.forked_from_id.map(|id| CleanupLogicalFork {
++        forked_from_id: id,
++        forked_from_ordinal_exclusive: meta.forked_from_ordinal_exclusive,
++    })
++}
++
++fn validate_bounded_target(
++    request: &ClosedWorkCleanupRequest,
++    target: &ClosedWorkTarget,
++    rollout: &ClosedWorkRollout,
++) -> Result<BoundedTarget> {
++    let path = &rollout.rollout_path;
++    require(
++        (path.starts_with(request.codex_home.join(codex_rollout::SESSIONS_SUBDIR))
++            || path.starts_with(
++                request
++                    .codex_home
++                    .join(codex_rollout::ARCHIVED_SESSIONS_SUBDIR),
++            ))
++            && path_representation(path)? == rollout.representation
++            && codex_rollout::rollout_id_from_path(path) == Some(rollout.rollout_id)
++            && codex_rollout::rollout_owner_from_path(path) == Some(target.thread_id),
++        "bounded target physical path does not match its identity",
++    )?;
++    let (file, identity) = open_bounded_history(path)?;
++    require(
++        wire_identity(&identity)? == rollout.physical_identity,
++        "bounded target physical identity differs from the prepared request",
++    )?;
++    let (digest, metadata) = bounded_header(&file, rollout.representation)?;
++    require(
++        digest == rollout.header_sha256,
++        "selected metadata header changed",
++    )?;
++    require(
++        metadata.meta.id == target.thread_id
++            && metadata.meta.history_mode == rollout.history_mode
++            && metadata_prefix(&metadata.meta) == rollout.history_prefix
++            && metadata_fork(&metadata.meta) == rollout.logical_fork,
++        "bounded target metadata provenance is inconsistent",
++    )?;
++    if rollout.rollout_id == target.current_rollout_id {
++        require(
++            metadata.meta.source == target.source
++                && metadata.meta.agent_role == target.agent_role
++                && metadata.meta.model_provider.as_deref() == Some(target.provider.as_str()),
++            "current metadata and SQL provenance disagree",
++        )?;
++        let source_parent = metadata.meta.source.parent_thread_id();
++        let header_parent = metadata.meta.parent_thread_id;
++        let guardian = matches!(&metadata.meta.source,
++            SessionSource::SubAgent(SubAgentSource::Other(kind)) if kind == "guardian");
++        let matches = match target.parent_relation {
++            CleanupParentRelation::Root {} => {
++                !guardian && source_parent.is_none() && header_parent.is_none()
++            }
++            CleanupParentRelation::Spawn { parent_thread_id } => {
++                !guardian
++                    && source_parent.is_none_or(|parent| parent == parent_thread_id)
++                    && header_parent.is_none_or(|parent| parent == parent_thread_id)
++            }
++            CleanupParentRelation::GuardianAssociation {
++                associated_parent_thread_id,
++            } => {
++                guardian
++                    && associated_parent_thread_id != target.thread_id
++                    && source_parent.is_none()
++                    && header_parent == Some(associated_parent_thread_id)
++            }
++        };
++        require(
++            matches,
++            "selected parent relation disagrees with typed header provenance",
++        )?;
++    }
++    let checked = BoundedTarget {
++        file,
++        identity,
++        metadata,
++    };
++    checked.recheck(path)?;
++    Ok(checked)
++}
++
++async fn validate_selected_parent_relation(
++    connection: &mut sqlx::SqliteConnection,
++    request: &ClosedWorkCleanupRequest,
++    target: &ClosedWorkTarget,
++) -> Result<()> {
++    let parents: Vec<(String, String)> = sqlx::query_as(
++        "SELECT parent_thread_id,status FROM thread_spawn_edges WHERE child_thread_id=?",
++    )
++    .bind(target.thread_id.to_string())
++    .fetch_all(connection)
++    .await
++    .map_err(error)?;
++    match target.parent_relation {
++        CleanupParentRelation::Spawn { parent_thread_id } => require(
++            request
++                .ownership_scope
++                .thread_ids
++                .contains(&parent_thread_id)
++                && parents
++                    == vec![(
++                        parent_thread_id.to_string(),
++                        codex_state::DirectionalThreadSpawnEdgeStatus::Closed
++                            .as_ref()
++                            .to_owned(),
++                    )],
++            "selected spawn parent or closed status changed",
++        ),
++        CleanupParentRelation::Root {} | CleanupParentRelation::GuardianAssociation { .. } => {
++            require(
++                target.thread_id == request.ownership_scope.root_thread_id && parents.is_empty(),
++                "selected root or guardian has an unexpected spawn parent",
++            )
++        }
++    }
++}
++
++#[derive(PartialEq, Eq)]
++struct PhysicalIdentity {
++    device: u64,
++    inode: u64,
++    bytes: u64,
++    modified: (i64, i64),
++    changed: (i64, i64),
++}
++
++struct PreservedZeroFile {
++    path: PathBuf,
++    file: std::fs::File,
++    identity: PhysicalIdentity,
++}
++
++impl PreservedZeroFile {
++    fn recheck(&self) -> Result<()> {
++        let descriptor = physical_identity_from_metadata(&self.file.metadata().map_err(error)?)?;
++        require(
++            descriptor == self.identity
++                && descriptor.bytes == 0
++                && capture_physical_identity(&self.path)? == self.identity,
++            "preserved zero history changed during preflight",
++        )
++    }
++}
++
++fn physical_identity_from_metadata(metadata: &std::fs::Metadata) -> Result<PhysicalIdentity> {
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::MetadataExt;
++        require(metadata.is_file(), "physical object is not a regular file")?;
++        Ok(PhysicalIdentity {
++            device: metadata.dev(),
++            inode: metadata.ino(),
++            bytes: metadata.len(),
++            modified: (metadata.mtime(), metadata.mtime_nsec()),
++            changed: (metadata.ctime(), metadata.ctime_nsec()),
++        })
++    }
++    #[cfg(not(unix))]
++    {
++        let _ = metadata;
++        Err(CleanupFailure::Admission(
++            "closed-work physical identity is not qualified on this platform".to_owned(),
++        ))
++    }
++}
++
++fn open_preserved_zero(path: &std::path::Path) -> Result<PreservedZeroFile> {
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
++        let file = std::fs::OpenOptions::new()
++            .read(true)
++            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
++            .open(path)
++            .map_err(error)?;
++        let metadata = file.metadata().map_err(error)?;
++        let identity = physical_identity_from_metadata(&metadata)?;
++        require(
++            identity.bytes == 0 && metadata.nlink() == 1,
++            "preserved zero history is not an unaliased empty regular file",
++        )?;
++        require(
++            capture_physical_identity(path)? == identity,
++            "preserved zero history path differs from its descriptor",
++        )?;
++        Ok(PreservedZeroFile {
++            path: path.to_owned(),
++            file,
++            identity,
++        })
++    }
++    #[cfg(not(unix))]
++    {
++        let _ = path;
++        Err(CleanupFailure::Admission(
++            "closed-work physical identity is not qualified on this platform".to_owned(),
++        ))
++    }
++}
++
++fn capture_physical_identity(path: &std::path::Path) -> Result<PhysicalIdentity> {
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::MetadataExt;
++        let metadata = std::fs::symlink_metadata(path).map_err(error)?;
++        require(
++            metadata.is_file() && std::fs::canonicalize(path).map_err(error)? == path,
++            "selected physical path is not a canonical regular file",
++        )?;
++        Ok(PhysicalIdentity {
++            device: metadata.dev(),
++            inode: metadata.ino(),
++            bytes: metadata.len(),
++            modified: (metadata.mtime(), metadata.mtime_nsec()),
++            changed: (metadata.ctime(), metadata.ctime_nsec()),
++        })
++    }
++    #[cfg(not(unix))]
++    {
++        let _ = path;
++        Err(CleanupFailure::Admission(
++            "closed-work physical identity is not qualified on this platform".to_owned(),
++        ))
++    }
++}
++
++fn validate_batch_selection(
++    request: &ClosedWorkCleanupRequest,
++) -> Result<(Vec<ThreadId>, Vec<ThreadId>)> {
++    let mut ownership = request.ownership_scope.thread_ids.clone();
++    ownership.sort_unstable_by_key(ToString::to_string);
++    require(
++        !ownership.windows(2).any(|pair| pair[0] == pair[1])
++            && ownership.contains(&request.ownership_scope.root_thread_id),
++        "invalid or duplicate ownership scope",
++    )?;
++    let mut selected = request.deletion_scope.clone();
++    selected.sort_unstable_by_key(ToString::to_string);
++    require(
++        !selected.is_empty() && !selected.windows(2).any(|pair| pair[0] == pair[1]),
++        "invalid or duplicate deletion scope",
++    )?;
++    let mut targets: Vec<_> = request
++        .targets
++        .iter()
++        .map(|target| target.thread_id)
++        .collect();
++    targets.sort_unstable_by_key(ToString::to_string);
++    let ownership_set: HashSet<_> = ownership.iter().copied().collect();
++    require(
++        targets == selected && selected.iter().all(|id| ownership_set.contains(id)),
++        "targets and deletion/ownership scope disagree",
++    )?;
++    let paths: HashSet<_> = request
++        .targets
++        .iter()
++        .flat_map(|target| target.rollouts.iter().map(|rollout| &rollout.rollout_path))
++        .collect();
++    require(
++        paths.len()
++            == request
++                .targets
++                .iter()
++                .map(|target| target.rollouts.len())
++                .sum::<usize>(),
++        "duplicate target paths",
++    )?;
++    let mut all_rollout_ids = HashSet::new();
++    for target in &request.targets {
++        let ids: Vec<_> = target
++            .rollouts
++            .iter()
++            .map(|rollout| rollout.rollout_id.to_string())
++            .collect();
++        require(
++            !ids.is_empty() && ids.windows(2).all(|pair| pair[0] < pair[1]),
++            "physical manifest is empty, unsorted or repeats an ID",
++        )?;
++        for rollout in &target.rollouts {
++            require(
++                all_rollout_ids.insert(rollout.rollout_id),
++                "physical ID has multiple owners",
++            )?;
++        }
++        let current = target
++            .rollouts
++            .iter()
++            .find(|rollout| rollout.rollout_id == target.current_rollout_id)
++            .ok_or("current immutable rollout is absent from manifest")?;
++        require(
++            codex_rollout::plain_rollout_path(&target.current_rollout_path)
++                == codex_rollout::plain_rollout_path(&current.rollout_path)
++                && path_representation(&target.current_rollout_path).is_ok()
++                && current
++                    .rollout_path
++                    .starts_with(request.codex_home.join(if target.archived {
++                        codex_rollout::ARCHIVED_SESSIONS_SUBDIR
++                    } else {
++                        codex_rollout::SESSIONS_SUBDIR
++                    })),
++            "raw SQL pointer and saved current rollout disagree",
++        )?;
++        require(
++            matches!(target.parent_relation, CleanupParentRelation::Spawn { .. })
++                == (target.thread_id != request.ownership_scope.root_thread_id),
++            "physical admission fields do not match the request version",
++        )?;
++        require(
++            !matches!(target.source, SessionSource::Unknown),
++            "target origin is not a known typed native source",
++        )?;
++        require(
++            !target.provider.is_empty() && target.updated_at_ms < request.cutoff.timestamp_millis(),
++            "target provider or strictly-before-cutoff activity is unqualified",
++        )?;
++    }
++    Ok((ownership, selected))
++}
++
++fn history_effect_ids(request: &ClosedWorkCleanupRequest) -> Vec<ThreadId> {
++    let mut ids: Vec<_> = request
++        .targets
++        .iter()
++        .flat_map(|target| {
++            std::iter::once(target.thread_id)
++                .chain(target.rollouts.iter().map(|rollout| rollout.rollout_id))
++        })
++        .collect();
++    ids.sort_unstable_by_key(ToString::to_string);
++    ids.dedup();
++    ids
++}
++
++async fn validate_ownership_closure(
++    connection: &mut sqlx::SqliteConnection,
++    scope: &CleanupOwnershipScope,
++    selected_ids: &[ThreadId],
++) -> Result<()> {
++    let has_parent: bool = sqlx::query_scalar(
++        "SELECT EXISTS(SELECT 1 FROM thread_spawn_edges WHERE child_thread_id=?)",
++    )
++    .bind(scope.root_thread_id.to_string())
++    .fetch_one(&mut *connection)
++    .await
++    .map_err(error)?;
++    require(!has_parent, "ownership root has a spawn parent")?;
++    let observed: Vec<String> = sqlx::query_scalar(
++        "WITH RECURSIVE owned(id) AS (SELECT ? UNION SELECT child_thread_id FROM thread_spawn_edges JOIN owned ON parent_thread_id=owned.id) SELECT id FROM owned",
++    )
++    .bind(scope.root_thread_id.to_string())
++    .fetch_all(&mut *connection)
++    .await
++    .map_err(error)?;
++    let observed: HashSet<ThreadId> = observed
++        .iter()
++        .map(|id| ThreadId::from_string(id).map_err(error))
++        .collect::<Result<_>>()?;
++    require(
++        observed == scope.thread_ids.iter().copied().collect(),
++        "ownership spawn closure changed",
++    )?;
++    for id in &scope.thread_ids {
++        // Preserve the full closure and its locks; cleanup may retain an absent
++        // nonselected graph member. Root and every selected row remain mandatory.
++        if *id != scope.root_thread_id && !selected_ids.contains(id) {
++            continue;
++        }
++        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM threads WHERE id=?)")
++            .bind(id.to_string())
++            .fetch_one(&mut *connection)
++            .await
++            .map_err(error)?;
++        require(exists, "ownership thread state is absent")?;
++    }
++    Ok(())
++}
++
++async fn validate_state_identity(
++    connection: &mut sqlx::SqliteConnection,
++    request: &ClosedWorkTarget,
++) -> Result<()> {
++    let row = sqlx::query("SELECT rollout_path, updated_at_ms, source, model_provider, agent_role, history_mode, archived FROM threads WHERE id=?")
++        .bind(request.thread_id.to_string()).fetch_optional(&mut *connection).await.map_err(error)?
++        .ok_or_else(|| "target state is absent".to_owned())?;
++    let raw_source = row.try_get::<&str, _>("source").map_err(error)?;
++    // Native enum_to_string stores scalar variants as raw text and structured
++    // variants as JSON objects. These are the two representations of one schema.
++    let source: SessionSource = match raw_source.as_bytes().first() {
++        Some(b'{') => serde_json::from_str(raw_source).map_err(error)?,
++        Some(_) => serde_json::from_value(serde_json::Value::String(raw_source.to_owned()))
++            .map_err(error)?,
++        None => return Err("target source is empty".into()),
++    };
++    require(source == request.source, "origin changed")?;
++    require(
++        row.try_get::<String, _>("rollout_path").map_err(error)?
++            == request.current_rollout_path.to_string_lossy(),
++        "physical identity changed",
++    )?;
++    require(
++        row.try_get::<Option<i64>, _>("updated_at_ms")
++            .map_err(error)?
++            == Some(request.updated_at_ms),
++        "activity admission changed or is unknown",
++    )?;
++    require(
++        row.try_get::<String, _>("model_provider").map_err(error)? == request.provider,
++        "provider changed",
++    )?;
++    require(
++        row.try_get::<Option<String>, _>("agent_role")
++            .map_err(error)?
++            == request.agent_role,
++        "role changed",
++    )?;
++    require(
++        row.try_get::<String, _>("history_mode").map_err(error)?
++            == match request
++                .rollouts
++                .iter()
++                .find(|rollout| rollout.rollout_id == request.current_rollout_id)
++                .ok_or("current rollout is absent")?
++                .history_mode
++            {
++                ThreadHistoryMode::Legacy => "legacy",
++                ThreadHistoryMode::Paginated => "paginated",
++            },
++        "current history mode changed",
++    )?;
++    require(
++        row.try_get::<i64, _>("archived").map_err(error)? == i64::from(request.archived),
++        "archive identity changed",
++    )
++}
++
++/// One namespace walk for the entire batch, retaining all external ancestry/providers.
++fn validate_batch_history_dependencies(
++    request: &ClosedWorkCleanupRequest,
++    bounded: &[BoundedTarget],
++) -> Result<(Vec<PreservedZeroFile>, Vec<RetainedGuardian>)> {
++    let physical: Vec<_> = request
++        .targets
++        .iter()
++        .flat_map(|target| target.rollouts.iter().map(move |rollout| (target, rollout)))
++        .collect();
++    let checked: HashMap<_, _> = physical
++        .iter()
++        .zip(bounded)
++        .map(|((_, rollout), file)| (rollout.rollout_id, file))
++        .collect();
++    let selected_physical: HashMap<_, _> = physical
++        .iter()
++        .map(|(target, rollout)| {
++            (
++                rollout.rollout_id,
++                (target.thread_id, &rollout.rollout_path),
++            )
++        })
++        .collect();
++    let selected: HashSet<_> = request
++        .targets
++        .iter()
++        .map(|target| target.thread_id)
++        .collect();
++    let cache_ids: HashSet<_> = history_effect_ids(request).into_iter().collect();
++    let mut found = HashSet::new();
++    let mut physical_ids = HashSet::new();
++    let mut zero_ids = HashSet::new();
++    let mut providers = HashSet::new();
++    let mut preserved_zero_files = Vec::new();
++    let mut retained_guardians = Vec::new();
++    let mut directories = vec![
++        request.codex_home.join(codex_rollout::SESSIONS_SUBDIR),
++        request
++            .codex_home
++            .join(codex_rollout::ARCHIVED_SESSIONS_SUBDIR),
++    ];
++    while let Some(directory) = directories.pop() {
++        match std::fs::symlink_metadata(&directory) {
++            Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => continue,
++            Err(failure) => return Err(error(failure)),
++            Ok(metadata) => require(
++                metadata.is_dir() && !metadata.is_symlink(),
++                "history directory identity is unresolved",
++            )?,
++        }
++        for entry in std::fs::read_dir(&directory).map_err(error)? {
++            let entry = entry.map_err(error)?;
++            let path = entry.path();
++            let kind = entry.file_type().map_err(error)?;
++            require(
++                !kind.is_symlink(),
++                "history namespace contains an unresolved alias",
++            )?;
++            if kind.is_dir() {
++                require(
++                    codex_rollout::rollout_id_from_path(&path).is_none(),
++                    "a directory occupies a native rollout identity",
++                )?;
++                directories.push(path);
++                continue;
++            }
++            require(
++                kind.is_file(),
++                "history namespace contains an unsupported physical object",
++            )?;
++            // Definitely empty unrelated regular files have no incoming metadata edge.
++            // Preserve their descriptor even if their basename has no rollout identity.
++            if std::fs::symlink_metadata(&path).map_err(error)?.len() == 0 {
++                let id = codex_rollout::rollout_id_from_path(&path);
++                require(
++                    !physical
++                        .iter()
++                        .any(|(_, rollout)| rollout.rollout_path == path)
++                        && codex_rollout::rollout_owner_from_path(&path)
++                            .is_none_or(|id| !selected.contains(&id)),
++                    "selected physical history is empty",
++                )?;
++                if let Some(id) = id {
++                    require(
++                        physical_ids.insert(id),
++                        "one physical rollout identity has conflicting paths",
++                    )?;
++                    zero_ids.insert(id);
++                }
++                preserved_zero_files.push(open_preserved_zero(&path)?);
++                continue;
++            }
++            let id = codex_rollout::rollout_id_from_path(&path)
++                .ok_or("history namespace contains an unsupported nonempty filename")?;
++            require(
++                physical_ids.insert(id),
++                "one physical rollout identity has conflicting paths",
++            )?;
++            let mut retained_file = None;
++            let meta = if let Some(target) = checked.get(&id) {
++                require(
++                    selected_physical
++                        .get(&id)
++                        .is_some_and(|(_, saved)| **saved == path),
++                    "selected physical path changed",
++                )?;
++                target.metadata.clone()
++            } else {
++                let (file, identity) = open_bounded_history(&path)?;
++                let representation = path_representation(&path)?;
++                let (digest, metadata) = bounded_header(&file, representation)?;
++                #[cfg(feature = "fixtures")]
++                fixture_checkpoint(request, "during_namespace_header")?;
++                let path_now = capture_physical_identity(&path)?;
++                let descriptor_now =
++                    physical_identity_from_metadata(&file.metadata().map_err(error)?)?;
++                require(
++                    path_now.device == identity.device
++                        && path_now.inode == identity.inode
++                        && descriptor_now.device == identity.device
++                        && descriptor_now.inode == identity.inode
++                        && bounded_header(&file, representation)?.0 == digest,
++                    "namespace header or descriptor identity changed",
++                )?;
++                // Unrelated append-only body growth is not a provider-header change.
++                // Selected files and separately guarded retained Guardians keep full-stat checks.
++                retained_file = Some(BoundedTarget {
++                    file,
++                    identity,
++                    metadata: metadata.clone(),
++                });
++                metadata
++            };
++            require(
++                codex_rollout::rollout_owner_from_path(&path) == Some(meta.meta.id),
++                "filename and header logical ownership disagree",
++            )?;
++            if let Some(base) = meta.meta.history_base {
++                providers.insert(base.thread_id);
++            }
++            if selected.contains(&meta.meta.id) {
++                require(
++                    selected_physical
++                        .get(&id)
++                        .is_some_and(|(owner, saved)| *owner == meta.meta.id && **saved == path)
++                        && found.insert(id),
++                    "selected owner has additional or conflicting physical rollouts",
++                )?;
++            } else {
++                require(
++                    !cache_ids.contains(&id) && !cache_ids.contains(&meta.meta.id),
++                    "retained ownership collides with selected history cache keys",
++                )?;
++                require(
++                    meta.meta
++                        .history_base
++                        .is_none_or(|base| !cache_ids.contains(&base.thread_id)),
++                    "retained history directly requires a selected physical provider",
++                )?;
++                let guardian_association = matches!(&meta.meta.source, SessionSource::SubAgent(SubAgentSource::Other(kind)) if kind == "guardian")
++                    && meta
++                        .meta
++                        .parent_thread_id
++                        .is_some_and(|id| selected.contains(&id));
++                if guardian_association {
++                    retained_guardians.push(RetainedGuardian {
++                        path: path.clone(),
++                        checked: retained_file
++                            .take()
++                            .ok_or("retained guardian descriptor is absent")?,
++                    });
++                }
++                // Logical fork ancestry records provenance in either history mode.
++                // An immutable history prefix can retain its provider; spawn and parent
++                // ownership are validated separately.
++                require(
++                    [
++                        if guardian_association {
++                            None
++                        } else {
++                            meta.meta.parent_thread_id
++                        },
++                        meta.meta.source.parent_thread_id(),
++                    ]
++                    .into_iter()
++                    .flatten()
++                    .all(|id| !selected.contains(&id)),
++                    "retained ancestry protects a selected target",
++                )?;
++            }
++        }
++    }
++    require(
++        found.len() == selected_physical.len(),
++        "selected physical namespace changed",
++    )?;
++    require(
++        zero_ids.is_disjoint(&providers),
++        "retained history requires an unresolved zero physical provider",
++    )?;
++    Ok((preserved_zero_files, retained_guardians))
++}
++
++/// Read-only physical row selection for the guarded batch validator.
++async fn observe_batch_rows(
++    connection: &mut sqlx::SqliteConnection,
++    kind: Kind,
++    selected_json: &str,
++    board_json: &str,
++) -> Result<BTreeMap<String, Vec<i64>>> {
++    let tables: &[(&str, &str)] = match kind {
++        Kind::State => &[
++            ("threads", "id"),
++            ("thread_dynamic_tools", "thread_id"),
++            ("thread_spawn_edges", "spawn"),
++            ("thread_attachments", "thread_id"),
++            ("guardian_review_feedback", "thread_id"),
++            ("thread_read_receipts", "thread_id"),
++        ],
++        Kind::Logs => &[("logs", "thread_id")],
++        Kind::Goals => &[
++            ("thread_goals", "thread_id"),
++            ("thread_goal_continuation_deferrals", "thread_id"),
++        ],
++        Kind::Memory => &[("stage1_outputs", "thread_id"), ("jobs", "job_key")],
++        Kind::History => &[
++            ("thread_items", "thread_id"),
++            ("thread_realtime_items", "thread_id"),
++            ("thread_turns", "thread_id"),
++            ("thread_history_projection_state", "thread_id"),
++        ],
++        Kind::Queue => &[
++            ("queued_items", "thread_id"),
++            ("queued_thread_revisions", "thread_id"),
++        ],
++        Kind::Board => &[
++            ("board_templates", "board"),
++            ("subscriptions", "board"),
++            ("subscription_opt_outs", "board"),
++            ("posts", "board"),
++            ("channels", "board"),
++            ("deleted_boards", "board"),
++        ],
++    };
++    let mut observed = BTreeMap::new();
++    for (table, column) in tables {
++        let clause = if *column == "spawn" {
++            "parent_thread_id IN (SELECT value FROM json_each(?)) OR child_thread_id IN (SELECT value FROM json_each(?))".to_owned()
++        } else {
++            format!(
++                "{} IN (SELECT value FROM json_each(?)){}",
++                column,
++                if *table == "jobs" {
++                    " AND kind='memory_stage1'"
++                } else {
++                    ""
++                }
++            )
++        };
++        // SQL identifiers are this finite native table list, never request strings.
++        let query = format!("SELECT rowid FROM {table} WHERE {clause} ORDER BY rowid");
++        let mut query = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(query)).bind(
++            if matches!(kind, Kind::Board) {
++                board_json
++            } else {
++                selected_json
++            },
++        );
++        if *column == "spawn" {
++            query = query.bind(selected_json);
++        }
++        observed.insert(
++            (*table).to_owned(),
++            query.fetch_all(&mut *connection).await.map_err(error)?,
++        );
++    }
++    if matches!(kind, Kind::Queue) {
++        observed.insert("sqlite_sequence".to_owned(), sqlx::query_scalar(
++            "SELECT rowid FROM sqlite_sequence WHERE name='queued_thread_revisions' ORDER BY rowid",
++        ).fetch_all(&mut *connection).await.map_err(error)?);
++    }
++    Ok(observed)
++}
++
++async fn validate_batch_database(
++    database: &mut OwnedDatabase,
++    request: &ClosedWorkCleanupRequest,
++    selected_json: &str,
++    history_json: &str,
++    selected_ids: &[ThreadId],
++) -> Result<()> {
++    let root = request.ownership_scope.root_thread_id;
++    let root_selected = selected_ids.contains(&root);
++    let board_json = serde_json::to_string(&if root_selected {
++        vec![root.to_string()]
++    } else {
++        Vec::new()
++    })
++    .map_err(error)?;
++    let observed = observe_batch_rows(
++        &mut database.transaction,
++        database.kind,
++        if matches!(database.kind, Kind::History) {
++            history_json
++        } else {
++            selected_json
++        },
++        &board_json,
++    )
++    .await?;
++    let bound = request
++        .databases
++        .iter()
++        .find(|bound| bound.path == database.path)
++        .ok_or("owned database has no approved effect bound")?;
++    require(
++        observed == bound.rows,
++        "physical SQL union effect keys changed or exceed approved bound",
++    )?;
++    require(
++        bound.queue_bookkeeping == matches!(database.kind, Kind::Queue),
++        "queue bookkeeping declaration changed",
++    )?;
++    let expected_board = if matches!(database.kind, Kind::Board) && root_selected {
++        Some(root)
++    } else {
++        None
++    };
++    require(
++        bound.board_tombstone == expected_board,
++        "board root tombstone is outside selected scope",
++    )?;
++    if matches!(database.kind, Kind::Queue) {
++        let inconsistent: bool = sqlx::query_scalar(
++            "SELECT EXISTS(SELECT 1 FROM queued_items q WHERE q.thread_id IN (SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM queued_thread_revisions r WHERE r.thread_id=q.thread_id))",
++        ).bind(selected_json).fetch_one(&mut *database.transaction).await.map_err(error)?;
++        require(!inconsistent, "queue revision state is inconsistent")?;
++    }
++    if matches!(database.kind, Kind::Memory) {
++        let running: bool = sqlx::query_scalar(
++            "SELECT EXISTS(SELECT 1 FROM jobs WHERE kind='memory_stage1' AND status='running' AND job_key IN (SELECT value FROM json_each(?)))",
++        ).bind(selected_json).fetch_one(&mut *database.transaction).await.map_err(error)?;
++        require(
++            !running,
++            "selected memory job is currently running, regardless of lease expiry",
++        )?;
++        let phase2: bool = sqlx::query_scalar(
++            "SELECT EXISTS(SELECT 1 FROM stage1_outputs WHERE selected_for_phase2!=0 AND thread_id IN (SELECT value FROM json_each(?)))",
++        ).bind(selected_json).fetch_one(&mut *database.transaction).await.map_err(error)?;
++        require(
++            !phase2,
++            "selected phase2 output requires unbounded global consolidation effects",
++        )?;
++    }
++    Ok(())
++}
++
++async fn validate_intent(
++    store: &LocalThreadStore,
++    request: &ClosedWorkCleanupRequest,
++    bytes: &[u8],
++    digest: [u8; 32],
++) -> Result<()> {
++    let journal = store
++        .config
++        .sqlite
++        .open_read_only_pool(&request.journal, Some(Duration::from_millis(100)))
++        .await
++        .map_err(error)?;
++    let mut observation = journal.begin().await.map_err(error)?;
++    let application: i64 = sqlx::query_scalar("PRAGMA application_id")
++        .fetch_one(&mut *observation)
++        .await
++        .map_err(error)?;
++    let version: i64 = sqlx::query_scalar("PRAGMA user_version")
++        .fetch_one(&mut *observation)
++        .await
++        .map_err(error)?;
++    require(
++        application == 0x43534752 && version == 2,
++        "unsupported journal identity",
++    )?;
++    let identity: (String, i64) = sqlx::query_as("SELECT name, schema_version FROM identity")
++        .fetch_one(&mut *observation)
++        .await
++        .map_err(error)?;
++    require(
++        identity == ("codex-session-gc.recovery".to_owned(), 2),
++        "journal identity changed",
++    )?;
++    let intent = sqlx::query("SELECT payload_type, payload_version, payload, digest FROM events WHERE attempt_id=? AND unit_id=? AND kind='intent'")
++        .bind(request.attempt_id.as_bytes().as_slice()).bind(request.unit_id.as_bytes().as_slice()).fetch_all(&mut *observation).await.map_err(error)?;
++    require(
++        intent.len() == 1,
++        "exact single dispatch intent is required",
++    )?;
++    let intent = &intent[0];
++    require(
++        intent.try_get::<String, _>("payload_type").map_err(error)? == CONTENT_TYPE
++            && intent.try_get::<i64, _>("payload_version").map_err(error)? == 1
++            && intent.try_get::<Vec<u8>, _>("payload").map_err(error)? == bytes
++            && intent.try_get::<Vec<u8>, _>("digest").map_err(error)? == digest,
++        "journal dispatch bytes do not match",
++    )?;
++    let terminal: i64 = sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM events WHERE attempt_id=? AND unit_id=? AND kind='terminal')+(SELECT COUNT(*) FROM resolutions WHERE attempt_id=? AND unit_id=?)")
++        .bind(request.attempt_id.as_bytes().as_slice()).bind(request.unit_id.as_bytes().as_slice()).bind(request.attempt_id.as_bytes().as_slice()).bind(request.unit_id.as_bytes().as_slice()).fetch_one(&mut *observation).await.map_err(error)?;
++    require(
++        terminal == 0,
++        "terminal or reconciled units cannot be dispatched again",
++    )?;
++    let closed: i64 = sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM events WHERE attempt_id=? AND kind='shutdown')+(SELECT COUNT(*) FROM lifecycle_resolutions WHERE attempt_id=?)")
++        .bind(request.attempt_id.as_bytes().as_slice()).bind(request.attempt_id.as_bytes().as_slice()).fetch_one(&mut *observation).await.map_err(error)?;
++    require(
++        closed == 0,
++        "closed attempts cannot authorize native effects",
++    )?;
++    let sequence: i64 =
++        sqlx::query_scalar("SELECT sequence FROM units WHERE attempt_id=? AND unit_id=?")
++            .bind(request.attempt_id.as_bytes().as_slice())
++            .bind(request.unit_id.as_bytes().as_slice())
++            .fetch_one(&mut *observation)
++            .await
++            .map_err(error)?;
++    let prior: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM units u WHERE u.attempt_id=? AND u.sequence<? AND NOT EXISTS (SELECT 1 FROM events e WHERE e.attempt_id=u.attempt_id AND e.unit_id=u.unit_id AND e.kind='terminal' AND e.terminal_kind IN ('confirmed','refused'))")
++        .bind(request.attempt_id.as_bytes().as_slice()).bind(sequence).fetch_one(&mut *observation).await.map_err(error)?;
++    require(
++        prior == 0,
++        "an earlier unit is incomplete, partial or unknown",
++    )?;
++    observation.rollback().await.map_err(error)?;
++    journal.close().await;
++    Ok(())
++}
++
++#[cfg(feature = "fixtures")]
++fn fixture_checkpoint(request: &ClosedWorkCleanupRequest, point: &str) -> Result<()> {
++    use std::io::Read;
++    let Some(control) = &request.fixture_control else {
++        return Ok(());
++    };
++    if control.get("point").and_then(|value| value.as_str()) != Some(point) {
++        return Ok(());
++    }
++    let directory = PathBuf::from(
++        control
++            .get("directory")
++            .and_then(|value| value.as_str())
++            .ok_or("fixture control directory is absent")?,
++    );
++    require(
++        directory.is_absolute() && directory.is_dir(),
++        "fixture control directory must exist",
++    )?;
++    std::fs::write(directory.join("ready"), point).map_err(error)?;
++    if control.get("action").and_then(|value| value.as_str()) == Some("fail") {
++        let mut buffer = Vec::new();
++        std::fs::File::open(directory.join("absent-io-failure"))
++            .and_then(|mut file| file.read_to_end(&mut buffer))
++            .map_err(error)?;
++    }
++    let deadline = std::time::Instant::now() + Duration::from_secs(10);
++    while !directory.join("continue").exists() {
++        require(
++            std::time::Instant::now() < deadline,
++            "fixture checkpoint timed out",
++        )?;
++        std::thread::sleep(Duration::from_millis(5));
++    }
++    Ok(())
++}

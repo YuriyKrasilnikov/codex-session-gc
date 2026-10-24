@@ -1,0 +1,14 @@
+--- a/codex-rs/thread-store/src/local/delete_thread.rs
++++ b/codex-rs/thread-store/src/local/delete_thread.rs
+@@ -280,7 +280,10 @@
+     Ok(deleted_plain || deleted_compressed)
+ }
+ 
+-fn delete_rollout_path(store: &LocalThreadStore, rollout_path: &Path) -> ThreadStoreResult<bool> {
++pub(super) fn delete_rollout_path(
++    store: &LocalThreadStore,
++    rollout_path: &Path,
++) -> ThreadStoreResult<bool> {
+     let canonical_rollout_path = scoped_rollout_path(
+         store.config.codex_home.join(SESSIONS_SUBDIR),
+         rollout_path,

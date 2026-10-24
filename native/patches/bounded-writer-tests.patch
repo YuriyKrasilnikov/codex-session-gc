@@ -1,0 +1,31 @@
+--- a/codex-rs/rollout/src/writer_lock_tests.rs
++++ b/codex-rs/rollout/src/writer_lock_tests.rs
+@@ -124,3 +124,28 @@
+     );
+     assert!(writer.acquire(thread_id).is_ok());
+ }
++
++#[test]
++fn bounded_cleanup_preserves_unrelated_stale_files_and_excludes_active_writers() {
++    let home = TempDir::new().expect("temp dir");
++    let active = ThreadId::default();
++    let ordinary = Arc::new(WriterLockCoordinator::new(home.path()));
++    let owner = ordinary.acquire(active).expect("ordinary owner");
++    let stale = ThreadId::default();
++    let stale_path = home
++        .path()
++        .join(WRITER_LOCK_DIR)
++        .join(format!("{stale}.lock"));
++    fs::write(&stale_path, b"retained").expect("stale lock fixture");
++    let cleanup = Arc::new(WriterLockCoordinator::new_for_bounded_cleanup(home.path()));
++    assert!(matches!(cleanup.acquire(active), Err(error) if error.kind() == ErrorKind::WouldBlock));
++    let target = ThreadId::default();
++    let guard = cleanup.acquire(target).expect("idle target");
++    assert_eq!(
++        fs::read(&stale_path).expect("retained stale lock"),
++        b"retained"
++    );
++    drop(guard);
++    assert!(stale_path.exists());
++    drop(owner);
++}

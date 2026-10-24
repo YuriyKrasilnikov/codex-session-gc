@@ -1,0 +1,22 @@
+--- a/codex-rs/state/src/runtime/queued_items.rs
++++ b/codex-rs/state/src/runtime/queued_items.rs
+@@ -201,9 +201,18 @@
+     }
+ 
+     pub(crate) async fn delete_thread_queue(&self, thread_id: ThreadId) -> anyhow::Result<bool> {
++        let mut connection = self.pool.acquire().await?;
++        Self::delete_thread_queue_in(&mut connection, thread_id).await
++    }
++
++    /// Executes native queue cleanup on the caller's retained connection.
++    pub async fn delete_thread_queue_in(
++        connection: &mut sqlx::SqliteConnection,
++        thread_id: ThreadId,
++    ) -> anyhow::Result<bool> {
+         Ok(sqlx::query("DELETE FROM queued_items WHERE thread_id = ?")
+             .bind(thread_id.to_string())
+-            .execute(self.pool.as_ref())
++            .execute(connection)
+             .await?
+             .rows_affected()
+             > 0)

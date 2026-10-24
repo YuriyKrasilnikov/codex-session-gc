@@ -1,0 +1,50 @@
+--- a/codex-rs/thread-store/src/local/mod.rs
++++ b/codex-rs/thread-store/src/local/mod.rs
+@@ -1,3 +1,8 @@
++mod bounded_cleanup;
++pub use bounded_cleanup::{
++    CleanupOutcome, CleanupOwnershipScope, CleanupStatus, CleanupWireVersion,
++    ClosedWorkCleanupRequest, ClosedWorkPhysicalIdentity, ClosedWorkTarget, DatabaseEffectBound,
++};
+ mod archive_thread;
+ mod create_thread;
+ mod delete_thread;
+@@ -258,6 +263,38 @@
+ }
+ 
+ impl LocalThreadStore {
++    /// Uses existing storage namespaces without runtime startup or unrelated lock cleanup.
++    pub fn new_for_bounded_cleanup(config: LocalThreadStoreConfig) -> ThreadStoreResult<Self> {
++        for directory in [
++            config.codex_home.clone(),
++            config.codex_home.join("thread-writer-locks"),
++        ] {
++            if !directory.is_dir() || directory.is_symlink() {
++                return Err(ThreadStoreError::InvalidRequest {
++                    message: "bounded cleanup requires existing canonical storage namespaces"
++                        .to_string(),
++                });
++            }
++        }
++        match std::fs::symlink_metadata(config.codex_home.join(".tmp")) {
++            Ok(metadata) if metadata.is_dir() && !metadata.is_symlink() => {}
++            Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => {}
++            _ => {
++                return Err(ThreadStoreError::InvalidRequest {
++                    message:
++                        "bounded cleanup temporary namespace is not an existing directory or absent"
++                            .to_string(),
++                });
++            }
++        }
++        let coordinator = Arc::new(WriterLockCoordinator::new_for_bounded_cleanup(
++            &config.codex_home,
++        ));
++        let mut store = Self::new(config, None);
++        store.writer_lock_coordinator = coordinator;
++        Ok(store)
++    }
++
+     /// Create a local store using an already initialized state DB handle.
+     pub fn new(config: LocalThreadStoreConfig, state_db: Option<StateDbHandle>) -> Self {
+         let writer_lock_coordinator = Arc::new(WriterLockCoordinator::new(&config.codex_home));

@@ -1,0 +1,1509 @@
+{
+  "files": [
+    {
+      "base64": "eyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjAsInR5cGUiOiJzZXNzaW9uX21ldGEiLCJwYXlsb2FkIjp7ImlkIjoiMDAwMDAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAyIiwic2Vzc2lvbl9pZCI6IjAwMDAwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsInNvdXJjZSI6InZzY29kZSIsIm1vZGVsX3Byb3ZpZGVyIjoib3BlbmFpIiwiaGlzdG9yeV9tb2RlIjoicGFnaW5hdGVkIn19CnsidGltZXN0YW1wIjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJvcmRpbmFsIjoxLCJ0eXBlIjoiZXZlbnRfbXNnIiwicGF5bG9hZCI6eyJ0eXBlIjoidGFza19zdGFydGVkIiwidHVybl9pZCI6InR1cm4tMiIsInJvb3RfdHVybl9pZCI6InR1cm4tMiIsInN0YXJ0ZWRfYXQiOjE3ODAyNzIwMDAwMDAsIm1vZGVsX2NvbnRleHRfd2luZG93IjozMjAwMCwiY29sbGFib3JhdGlvbl9tb2RlX2tpbmQiOiJkZWZhdWx0In19CnsidGltZXN0YW1wIjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJvcmRpbmFsIjoyLCJ0eXBlIjoicmVzcG9uc2VfaXRlbSIsInBheWxvYWQiOnsidHlwZSI6Im1lc3NhZ2UiLCJpZCI6InVzZXItMiIsInJvbGUiOiJ1c2VyIiwiY29udGVudCI6W3sidHlwZSI6ImlucHV0X3RleHQiLCJ0ZXh0IjoiU3ludGhldGljIHVzZXIgbWVzc2FnZSAyIn1dfX0KeyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjMsInR5cGUiOiJyZXNwb25zZV9pdGVtIiwicGF5bG9hZCI6eyJ0eXBlIjoibWVzc2FnZSIsImlkIjoiYXNzaXN0YW50LTIiLCJyb2xlIjoiYXNzaXN0YW50IiwiY29udGVudCI6W3sidHlwZSI6Im91dHB1dF90ZXh0IiwidGV4dCI6IlN5bnRoZXRpYyBhc3Npc3RhbnQgbWVzc2FnZSAyIn1dfX0KeyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjQsInR5cGUiOiJldmVudF9tc2ciLCJwYXlsb2FkIjp7InR5cGUiOiJ0YXNrX2NvbXBsZXRlIiwidHVybl9pZCI6InR1cm4tMiIsImxhc3RfYWdlbnRfbWVzc2FnZSI6IlN5bnRoZXRpYyBhc3Npc3RhbnQgbWVzc2FnZSAyIiwic3RhcnRlZF9hdCI6MTc4MDI3MjAwMDAwMCwiY29tcGxldGVkX2F0IjoxNzgwMjcyMDAxMDAwLCJkdXJhdGlvbl9tcyI6MTAwMCwidGltZV90b19maXJzdF90b2tlbl9tcyI6MX19Cg==",
+      "path": "sessions/2026/06/01/rollout-2026-06-01T00-00-00-00000000-0000-7000-8000-000000000002.jsonl"
+    },
+    {
+      "base64": "eyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjAsInR5cGUiOiJzZXNzaW9uX21ldGEiLCJwYXlsb2FkIjp7ImlkIjoiMDAwMDAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwic2Vzc2lvbl9pZCI6IjAwMDAwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsInNvdXJjZSI6eyJzdWJhZ2VudCI6eyJ0aHJlYWRfc3Bhd24iOnsicGFyZW50X3RocmVhZF9pZCI6IjAwMDAwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsImRlcHRoIjoxfX19LCJtb2RlbF9wcm92aWRlciI6Im9wZW5haSIsImhpc3RvcnlfbW9kZSI6InBhZ2luYXRlZCIsInBhcmVudF90aHJlYWRfaWQiOiIwMDAwMDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDIifX0KeyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjEsInR5cGUiOiJldmVudF9tc2ciLCJwYXlsb2FkIjp7InR5cGUiOiJ0YXNrX3N0YXJ0ZWQiLCJ0dXJuX2lkIjoidHVybi0zIiwicm9vdF90dXJuX2lkIjoidHVybi0zIiwic3RhcnRlZF9hdCI6MTc4MDI3MjAwMDAwMCwibW9kZWxfY29udGV4dF93aW5kb3ciOjMyMDAwLCJjb2xsYWJvcmF0aW9uX21vZGVfa2luZCI6ImRlZmF1bHQifX0KeyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjIsInR5cGUiOiJyZXNwb25zZV9pdGVtIiwicGF5bG9hZCI6eyJ0eXBlIjoibWVzc2FnZSIsImlkIjoidXNlci0zIiwicm9sZSI6InVzZXIiLCJjb250ZW50IjpbeyJ0eXBlIjoiaW5wdXRfdGV4dCIsInRleHQiOiJTeW50aGV0aWMgdXNlciBtZXNzYWdlIDMifV19fQp7InRpbWVzdGFtcCI6IjIwMjYtMDYtMDFUMDA6MDA6MDBaIiwib3JkaW5hbCI6MywidHlwZSI6InJlc3BvbnNlX2l0ZW0iLCJwYXlsb2FkIjp7InR5cGUiOiJtZXNzYWdlIiwiaWQiOiJhc3Npc3RhbnQtMyIsInJvbGUiOiJhc3Npc3RhbnQiLCJjb250ZW50IjpbeyJ0eXBlIjoib3V0cHV0X3RleHQiLCJ0ZXh0IjoiU3ludGhldGljIGFzc2lzdGFudCBtZXNzYWdlIDMifV19fQp7InRpbWVzdGFtcCI6IjIwMjYtMDYtMDFUMDA6MDA6MDBaIiwib3JkaW5hbCI6NCwidHlwZSI6ImV2ZW50X21zZyIsInBheWxvYWQiOnsidHlwZSI6InRhc2tfY29tcGxldGUiLCJ0dXJuX2lkIjoidHVybi0zIiwibGFzdF9hZ2VudF9tZXNzYWdlIjoiU3ludGhldGljIGFzc2lzdGFudCBtZXNzYWdlIDMiLCJzdGFydGVkX2F0IjoxNzgwMjcyMDAwMDAwLCJjb21wbGV0ZWRfYXQiOjE3ODAyNzIwMDEwMDAsImR1cmF0aW9uX21zIjoxMDAwLCJ0aW1lX3RvX2ZpcnN0X3Rva2VuX21zIjoxfX0K",
+      "path": "sessions/2026/06/01/rollout-2026-06-01T00-00-00-00000000-0000-7000-8000-000000000003.jsonl"
+    },
+    {
+      "base64": "eyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjAsInR5cGUiOiJzZXNzaW9uX21ldGEiLCJwYXlsb2FkIjp7ImlkIjoiMDAwMDAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDA0Iiwic2Vzc2lvbl9pZCI6IjAwMDAwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsInNvdXJjZSI6eyJzdWJhZ2VudCI6eyJ0aHJlYWRfc3Bhd24iOnsicGFyZW50X3RocmVhZF9pZCI6IjAwMDAwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImRlcHRoIjoyfX19LCJtb2RlbF9wcm92aWRlciI6Im9wZW5haSIsImhpc3RvcnlfbW9kZSI6InBhZ2luYXRlZCIsInBhcmVudF90aHJlYWRfaWQiOiIwMDAwMDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDMifX0KeyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjEsInR5cGUiOiJldmVudF9tc2ciLCJwYXlsb2FkIjp7InR5cGUiOiJ0YXNrX3N0YXJ0ZWQiLCJ0dXJuX2lkIjoidHVybi00Iiwicm9vdF90dXJuX2lkIjoidHVybi00Iiwic3RhcnRlZF9hdCI6MTc4MDI3MjAwMDAwMCwibW9kZWxfY29udGV4dF93aW5kb3ciOjMyMDAwLCJjb2xsYWJvcmF0aW9uX21vZGVfa2luZCI6ImRlZmF1bHQifX0KeyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjIsInR5cGUiOiJyZXNwb25zZV9pdGVtIiwicGF5bG9hZCI6eyJ0eXBlIjoibWVzc2FnZSIsImlkIjoidXNlci00Iiwicm9sZSI6InVzZXIiLCJjb250ZW50IjpbeyJ0eXBlIjoiaW5wdXRfdGV4dCIsInRleHQiOiJTeW50aGV0aWMgdXNlciBtZXNzYWdlIDQifV19fQp7InRpbWVzdGFtcCI6IjIwMjYtMDYtMDFUMDA6MDA6MDBaIiwib3JkaW5hbCI6MywidHlwZSI6InJlc3BvbnNlX2l0ZW0iLCJwYXlsb2FkIjp7InR5cGUiOiJtZXNzYWdlIiwiaWQiOiJhc3Npc3RhbnQtNCIsInJvbGUiOiJhc3Npc3RhbnQiLCJjb250ZW50IjpbeyJ0eXBlIjoib3V0cHV0X3RleHQiLCJ0ZXh0IjoiU3ludGhldGljIGFzc2lzdGFudCBtZXNzYWdlIDQifV19fQp7InRpbWVzdGFtcCI6IjIwMjYtMDYtMDFUMDA6MDA6MDBaIiwib3JkaW5hbCI6NCwidHlwZSI6ImV2ZW50X21zZyIsInBheWxvYWQiOnsidHlwZSI6InRhc2tfY29tcGxldGUiLCJ0dXJuX2lkIjoidHVybi00IiwibGFzdF9hZ2VudF9tZXNzYWdlIjoiU3ludGhldGljIGFzc2lzdGFudCBtZXNzYWdlIDQiLCJzdGFydGVkX2F0IjoxNzgwMjcyMDAwMDAwLCJjb21wbGV0ZWRfYXQiOjE3ODAyNzIwMDEwMDAsImR1cmF0aW9uX21zIjoxMDAwLCJ0aW1lX3RvX2ZpcnN0X3Rva2VuX21zIjoxfX0K",
+      "path": "sessions/2026/06/01/rollout-2026-06-01T00-00-00-00000000-0000-7000-8000-000000000004.jsonl"
+    },
+    {
+      "base64": "eyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjUsInR5cGUiOiJzZXNzaW9uX21ldGEiLCJwYXlsb2FkIjp7ImlkIjoiMDAwMDAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDA1Iiwic2Vzc2lvbl9pZCI6IjAwMDAwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwNSIsInNvdXJjZSI6InZzY29kZSIsIm1vZGVsX3Byb3ZpZGVyIjoib3BlbmFpIiwiaGlzdG9yeV9tb2RlIjoicGFnaW5hdGVkIiwiaGlzdG9yeV9iYXNlIjp7InRocmVhZF9pZCI6IjAwMDAwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwMiIsImVuZF9vcmRpbmFsX2V4Y2x1c2l2ZSI6NSwiZW5kX2J5dGVfb2Zmc2V0IjoxMTc0fSwiZm9ya2VkX2Zyb21faWQiOiIwMDAwMDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDIiLCJ0aHJlYWRfc291cmNlIjoidXNlciIsIm11bHRpX2FnZW50X3ZlcnNpb24iOiJ2MiJ9fQp7InRpbWVzdGFtcCI6IjIwMjYtMDYtMDFUMDA6MDA6MDBaIiwib3JkaW5hbCI6NiwidHlwZSI6ImV2ZW50X21zZyIsInBheWxvYWQiOnsidHlwZSI6ImFnZW50X21lc3NhZ2UiLCJtZXNzYWdlIjoiU3ludGhldGljIGZvcmsgbWFya2VyIn19Cg==",
+      "path": "sessions/2026/06/01/rollout-2026-06-01T00-00-00-00000000-0000-7000-8000-000000000005.jsonl"
+    },
+    {
+      "base64": "eyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjAsInR5cGUiOiJzZXNzaW9uX21ldGEiLCJwYXlsb2FkIjp7ImlkIjoiMDAwMDAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDA2Iiwic2Vzc2lvbl9pZCI6IjAwMDAwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwNiIsInNvdXJjZSI6InZzY29kZSIsIm1vZGVsX3Byb3ZpZGVyIjoib3BlbmFpIiwiaGlzdG9yeV9tb2RlIjoicGFnaW5hdGVkIn19CnsidGltZXN0YW1wIjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJvcmRpbmFsIjoxLCJ0eXBlIjoiZXZlbnRfbXNnIiwicGF5bG9hZCI6eyJ0eXBlIjoidGFza19zdGFydGVkIiwidHVybl9pZCI6InR1cm4tNiIsInJvb3RfdHVybl9pZCI6InR1cm4tNiIsInN0YXJ0ZWRfYXQiOjE3ODAyNzIwMDAwMDAsIm1vZGVsX2NvbnRleHRfd2luZG93IjozMjAwMCwiY29sbGFib3JhdGlvbl9tb2RlX2tpbmQiOiJkZWZhdWx0In19CnsidGltZXN0YW1wIjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJvcmRpbmFsIjoyLCJ0eXBlIjoicmVzcG9uc2VfaXRlbSIsInBheWxvYWQiOnsidHlwZSI6Im1lc3NhZ2UiLCJpZCI6InVzZXItNiIsInJvbGUiOiJ1c2VyIiwiY29udGVudCI6W3sidHlwZSI6ImlucHV0X3RleHQiLCJ0ZXh0IjoiU3ludGhldGljIHVzZXIgbWVzc2FnZSA2In1dfX0KeyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjMsInR5cGUiOiJyZXNwb25zZV9pdGVtIiwicGF5bG9hZCI6eyJ0eXBlIjoibWVzc2FnZSIsImlkIjoiYXNzaXN0YW50LTYiLCJyb2xlIjoiYXNzaXN0YW50IiwiY29udGVudCI6W3sidHlwZSI6Im91dHB1dF90ZXh0IiwidGV4dCI6IlN5bnRoZXRpYyBhc3Npc3RhbnQgbWVzc2FnZSA2In1dfX0KeyJ0aW1lc3RhbXAiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsIm9yZGluYWwiOjQsInR5cGUiOiJldmVudF9tc2ciLCJwYXlsb2FkIjp7InR5cGUiOiJ0YXNrX2NvbXBsZXRlIiwidHVybl9pZCI6InR1cm4tNiIsImxhc3RfYWdlbnRfbWVzc2FnZSI6IlN5bnRoZXRpYyBhc3Npc3RhbnQgbWVzc2FnZSA2Iiwic3RhcnRlZF9hdCI6MTc4MDI3MjAwMDAwMCwiY29tcGxldGVkX2F0IjoxNzgwMjcyMDAxMDAwLCJkdXJhdGlvbl9tcyI6MTAwMCwidGltZV90b19maXJzdF90b2tlbl9tcyI6MX19Cg==",
+      "path": "archived_sessions/rollout-2026-06-01T00-00-00-00000000-0000-7000-8000-000000000006.jsonl"
+    }
+  ],
+  "sqlite": [
+    {
+      "objects": [
+        {
+          "name": "idx_projects_position",
+          "sql": "CREATE INDEX idx_projects_position\n    ON projects(position ASC, id ASC)",
+          "type": "index"
+        },
+        {
+          "name": "idx_thread_attachments_thread_created_id",
+          "sql": "CREATE INDEX idx_thread_attachments_thread_created_id\n    ON thread_attachments(thread_id, created_at, id)",
+          "type": "index"
+        },
+        {
+          "name": "idx_thread_dynamic_tools_thread",
+          "sql": "CREATE INDEX idx_thread_dynamic_tools_thread ON thread_dynamic_tools(thread_id)",
+          "type": "index"
+        },
+        {
+          "name": "idx_thread_spawn_edges_parent_status",
+          "sql": "CREATE INDEX idx_thread_spawn_edges_parent_status\n    ON thread_spawn_edges(parent_thread_id, status)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_archived",
+          "sql": "CREATE INDEX idx_threads_archived ON threads(archived)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_archived_cwd_created_at_ms",
+          "sql": "CREATE INDEX idx_threads_archived_cwd_created_at_ms ON threads(archived, cwd, created_at_ms DESC, id DESC)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_archived_cwd_recency_at_ms",
+          "sql": "CREATE INDEX idx_threads_archived_cwd_recency_at_ms\n    ON threads(archived, cwd, recency_at_ms DESC, id DESC)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_archived_cwd_updated_at_ms",
+          "sql": "CREATE INDEX idx_threads_archived_cwd_updated_at_ms ON threads(archived, cwd, updated_at_ms DESC, id DESC)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_created_at",
+          "sql": "CREATE INDEX idx_threads_created_at ON threads(created_at DESC, id DESC)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_created_at_ms",
+          "sql": "CREATE INDEX idx_threads_created_at_ms ON threads(created_at_ms DESC, id DESC)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_pinned_recency_at_ms",
+          "sql": "CREATE INDEX idx_threads_pinned_recency_at_ms\n    ON threads(archived, recency_at_ms DESC, id DESC)\n    WHERE is_pinned = 1 AND preview <> ''",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_project_id",
+          "sql": "CREATE INDEX idx_threads_project_id\n    ON threads(project_id, archived, created_at_ms DESC, id DESC)\n    WHERE project_id IS NOT NULL",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_project_recency",
+          "sql": "CREATE INDEX idx_threads_project_recency\n    ON threads(project_id, recency_at_ms DESC)\n    WHERE archived = 0 AND project_id IS NOT NULL",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_provider",
+          "sql": "CREATE INDEX idx_threads_provider ON threads(model_provider)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_recency_at_ms",
+          "sql": "CREATE INDEX idx_threads_recency_at_ms\n    ON threads(recency_at_ms DESC, id DESC)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_section_position",
+          "sql": "CREATE INDEX idx_threads_section_position\n    ON threads(archived, thread_section_id, section_position ASC, id ASC)\n    WHERE thread_section_id IS NOT NULL",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_section_recency_at_ms",
+          "sql": "CREATE INDEX idx_threads_section_recency_at_ms\n    ON threads(archived, thread_section_id, recency_at_ms DESC, id DESC)\n    WHERE thread_section_id IS NOT NULL",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_source",
+          "sql": "CREATE INDEX idx_threads_source ON threads(source)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_updated_at",
+          "sql": "CREATE INDEX idx_threads_updated_at ON threads(updated_at DESC, id DESC)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_updated_at_ms",
+          "sql": "CREATE INDEX idx_threads_updated_at_ms ON threads(updated_at_ms DESC, id DESC)",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_visible_created_at_ms",
+          "sql": "CREATE INDEX idx_threads_visible_created_at_ms\n    ON threads(archived, created_at_ms DESC)\n    WHERE preview <> ''",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_visible_recency_at_ms",
+          "sql": "CREATE INDEX idx_threads_visible_recency_at_ms\n    ON threads(archived, recency_at_ms DESC, id DESC)\n    WHERE preview <> ''",
+          "type": "index"
+        },
+        {
+          "name": "idx_threads_visible_updated_at_ms",
+          "sql": "CREATE INDEX idx_threads_visible_updated_at_ms\n    ON threads(archived, updated_at_ms DESC)\n    WHERE preview <> ''",
+          "type": "index"
+        },
+        {
+          "name": "_sqlx_migrations",
+          "sql": "CREATE TABLE _sqlx_migrations (\n    version BIGINT PRIMARY KEY,\n    description TEXT NOT NULL,\n    installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    success BOOLEAN NOT NULL,\n    checksum BLOB NOT NULL,\n    execution_time BIGINT NOT NULL\n)",
+          "type": "table"
+        },
+        {
+          "name": "backfill_state",
+          "sql": "CREATE TABLE backfill_state (\n    id INTEGER PRIMARY KEY CHECK (id = 1),\n    status TEXT NOT NULL,\n    last_watermark TEXT,\n    last_success_at INTEGER,\n    updated_at INTEGER NOT NULL\n)",
+          "type": "table"
+        },
+        {
+          "name": "external_agent_config_imports",
+          "sql": "CREATE TABLE external_agent_config_imports (\n    import_id TEXT PRIMARY KEY,\n    completed_at_ms INTEGER NOT NULL,\n    successes TEXT NOT NULL,\n    failures TEXT NOT NULL\n, provider_id TEXT)",
+          "type": "table"
+        },
+        {
+          "name": "project_idempotency_keys",
+          "sql": "CREATE TABLE project_idempotency_keys (\n    key TEXT PRIMARY KEY,\n    project_id TEXT NOT NULL,\n    created_at_ms INTEGER NOT NULL\n)",
+          "type": "table"
+        },
+        {
+          "name": "project_roots",
+          "sql": "CREATE TABLE project_roots (\n    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,\n    position INTEGER NOT NULL,\n    path TEXT NOT NULL,\n    PRIMARY KEY (project_id, position)\n)",
+          "type": "table"
+        },
+        {
+          "name": "projects",
+          "sql": "CREATE TABLE projects (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    metadata TEXT NOT NULL DEFAULT '{}',\n    position INTEGER NOT NULL,\n    created_at_ms INTEGER NOT NULL,\n    updated_at_ms INTEGER NOT NULL\n)",
+          "type": "table"
+        },
+        {
+          "name": "remote_control_enrollments",
+          "sql": "CREATE TABLE remote_control_enrollments (\n    websocket_url TEXT NOT NULL,\n    account_id TEXT NOT NULL,\n    app_server_client_name TEXT NOT NULL,\n    server_id TEXT NOT NULL,\n    environment_id TEXT NOT NULL,\n    server_name TEXT NOT NULL,\n    updated_at INTEGER NOT NULL, remote_control_enabled INTEGER,\n    PRIMARY KEY (websocket_url, account_id, app_server_client_name)\n)",
+          "type": "table"
+        },
+        {
+          "name": "rollout_migration_skipped_rollouts",
+          "sql": "CREATE TABLE rollout_migration_skipped_rollouts (\n    migration_id TEXT NOT NULL,\n    rollout_path TEXT NOT NULL,\n    rollout_size_bytes INTEGER NOT NULL,\n    rollout_modified_at_ns INTEGER NOT NULL,\n    skip_reason TEXT NOT NULL,\n    skipped_at INTEGER NOT NULL,\n    PRIMARY KEY (migration_id, rollout_path)\n)",
+          "type": "table"
+        },
+        {
+          "name": "rollout_migration_state",
+          "sql": "CREATE TABLE rollout_migration_state (\n    migration_id TEXT PRIMARY KEY,\n    last_checked_thread_created_at INTEGER,\n    last_checked_thread_id TEXT,\n    updated_at INTEGER NOT NULL\n)",
+          "type": "table"
+        },
+        {
+          "name": "sqlite_sequence",
+          "sql": "CREATE TABLE sqlite_sequence(name,seq)",
+          "type": "table"
+        },
+        {
+          "name": "thread_attachments",
+          "sql": "CREATE TABLE \"thread_attachments\" (\n    id TEXT PRIMARY KEY,\n    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,\n    attachment_type TEXT NOT NULL,\n    identity_key TEXT NOT NULL,\n    payload TEXT NOT NULL,\n    created_at INTEGER NOT NULL,\n    UNIQUE (thread_id, attachment_type, identity_key)\n)",
+          "type": "table"
+        },
+        {
+          "name": "thread_dynamic_tools",
+          "sql": "CREATE TABLE thread_dynamic_tools (\n    thread_id TEXT NOT NULL,\n    position INTEGER NOT NULL,\n    name TEXT NOT NULL,\n    description TEXT NOT NULL,\n    input_schema TEXT NOT NULL, defer_loading INTEGER NOT NULL DEFAULT 0, namespace TEXT,\n    PRIMARY KEY(thread_id, position),\n    FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE\n)",
+          "type": "table"
+        },
+        {
+          "name": "thread_sections",
+          "sql": "CREATE TABLE thread_sections (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL\n, appearance TEXT)",
+          "type": "table"
+        },
+        {
+          "name": "thread_spawn_edges",
+          "sql": "CREATE TABLE thread_spawn_edges (\n    parent_thread_id TEXT NOT NULL,\n    child_thread_id TEXT NOT NULL PRIMARY KEY,\n    status TEXT NOT NULL\n)",
+          "type": "table"
+        },
+        {
+          "name": "threads",
+          "sql": "CREATE TABLE threads (\n    id TEXT PRIMARY KEY,\n    rollout_path TEXT NOT NULL,\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL,\n    source TEXT NOT NULL,\n    model_provider TEXT NOT NULL,\n    cwd TEXT NOT NULL,\n    title TEXT NOT NULL,\n    sandbox_policy TEXT NOT NULL,\n    approval_mode TEXT NOT NULL,\n    tokens_used INTEGER NOT NULL DEFAULT 0,\n    has_user_event INTEGER NOT NULL DEFAULT 0,\n    archived INTEGER NOT NULL DEFAULT 0,\n    archived_at INTEGER,\n    git_sha TEXT,\n    git_branch TEXT,\n    git_origin_url TEXT\n, cli_version TEXT NOT NULL DEFAULT '', first_user_message TEXT NOT NULL DEFAULT '', agent_nickname TEXT, agent_role TEXT, memory_mode TEXT NOT NULL DEFAULT 'enabled', model TEXT, reasoning_effort TEXT, agent_path TEXT, created_at_ms INTEGER, updated_at_ms INTEGER, thread_source TEXT, preview TEXT NOT NULL DEFAULT '', recency_at INTEGER NOT NULL DEFAULT 0, recency_at_ms INTEGER NOT NULL DEFAULT 0, history_mode TEXT NOT NULL DEFAULT 'legacy', name TEXT, is_pinned INTEGER NOT NULL DEFAULT 0, thread_section_id TEXT\n    REFERENCES thread_sections(id) ON DELETE SET NULL, section_position INTEGER, section_entered_at_ms INTEGER, project_id TEXT\n    REFERENCES projects(id) ON DELETE SET NULL, originator TEXT, daybreak_enabled BOOLEAN, creator_user_id TEXT, creator_account_id TEXT)",
+          "type": "table"
+        },
+        {
+          "name": "threads_created_at_ms_after_insert",
+          "sql": "CREATE TRIGGER threads_created_at_ms_after_insert\nAFTER INSERT ON threads\nWHEN NEW.created_at_ms IS NULL\nBEGIN\n    UPDATE threads\n    SET created_at_ms = NEW.created_at * 1000\n    WHERE id = NEW.id;\nEND",
+          "type": "trigger"
+        },
+        {
+          "name": "threads_created_at_ms_after_update",
+          "sql": "CREATE TRIGGER threads_created_at_ms_after_update\nAFTER UPDATE OF created_at ON threads\nWHEN NEW.created_at != OLD.created_at\n AND NEW.created_at_ms IS OLD.created_at_ms\nBEGIN\n    UPDATE threads\n    SET created_at_ms = NEW.created_at * 1000\n    WHERE id = NEW.id;\nEND",
+          "type": "trigger"
+        },
+        {
+          "name": "threads_recency_at_after_insert",
+          "sql": "CREATE TRIGGER threads_recency_at_after_insert\nAFTER INSERT ON threads\nWHEN NEW.recency_at_ms = 0\nBEGIN\n    UPDATE threads\n    SET recency_at = NEW.updated_at,\n        recency_at_ms = COALESCE(NEW.updated_at_ms, NEW.updated_at * 1000)\n    WHERE id = NEW.id;\nEND",
+          "type": "trigger"
+        },
+        {
+          "name": "threads_updated_at_ms_after_insert",
+          "sql": "CREATE TRIGGER threads_updated_at_ms_after_insert\nAFTER INSERT ON threads\nWHEN NEW.updated_at_ms IS NULL\nBEGIN\n    UPDATE threads\n    SET updated_at_ms = NEW.updated_at * 1000\n    WHERE id = NEW.id;\nEND",
+          "type": "trigger"
+        },
+        {
+          "name": "threads_updated_at_ms_after_update",
+          "sql": "CREATE TRIGGER threads_updated_at_ms_after_update\nAFTER UPDATE OF updated_at ON threads\nWHEN NEW.updated_at != OLD.updated_at\n AND NEW.updated_at_ms IS OLD.updated_at_ms\nBEGIN\n    UPDATE threads\n    SET updated_at_ms = NEW.updated_at * 1000\n    WHERE id = NEW.id;\nEND",
+          "type": "trigger"
+        }
+      ],
+      "path": "state_5.sqlite",
+      "rows": {
+        "_sqlx_migrations": [
+          [
+            1,
+            "threads",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "Yn7xkWTJuymKDNmZRZgcm3vaPZ5s8S6zUUXjsdO/fPh0Dw26oLR1GF/CmTOXB4BJ",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            10,
+            "logs process id",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "itrxNl+OXe66aL3u6f2DsJSoe9qzZNlatccU97i9ldw7OFdocUcDEhVMnUHo8Q+T",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            11,
+            "logs partition prune indexes",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "MezsvQfwRFLQ3FEn2CTtGDBWuZAKMapzk4ekrvIyAW2XURCCmBSEH7a/P9I2NLeZ",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            12,
+            "logs estimated bytes",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "ABKiE+0l8s+AbCUwxIfrsAtPEC9ZYNGoUhVKD3fSXJ6fffKVUPrrMOuv8Vomx9YE",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            13,
+            "threads agent nickname",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "BVJqCQCoQwUjqaBZMuphMC/OIHgrJFSYVlwbmi39EM9cSZMgibSWriOvRPbF92r0",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            14,
+            "agent jobs",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "TS+7JELFxcfEe0JUtbjcLFISn2XEqVKnnx7FxA+wdIMyZCnOWs29NyvJJiNSy2J3",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            15,
+            "agent jobs max runtime seconds",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "Duzm21nJSPqmYIUmr0QKn1P1qYLSfz6GbNnxQBwuWbxh+DgbWhyXRKyyMvUNtJPl",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            16,
+            "memory usage",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "R2j3Q+mBKTc1xuB7AoLsis6Yr3IAWdaFVbF5edKMlLDIk6l6lQ1eMnWLxtktj+b/",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            17,
+            "phase2 selection flag",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "TL2y7f6/YECFj/wZPP+jbms/v1CPhBitBzCBu/z1nVPUI7brTA3tIGq01MGg7+2U",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            18,
+            "phase2 selection snapshot",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "pDYwA7xE8KSuHu1TtTa3F1+Xhj6miBoFncZkLnDikhV2IEaXzsI0X1YOZf9/v0RV",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            19,
+            "thread dynamic tools defer loading",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "OITALwgPAYTpK2IPhw37uECo7F384v5kVd2Bl/zSfX3YbmOtbsfECRoRYdntGZ+N",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            2,
+            "logs",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "Uhtyy8BMfQOx5K743A/e5nLx9/WIE4WlWg6Tfk6+h6P2e8pNP2tZr7yafKcjyChW",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            20,
+            "threads model reasoning effort",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "B2c/SFn3QBNFaauWBnYNgXPtbfktpHyG+9DO6zM+GKt6yR1SWrjBFQPEIWT9QWeu",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            21,
+            "thread spawn edges",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "6hrr5PWh1WyO/8wV9wXCcidd2K3+sBvJfT97KDR0o7jCsMjGneVXhui9oXyub03n",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            22,
+            "threads agent path",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "Fg/gG3V90G+Vc7kDCVLQIfKxSHMr6l/F9a4J6SJ/P4PKZ2aV7a+FAmafy1RhGdyU",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            23,
+            "drop logs",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "5sdIqaGChuTHc//g2tZZ8W+35bewMiNYFZkcQF8tMsBo8+3ekg0Pz1ibaHv/z+4u",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            24,
+            "remote control enrollments",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "6SqlJrHzbib2IhwEpnHweyfeLnpREtk6jDr4Fqh4RueATV+61onmHPTskf15072K",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            25,
+            "thread timestamps millis",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "1vtR15lBuTwyeP4qigxvqIJAe3txbjLXIynwt7YMGBpC9J5WzVUjFe+wQCoRHt4S",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            26,
+            "thread dynamic tools namespace",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "bGKjJdO5yo5CTqy544kNjZ3lfDcl4tH6MMN0Oud5/KKWk4cXQ1nfsm5JIHka5+gx",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            27,
+            "threads cwd sort indexes",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "2E3KagOeAEwMfQbFoWwszDYxN1N/PdmJj1C7ATzpBnFAdhuH1YynQtdp01l2hj/D",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            28,
+            "device key bindings",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "70StqikeQN/mt0480llxGtrhPwHFWUsXfQji0gQaZ+04E/7s8ElmKq7Q9ja9P0rD",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            29,
+            "thread goals",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "6ex2+X2/Qc5JSd4ySiomU4wgJcCsTycrd6hSlw+xS37JcNaXinZfka4XHc6cDkFJ",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            3,
+            "logs thread id",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "5YooYr22bTJ05gFEom3J1ou+//g0zSm4K3QPOPz5WGKTT0EmZdmFcVFng56PDrN3",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            30,
+            "threads thread source",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "gMHNrNRSC0Kxi5YBZJEmhVkafuBBZF81YJou4nkutHS3sLdYNmVWmC2M3irLWDZy",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            31,
+            "drop device key bindings",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "lDZ1qbPcktCycxrn0v4yT/GkC2NmudXYtMtHyohcCL6267HXdqWkfIeLQJTd5w6g",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            32,
+            "threads preview",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "PAHWFcXjq6D9hYtxaOc4gVmNfTOg7MQVJ732WVoZnRrsL/nzswAKVyQcUA2Bs0JZ",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            33,
+            "thread goal stopped statuses",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "SQSq41Tj2M4yrCHSrlef1whEauHfsmSfyd0i3JJ5uRoruwLm8Bs+Cr0QiBd78vAw",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            34,
+            "drop thread goals",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "1v6nOcduve81oj8G5U77WQTXmH+2tmPbHryY65sZIwX0VJMr+6oiMa7cpiCZA6Xz",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            35,
+            "drop memory tables",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "17VqywfJaFi9x8pMU9tR63HGoZ7yxST/aMJmCm/g0jIRptOcuQXwHEL/t8jukTu8",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            36,
+            "threads visible sort indexes",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "Y4H3u0w2vkHGEGuFI+psaPWgAnOlUiFVt7hLrSbRUkNvM3XfcJfOOr8kIa7DJkHt",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            37,
+            "remote control enrollments enabled",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "9qWrDbNrueRatShbVgkPtFPfCk1NjWLqziNPC1V/QgPGxFX8Z719bnJiPDl57JQF",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            38,
+            "external agent config imports",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "53eFIsvlKfXiuhebUCrujlwhJyrYIOZyqwpWX37cm9DykXHM+YFcCswPiergorH8",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            39,
+            "threads recency at",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "whez0UwIwjYD9IWvEUUu4raPZfqNuvIV8z9TtgjAkr6HON4/Y9ajjxIO3qWvJHwX",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            4,
+            "thread dynamic tools",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "itwlE2bkx+XqeLYgrHH0xL37jwSL+fL9cgQibPulTI6D/J2D/B7DNLxoO7f20Nio",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            40,
+            "threads history mode",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "p6mWdPkKQxhOQ9ZllcTx2lCuhxWlv8sVeaK3sQZoM11/era28teno3knJ3PYA6kU",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            41,
+            "threads name",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "Dcc02+TLzFrVqLvC/cHPdw3eo8tT6zbFWk2m+i6L5MyOaGcvQ6yVPnJ+QV5FxQp4",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            42,
+            "drop agent jobs",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "z9xP1HMo0bZ8DHVVEl3k+0rdWztX/TGsGYfk2LDJmx9UGNue5+whWK7YouPfz9Y2",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            43,
+            "threads is pinned",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "YFEo5yK9JSHH6XnplhwWcGQ15EKz46jvo29rFsQuODMJCQbZpi/eCXoQm3jinagw",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            44,
+            "external agent config imports provider id",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "XSkiO9HK/kVqSvmSpUXo7EILcTMesSp0J+JlErikQRfZRFuDVi8JWzpaDxHE8JHS",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            45,
+            "threads section",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "p/rcjK6otqvrEI9YipG45dHJ4mRc6ZDyJRufAjTm5T14/IVPHIjHIXzBQwFlOdaR",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            46,
+            "threads section order",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "Y63fYRXD+xoiqIYQjObr/1zYQI8hlgbcL4OWg2QY5W1b4qbeew34dxGaKAlu5n0i",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            47,
+            "rollout migration state",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "GuEX5KtAgT3its/tUhWFpTlqjctyd5I9U57REfXnZCR4cTHvHeNTvl3XjoIo8gTM",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            48,
+            "thread section appearance",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "nSmDM/dSMBBQIERoUAn/4e0Yw/7X8B+yANYiUvkKsNiXzPBeR4+QFQuUHqbAvUWc",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            49,
+            "projects",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "+vRcOSu4VyBiu9UvlwKWbPYuPRlaFjP1TP4bfctYZaP5Udx1yXUXncmg7mOfdCan",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            5,
+            "threads cli version",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "GsZPheCD5bSbl0v0mPw5xjDwAyBX+0v0yzFwhhn6xagBifJhzz442v2S3EBuc8Ig",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            50,
+            "threads section empty preview indexes",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "0oAulvX8GQD8bT1ZXwQOvKjSUxCunRSZoSuR8WNWF6310rSpPQgHIDoi9KbU7bd+",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            51,
+            "thread artifacts",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "IzYKA6f8MHw/1buLQytmA03Y+Glc26aYtFJ4wg3XEsGvR2uIThkiN9gLqgil8pUF",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            52,
+            "projects recency",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "Bx6WMT1ALkw9FW9iDz9itKRo2gDOMKR1dNJZRiPl6VTz7C8eVPBDqOS2AmQ+hot9",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            53,
+            "threads originator",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "6G73zLzIkbGvJ/au2ya/4215ydQF5I8wLrBTy1f/myTb6wR5tIsY4gdu+2v8SpKH",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            54,
+            "threads daybreak enabled",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "5iqZd9mcfqvza2exg9hkQ9BisKqNAYxC0SmYId5L9ZGC4WSUq4dP0tQIHvUQ51nx",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            55,
+            "thread attachments",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "barcVSez9X+jYMXZMZkoK6VKQrdZhVipdlvW3PEfVVFQ/meO2BY6uy4YYctR0ZbD",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            56,
+            "threads creator identity",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "XeRPrFUFJJvmb81kDprD02VQhUwNsScutSy7bD0YsgfbTLeCaG2BCJ5367V/aBmx",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            57,
+            "cleanup guardian thread metadata",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "cpVixXv6i0PVrjR2yZzvboGlRwmnQoMFfOjS1vVc+OriWU/bfP9COOvh5IHnwEnm",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            6,
+            "memories",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "ogP8S1l+FCC//cTgDiFHmLIc9/ySHYvW8InHUkj7aktJQsl6H44Cceyozzs+XnqA",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            7,
+            "threads first user message",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "fjWkZN9tTIJpTeUIZbo/6RBPnhOFozvn1jOrS41s9gt/Np/gg9MSUf13t1+i1h+C",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            8,
+            "backfill state",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "qj8of3pEhVTnrwHyWfCHHOkKzhp9S46710yHrlfD4hEZ9+7IucLp9KnnbmOg8LYK",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            9,
+            "stage1 outputs rollout slug",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "i0aTYHd+bdbCHT8OuTSBJRhGsKUOCkTrDb7koKMrcgZ2il2DpfzsMMb9LkPXVf8b",
+              "bytes": 48
+            },
+            0
+          ]
+        ],
+        "backfill_state": [
+          [
+            1,
+            "complete",
+            null,
+            1767225600,
+            1767225600
+          ]
+        ],
+        "external_agent_config_imports": [],
+        "project_idempotency_keys": [],
+        "project_roots": [],
+        "projects": [],
+        "remote_control_enrollments": [],
+        "rollout_migration_skipped_rollouts": [],
+        "rollout_migration_state": [],
+        "thread_attachments": [],
+        "thread_dynamic_tools": [],
+        "thread_sections": [
+          [
+            "00000000-0000-7000-8000-000000000001",
+            "Pinned",
+            null
+          ]
+        ],
+        "thread_spawn_edges": [
+          [
+            "00000000-0000-7000-8000-000000000002",
+            "00000000-0000-7000-8000-000000000003",
+            "open"
+          ],
+          [
+            "00000000-0000-7000-8000-000000000003",
+            "00000000-0000-7000-8000-000000000004",
+            "open"
+          ]
+        ],
+        "threads": [
+          [
+            "00000000-0000-7000-8000-000000000002",
+            "{home}/sessions/2026/06/01/rollout-2026-06-01T00-00-00-00000000-0000-7000-8000-000000000002.jsonl",
+            1780272000,
+            1780272001,
+            "vscode",
+            "openai",
+            "/synthetic/project",
+            "Synthetic history 2",
+            "{\"type\":\"read-only\"}",
+            "never",
+            0,
+            1,
+            0,
+            null,
+            null,
+            null,
+            null,
+            "synthetic",
+            "Synthetic user message 2",
+            null,
+            null,
+            "enabled",
+            "synthetic-model",
+            null,
+            null,
+            1780272000000,
+            1780272001000,
+            null,
+            "Synthetic history 2",
+            1780272001,
+            1780272001000,
+            "paginated",
+            null,
+            0,
+            null,
+            null,
+            null,
+            null,
+            "fixture",
+            null,
+            null,
+            null
+          ],
+          [
+            "00000000-0000-7000-8000-000000000003",
+            "{home}/sessions/2026/06/01/rollout-2026-06-01T00-00-00-00000000-0000-7000-8000-000000000003.jsonl",
+            1780272000,
+            1780272001,
+            "{\"subagent\":{\"thread_spawn\":{\"parent_thread_id\":\"00000000-0000-7000-8000-000000000002\",\"depth\":1}}}",
+            "openai",
+            "/synthetic/project",
+            "Synthetic history 3",
+            "{\"type\":\"read-only\"}",
+            "never",
+            0,
+            1,
+            0,
+            null,
+            null,
+            null,
+            null,
+            "synthetic",
+            "Synthetic user message 3",
+            null,
+            null,
+            "enabled",
+            "synthetic-model",
+            null,
+            null,
+            1780272000000,
+            1780272001000,
+            "subagent",
+            "Synthetic history 3",
+            1780272001,
+            1780272001000,
+            "paginated",
+            null,
+            0,
+            null,
+            null,
+            null,
+            null,
+            "fixture",
+            null,
+            null,
+            null
+          ],
+          [
+            "00000000-0000-7000-8000-000000000004",
+            "{home}/sessions/2026/06/01/rollout-2026-06-01T00-00-00-00000000-0000-7000-8000-000000000004.jsonl",
+            1780272000,
+            1780272001,
+            "{\"subagent\":{\"thread_spawn\":{\"parent_thread_id\":\"00000000-0000-7000-8000-000000000003\",\"depth\":2}}}",
+            "openai",
+            "/synthetic/project",
+            "Synthetic history 4",
+            "{\"type\":\"read-only\"}",
+            "never",
+            0,
+            1,
+            0,
+            null,
+            null,
+            null,
+            null,
+            "synthetic",
+            "Synthetic user message 4",
+            null,
+            null,
+            "enabled",
+            "synthetic-model",
+            null,
+            null,
+            1780272000000,
+            1780272001000,
+            "subagent",
+            "Synthetic history 4",
+            1780272001,
+            1780272001000,
+            "paginated",
+            null,
+            0,
+            null,
+            null,
+            null,
+            null,
+            "fixture",
+            null,
+            null,
+            null
+          ],
+          [
+            "00000000-0000-7000-8000-000000000005",
+            "{home}/sessions/2026/06/01/rollout-2026-06-01T00-00-00-00000000-0000-7000-8000-000000000005.jsonl",
+            1780272000,
+            1780272001,
+            "vscode",
+            "openai",
+            "/synthetic/project",
+            "Synthetic history 5",
+            "{\"type\":\"read-only\"}",
+            "never",
+            0,
+            1,
+            0,
+            null,
+            null,
+            null,
+            null,
+            "synthetic",
+            "Synthetic user message 5",
+            null,
+            null,
+            "enabled",
+            "synthetic-model",
+            null,
+            null,
+            1780272000000,
+            1780272001000,
+            "user",
+            "Synthetic history 5",
+            1780272001,
+            1780272001000,
+            "paginated",
+            null,
+            0,
+            null,
+            null,
+            null,
+            null,
+            "fixture",
+            null,
+            null,
+            null
+          ],
+          [
+            "00000000-0000-7000-8000-000000000006",
+            "{home}/archived_sessions/rollout-2026-06-01T00-00-00-00000000-0000-7000-8000-000000000006.jsonl",
+            1780272000,
+            1780272001,
+            "vscode",
+            "openai",
+            "/synthetic/project",
+            "Synthetic history 6",
+            "{\"type\":\"read-only\"}",
+            "never",
+            0,
+            1,
+            1,
+            1780272001,
+            null,
+            null,
+            null,
+            "synthetic",
+            "Synthetic user message 6",
+            null,
+            null,
+            "enabled",
+            "synthetic-model",
+            null,
+            null,
+            1780272000000,
+            1780272001000,
+            null,
+            "Synthetic history 6",
+            1780272001,
+            1780272001000,
+            "paginated",
+            null,
+            0,
+            null,
+            null,
+            null,
+            null,
+            "fixture",
+            null,
+            null,
+            null
+          ]
+        ]
+      }
+    },
+    {
+      "objects": [
+        {
+          "name": "idx_thread_items_by_turn_page",
+          "sql": "CREATE INDEX idx_thread_items_by_turn_page\n    ON thread_items(thread_id, turn_id, rollout_ordinal)",
+          "type": "index"
+        },
+        {
+          "name": "idx_thread_items_by_turn_updated_page",
+          "sql": "CREATE INDEX idx_thread_items_by_turn_updated_page\n    ON thread_items(thread_id, turn_id, updated_at_ordinal)",
+          "type": "index"
+        },
+        {
+          "name": "idx_thread_items_page",
+          "sql": "CREATE UNIQUE INDEX idx_thread_items_page\n    ON thread_items(thread_id, rollout_ordinal)",
+          "type": "index"
+        },
+        {
+          "name": "idx_thread_items_updated_page",
+          "sql": "CREATE INDEX idx_thread_items_updated_page\n    ON thread_items(thread_id, updated_at_ordinal)",
+          "type": "index"
+        },
+        {
+          "name": "idx_thread_items_user_messages",
+          "sql": "CREATE INDEX idx_thread_items_user_messages\n    ON thread_items(thread_id, rollout_ordinal)\n    WHERE item_type = 'userMessage'",
+          "type": "index"
+        },
+        {
+          "name": "idx_thread_realtime_items_boundary",
+          "sql": "CREATE INDEX idx_thread_realtime_items_boundary\n    ON thread_realtime_items(thread_id, rollout_ordinal)\n    WHERE item_type IN ('realtime_session_started', 'realtime_session_closed')",
+          "type": "index"
+        },
+        {
+          "name": "idx_thread_realtime_items_page",
+          "sql": "CREATE UNIQUE INDEX idx_thread_realtime_items_page\n    ON thread_realtime_items(thread_id, rollout_ordinal)",
+          "type": "index"
+        },
+        {
+          "name": "idx_thread_turns_end_page",
+          "sql": "CREATE INDEX idx_thread_turns_end_page\n    ON thread_turns(thread_id, rollout_end_ordinal, turn_id)\n    WHERE rollout_end_ordinal IS NOT NULL",
+          "type": "index"
+        },
+        {
+          "name": "idx_thread_turns_page",
+          "sql": "CREATE UNIQUE INDEX idx_thread_turns_page\n    ON thread_turns(thread_id, rollout_ordinal)",
+          "type": "index"
+        },
+        {
+          "name": "_sqlx_migrations",
+          "sql": "CREATE TABLE _sqlx_migrations (\n    version BIGINT PRIMARY KEY,\n    description TEXT NOT NULL,\n    installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    success BOOLEAN NOT NULL,\n    checksum BLOB NOT NULL,\n    execution_time BIGINT NOT NULL\n)",
+          "type": "table"
+        },
+        {
+          "name": "thread_history_projection_state",
+          "sql": "CREATE TABLE thread_history_projection_state (\n    thread_id TEXT PRIMARY KEY,\n    next_rollout_byte_offset INTEGER NOT NULL,\n    next_rollout_ordinal INTEGER NOT NULL\n)",
+          "type": "table"
+        },
+        {
+          "name": "thread_items",
+          "sql": "CREATE TABLE thread_items (\n    thread_id TEXT NOT NULL,\n    turn_id TEXT NOT NULL,\n    item_id TEXT NOT NULL,\n    rollout_ordinal INTEGER NOT NULL,\n    created_at_ms INTEGER NOT NULL,\n    item_json TEXT NOT NULL, item_type TEXT NOT NULL DEFAULT '', updated_at_ordinal INTEGER NOT NULL DEFAULT 0, started_at_ms INTEGER, completed_at_ms INTEGER,\n    PRIMARY KEY (thread_id, turn_id, item_id)\n)",
+          "type": "table"
+        },
+        {
+          "name": "thread_realtime_items",
+          "sql": "CREATE TABLE thread_realtime_items (\n    thread_id TEXT NOT NULL,\n    item_id TEXT NOT NULL,\n    rollout_ordinal INTEGER NOT NULL,\n    created_at_ms INTEGER NOT NULL,\n    item_type TEXT NOT NULL,\n    item_json TEXT NOT NULL,\n    PRIMARY KEY (thread_id, item_id)\n)",
+          "type": "table"
+        },
+        {
+          "name": "thread_turns",
+          "sql": "CREATE TABLE thread_turns (\n    thread_id TEXT NOT NULL,\n    turn_id TEXT NOT NULL,\n    rollout_ordinal INTEGER NOT NULL,\n    status TEXT NOT NULL,\n    error_json TEXT,\n    started_at INTEGER,\n    completed_at INTEGER,\n    duration_ms INTEGER,\n    first_user_item_id TEXT,\n    final_agent_item_id TEXT, rollout_byte_offset INTEGER, rollout_end_ordinal INTEGER, rollout_end_byte_offset INTEGER,\n    PRIMARY KEY (thread_id, turn_id)\n)",
+          "type": "table"
+        },
+        {
+          "name": "thread_realtime_items_projection_cleanup",
+          "sql": "CREATE TRIGGER thread_realtime_items_projection_cleanup\n    AFTER DELETE ON thread_history_projection_state\nBEGIN\n    DELETE FROM thread_realtime_items WHERE thread_id = OLD.thread_id;\nEND",
+          "type": "trigger"
+        }
+      ],
+      "path": "thread_history_1.sqlite",
+      "rows": {
+        "_sqlx_migrations": [
+          [
+            1,
+            "thread history",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "KtmkqxffUR+3PwMzcTPelKFy3AofVym172H+EG2wPRpDvbWXiwy317x0Bx08o0qS",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            2,
+            "thread items item type",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "rmHbwaZCJTCqk5FNvKw2OgI4uGrhqdd+sEHHUzDhKDoPz5OgQ97u/Nb9LEA3aUvE",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            3,
+            "turn rollout positions",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "pR2ioR33dg2PjKsiHoKzbOjAow8W1E82Aufw+8YiynLxw+Ps8ioZThLCIivctRr+",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            4,
+            "thread items updated at ordinal",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "ZfM7FxvTqv6dJHKLLKalxyCjq1Su1HKZj4rPdInw01st/RIlii0Xvpk78XCYteUM",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            5,
+            "thread realtime items",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "L9rY42HcH4KK+s8QvS6x9RGwLe73+iNKnEEtAhHeEm0c+tVLF1ycOpcxVI+QhLQ3",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            6,
+            "thread turn ends",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "Au2C03WttYtcDAngFU8zMdUHzqevRG0SMk5WU826mpH4Sv04zyop8zAwYUaJ3rne",
+              "bytes": 48
+            },
+            0
+          ],
+          [
+            7,
+            "thread item lifecycle timestamps",
+            "2026-01-01 00:00:00",
+            1,
+            {
+              "blobBase64": "kzSttM2nkhFqR7aaGeOECuOAawh3PvF5QEP+CqcokTYKyxoKhDEITVPFaEgsX90g",
+              "bytes": 48
+            },
+            0
+          ]
+        ],
+        "thread_history_projection_state": [
+          [
+            "00000000-0000-7000-8000-000000000002",
+            1174,
+            5
+          ],
+          [
+            "00000000-0000-7000-8000-000000000003",
+            1323,
+            5
+          ],
+          [
+            "00000000-0000-7000-8000-000000000004",
+            1323,
+            5
+          ],
+          [
+            "00000000-0000-7000-8000-000000000005",
+            610,
+            7
+          ],
+          [
+            "00000000-0000-7000-8000-000000000006",
+            1174,
+            5
+          ]
+        ],
+        "thread_items": [
+          [
+            "00000000-0000-7000-8000-000000000002",
+            "turn-2",
+            "user-2",
+            2,
+            1780272000000,
+            "{\"type\":\"userMessage\",\"id\":\"user-2\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Synthetic user message 2\",\"text_elements\":[]}]}",
+            "userMessage",
+            2,
+            1780272000000,
+            1780272001000
+          ],
+          [
+            "00000000-0000-7000-8000-000000000002",
+            "turn-2",
+            "assistant-2",
+            3,
+            1780272000000,
+            "{\"type\":\"agentMessage\",\"id\":\"assistant-2\",\"text\":\"Synthetic assistant message 2\"}",
+            "agentMessage",
+            3,
+            1780272000000,
+            1780272001000
+          ],
+          [
+            "00000000-0000-7000-8000-000000000003",
+            "turn-3",
+            "user-3",
+            2,
+            1780272000000,
+            "{\"type\":\"userMessage\",\"id\":\"user-3\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Synthetic user message 3\",\"text_elements\":[]}]}",
+            "userMessage",
+            2,
+            1780272000000,
+            1780272001000
+          ],
+          [
+            "00000000-0000-7000-8000-000000000003",
+            "turn-3",
+            "assistant-3",
+            3,
+            1780272000000,
+            "{\"type\":\"agentMessage\",\"id\":\"assistant-3\",\"text\":\"Synthetic assistant message 3\"}",
+            "agentMessage",
+            3,
+            1780272000000,
+            1780272001000
+          ],
+          [
+            "00000000-0000-7000-8000-000000000004",
+            "turn-4",
+            "user-4",
+            2,
+            1780272000000,
+            "{\"type\":\"userMessage\",\"id\":\"user-4\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Synthetic user message 4\",\"text_elements\":[]}]}",
+            "userMessage",
+            2,
+            1780272000000,
+            1780272001000
+          ],
+          [
+            "00000000-0000-7000-8000-000000000004",
+            "turn-4",
+            "assistant-4",
+            3,
+            1780272000000,
+            "{\"type\":\"agentMessage\",\"id\":\"assistant-4\",\"text\":\"Synthetic assistant message 4\"}",
+            "agentMessage",
+            3,
+            1780272000000,
+            1780272001000
+          ],
+          [
+            "00000000-0000-7000-8000-000000000005",
+            "turn-2",
+            "user-2",
+            2,
+            1780272000000,
+            "{\"type\":\"userMessage\",\"id\":\"user-2\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Synthetic user message 2\",\"text_elements\":[]}]}",
+            "userMessage",
+            2,
+            1780272000000,
+            1780272001000
+          ],
+          [
+            "00000000-0000-7000-8000-000000000005",
+            "turn-2",
+            "assistant-2",
+            3,
+            1780272000000,
+            "{\"type\":\"agentMessage\",\"id\":\"assistant-2\",\"text\":\"Synthetic assistant message 2\"}",
+            "agentMessage",
+            3,
+            1780272000000,
+            1780272001000
+          ],
+          [
+            "00000000-0000-7000-8000-000000000006",
+            "turn-6",
+            "user-6",
+            2,
+            1780272000000,
+            "{\"type\":\"userMessage\",\"id\":\"user-6\",\"clientId\":null,\"content\":[{\"type\":\"text\",\"text\":\"Synthetic user message 6\",\"text_elements\":[]}]}",
+            "userMessage",
+            2,
+            1780272000000,
+            1780272001000
+          ],
+          [
+            "00000000-0000-7000-8000-000000000006",
+            "turn-6",
+            "assistant-6",
+            3,
+            1780272000000,
+            "{\"type\":\"agentMessage\",\"id\":\"assistant-6\",\"text\":\"Synthetic assistant message 6\"}",
+            "agentMessage",
+            3,
+            1780272000000,
+            1780272001000
+          ]
+        ],
+        "thread_realtime_items": [],
+        "thread_turns": [
+          [
+            "00000000-0000-7000-8000-000000000002",
+            "turn-2",
+            1,
+            "completed",
+            null,
+            1780272000000,
+            1780272001000,
+            1000,
+            "user-2",
+            "assistant-2",
+            250,
+            5,
+            1174
+          ],
+          [
+            "00000000-0000-7000-8000-000000000003",
+            "turn-3",
+            1,
+            "completed",
+            null,
+            1780272000000,
+            1780272001000,
+            1000,
+            "user-3",
+            "assistant-3",
+            399,
+            5,
+            1323
+          ],
+          [
+            "00000000-0000-7000-8000-000000000004",
+            "turn-4",
+            1,
+            "completed",
+            null,
+            1780272000000,
+            1780272001000,
+            1000,
+            "user-4",
+            "assistant-4",
+            399,
+            5,
+            1323
+          ],
+          [
+            "00000000-0000-7000-8000-000000000006",
+            "turn-6",
+            1,
+            "completed",
+            null,
+            1780272000000,
+            1780272001000,
+            1000,
+            "user-6",
+            "assistant-6",
+            250,
+            5,
+            1174
+          ]
+        ]
+      }
+    }
+  ]
+}

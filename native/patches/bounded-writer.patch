@@ -1,0 +1,26 @@
+--- a/codex-rs/rollout/src/writer_lock.rs
++++ b/codex-rs/rollout/src/writer_lock.rs
+@@ -37,6 +37,23 @@
+             directory: codex_home.join(WRITER_LOCK_DIR),
+             cleanup_attempted: AtomicBool::new(false),
+         }
++    }
++
++    /// Acquires target ownership without sweeping unrelated stale lock files.
++    /// The existing coordination and guard release protocol is unchanged.
++    pub fn new_for_bounded_cleanup(codex_home: &Path) -> Self {
++        Self {
++            directory: codex_home.join(WRITER_LOCK_DIR),
++            cleanup_attempted: AtomicBool::new(true),
++        }
++    }
++
++    /// Lists the exact native lock paths used for one bounded cleanup target.
++    pub fn cleanup_lock_paths(&self, thread_id: ThreadId) -> [PathBuf; 2] {
++        [
++            self.directory.join(COORDINATION_LOCK_FILE),
++            self.directory.join(format!("{thread_id}.lock")),
++        ]
+     }
+ 
+     /// Acquires exclusive writer ownership, returning `WouldBlock` for an active writer.

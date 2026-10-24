@@ -1,0 +1,110 @@
+{
+  "objects": [
+    {
+      "name": "thread_spawn_edges",
+      "sql": "CREATE TABLE thread_spawn_edges (\n    parent_thread_id TEXT NOT NULL,\n    child_thread_id TEXT NOT NULL PRIMARY KEY,\n    status TEXT NOT NULL\n)",
+      "type": "table"
+    },
+    {
+      "name": "threads",
+      "sql": "CREATE TABLE threads (\n    id TEXT PRIMARY KEY,\n    rollout_path TEXT NOT NULL,\n    created_at INTEGER NOT NULL,\n    updated_at INTEGER NOT NULL,\n    source TEXT NOT NULL,\n    model_provider TEXT NOT NULL,\n    cwd TEXT NOT NULL,\n    title TEXT NOT NULL,\n    sandbox_policy TEXT NOT NULL,\n    approval_mode TEXT NOT NULL,\n    tokens_used INTEGER NOT NULL DEFAULT 0,\n    has_user_event INTEGER NOT NULL DEFAULT 0,\n    archived INTEGER NOT NULL DEFAULT 0,\n    archived_at INTEGER,\n    git_sha TEXT,\n    git_branch TEXT,\n    git_origin_url TEXT\n, cli_version TEXT NOT NULL DEFAULT '', first_user_message TEXT NOT NULL DEFAULT '', agent_nickname TEXT, agent_role TEXT, memory_mode TEXT NOT NULL DEFAULT 'enabled', model TEXT, reasoning_effort TEXT, agent_path TEXT, created_at_ms INTEGER, updated_at_ms INTEGER, thread_source TEXT, preview TEXT NOT NULL DEFAULT '', recency_at INTEGER NOT NULL DEFAULT 0, recency_at_ms INTEGER NOT NULL DEFAULT 0, history_mode TEXT NOT NULL DEFAULT 'legacy', name TEXT, is_pinned INTEGER NOT NULL DEFAULT 0, thread_section_id TEXT\n    REFERENCES thread_sections(id) ON DELETE SET NULL, section_position INTEGER, section_entered_at_ms INTEGER, project_id TEXT\n    REFERENCES projects(id) ON DELETE SET NULL, originator TEXT, daybreak_enabled BOOLEAN)",
+      "type": "table"
+    }
+  ],
+  "thread_spawn_edges": {
+    "columns": [
+      "parent_thread_id",
+      "child_thread_id",
+      "status"
+    ],
+    "rows": []
+  },
+  "threads": {
+    "columns": [
+      "id",
+      "rollout_path",
+      "created_at",
+      "updated_at",
+      "source",
+      "model_provider",
+      "cwd",
+      "title",
+      "sandbox_policy",
+      "approval_mode",
+      "tokens_used",
+      "has_user_event",
+      "archived",
+      "archived_at",
+      "git_sha",
+      "git_branch",
+      "git_origin_url",
+      "cli_version",
+      "first_user_message",
+      "agent_nickname",
+      "agent_role",
+      "memory_mode",
+      "model",
+      "reasoning_effort",
+      "agent_path",
+      "created_at_ms",
+      "updated_at_ms",
+      "thread_source",
+      "preview",
+      "recency_at",
+      "recency_at_ms",
+      "history_mode",
+      "name",
+      "is_pinned",
+      "thread_section_id",
+      "section_position",
+      "section_entered_at_ms",
+      "project_id",
+      "originator",
+      "daybreak_enabled"
+    ],
+    "rows": [
+      [
+        "11111111-1111-4111-8111-111111111111",
+        "/synthetic/sessions/rollout-2026-06-01T00-00-00-11111111-1111-4111-8111-111111111111.jsonl",
+        1780272000,
+        1780272000,
+        "cli",
+        "openai",
+        "/synthetic/project",
+        "Synthetic history",
+        "{\"type\":\"read-only\"}",
+        "never",
+        0,
+        1,
+        0,
+        null,
+        null,
+        null,
+        null,
+        "synthetic",
+        "Synthetic user message",
+        null,
+        null,
+        "enabled",
+        "synthetic-model",
+        null,
+        null,
+        1780272000000,
+        1780272000000,
+        null,
+        "Synthetic history",
+        1780272000,
+        1780272000000,
+        "paginated",
+        null,
+        0,
+        null,
+        null,
+        null,
+        null,
+        "fixture",
+        null
+      ]
+    ]
+  }
+}

@@ -1,0 +1,131 @@
+[project]
+name = "codex-session-gc"
+version = "0.2.0"
+description = "Garbage collection tools for Codex session data"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = [
+    "LICENSE",
+    "NOTICE",
+    "third_party/NATIVE_NOTICES.txt",
+    "third_party/RUST_LIBRARY_NOTICES.html",
+    "third_party/NOTICE_SOURCES.json",
+]
+requires-python = ">=3.14"
+classifiers = [
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "textual>=8.2.8,<9",
+    "mcp>=2.3.0,<3",
+]
+
+[project.urls]
+Repository = "https://github.com/YuriyKrasilnikov/codex-session-gc"
+Releases = "https://github.com/YuriyKrasilnikov/codex-session-gc/releases"
+Documentation = "https://github.com/YuriyKrasilnikov/codex-session-gc#readme"
+
+[project.scripts]
+codex-session-gc = "codex_session_gc.cli.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = [
+    ".mypy_cache",
+    ".ruff_cache",
+    ".uv-cache",
+    ".venv",
+    "__pycache__",
+    "dist",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codex_session_gc"]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "LICENSE",
+    "NOTICE",
+    "third_party",
+    "src/codex_session_gc",
+    "README.md",
+    "docs/contract.md",
+    "docs/recovery.md",
+    "docs/architecture.md",
+    "docs/compatibility.md",
+    "tests",
+    "native/README.md",
+    "native/build-inputs/provenance.json",
+    "native/helper/Cargo.toml",
+    "native/helper/Cargo.lock",
+    "native/helper/rust-toolchain.toml",
+    "native/helper/src",
+    "native/helper/tests",
+    "native/patches",
+    "native/tests",
+    "tools/build_release.py",
+    "pyproject.toml",
+    "uv.lock",
+]
+
+[dependency-groups]
+lint = [
+    "mypy>=1.20.0",
+    "ruff>=0.15.0",
+]
+test = [
+    "pytest>=8.3.0",
+]
+dev = [
+    "packaging>=25.0",
+    { include-group = "lint" },
+    { include-group = "test" },
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+respect-gitignore = false
+exclude = [
+    ".mypy_cache",
+    ".ruff_cache",
+    ".uv-cache",
+    ".venv",
+    "__pycache__",
+    "dist",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["COM812"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.14"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
+explicit_package_bases = true
+strict = true
+warn_unreachable = true
+strict_bytes = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+]

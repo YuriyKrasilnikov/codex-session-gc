@@ -1,0 +1,78 @@
+--- a/codex-rs/ext/agent-message-board/src/local/lifecycle.rs
++++ b/codex-rs/ext/agent-message-board/src/local/lifecycle.rs
+@@ -66,13 +66,25 @@
+             .begin_with("BEGIN IMMEDIATE")
+             .await
+             .map_err(storage_error)?;
++        Self::delete_board_rows_in(&mut tx, roots).await?;
++        tx.commit().await.map_err(storage_error)?;
++        pool.close().await;
++        Ok(())
++    }
++
++    /// Executes native root-board cleanup on the caller's retained transaction.
++    pub async fn delete_board_rows_in(
++        connection: &mut sqlx::SqliteConnection,
++        roots: &[SessionId],
++    ) -> Result<()> {
+         for root in roots {
+             sqlx::query("INSERT OR IGNORE INTO deleted_boards (board) VALUES (?)")
+                 .bind(root.to_string())
+-                .execute(&mut *tx)
++                .execute(&mut *connection)
+                 .await
+                 .map_err(storage_error)?;
+             for statement in [
++                "DELETE FROM board_templates WHERE board=?",
+                 "DELETE FROM subscriptions WHERE board=?",
+                 "DELETE FROM subscription_opt_outs WHERE board=?",
+                 "DELETE FROM posts WHERE board=?",
+@@ -80,13 +92,45 @@
+             ] {
+                 sqlx::query(statement)
+                     .bind(root.to_string())
+-                    .execute(&mut *tx)
++                    .execute(&mut *connection)
+                     .await
+                     .map_err(storage_error)?;
+             }
+         }
+-        tx.commit().await.map_err(storage_error)?;
+-        pool.close().await;
++        Ok(())
++    }
++
++    /// Returns the existing native board storage path.
++    pub fn cleanup_database_path(sqlite: &SqliteConfig) -> std::path::PathBuf {
++        sqlite.home().join(DATABASE_FILE)
++    }
++
++    /// Recognizes the exact board schema without changing source storage.
++    pub async fn validate_cleanup_schema(connection: &mut sqlx::SqliteConnection) -> Result<()> {
++        let reference = sqlx::sqlite::SqlitePoolOptions::new()
++            .max_connections(1)
++            .connect("sqlite::memory:")
++            .await
++            .map_err(storage_error)?;
++        sqlx::raw_sql(SCHEMA)
++            .execute(&reference)
++            .await
++            .map_err(storage_error)?;
++        let query = "SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name";
++        let expected: Vec<(String, String, String, Option<String>)> = sqlx::query_as(query)
++            .fetch_all(&reference)
++            .await
++            .map_err(storage_error)?;
++        let observed: Vec<(String, String, String, Option<String>)> = sqlx::query_as(query)
++            .fetch_all(connection)
++            .await
++            .map_err(storage_error)?;
++        reference.close().await;
++        if expected != observed {
++            return Err(storage_error(sqlx::Error::Protocol(
++                "board schema is not qualified for cleanup".to_string(),
++            )));
++        }
+         Ok(())
+     }
+ 

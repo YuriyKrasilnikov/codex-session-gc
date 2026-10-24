@@ -1,0 +1,8 @@
+/build/
+/cargo-home/
+/upstream/
+/artifacts/
+/*.log
+/build-inputs/*.tar.gz
+/build-inputs/activity-*.json
+/build-inputs/source-snapshot.json

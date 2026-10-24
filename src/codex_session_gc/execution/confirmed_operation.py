@@ -1,0 +1,242 @@
+# Copyright (c) 2026
+
+"""Fixed-namespace confirmed operations over the existing durable attempt journal."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import threading
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
+from uuid import UUID, uuid4
+
+from anyio import CancelScope
+
+from codex_session_gc.domain import GuardianAssociation, ThreadId, UtcCutoff
+from codex_session_gc.execution.closed_work_operation import ExecutionRequest, execute
+from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
+from codex_session_gc.execution.confirmed_declaration import Declaration, schema_version
+from codex_session_gc.execution.physical_manifest import decode_targets, manifest_bytes
+from codex_session_gc.execution.selection_provenance import association_bindings
+from codex_session_gc.recovery import AttemptId, RecoveryError, inspect
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+def _identifier(value: str) -> str:
+    return str(UUID(value))
+
+
+class ConfirmedOperations:
+    """One startup configuration and owned background calls, without another engine."""
+
+    def __init__(self, home: Path, helper: Path | None, receipts: Path) -> None:
+        """Fix all paths before accepting tool requests."""
+        self.home = home.resolve()
+        self.helper = helper.expanduser().absolute() if helper is not None else None
+        self.receipts = receipts.resolve()
+        if self.receipts == self.home or self.home in self.receipts.parents:
+            message = "Receipt storage must be outside the selected home."
+            raise ValueError(message)
+        metadata = self.home.stat()
+        self.home_identity = (metadata.st_dev, metadata.st_ino)
+        self._lock = threading.Lock()
+        self._declarations: dict[str, Declaration] = {}
+        self._results: dict[str, dict[str, Any]] = {}
+
+    def prepare(
+        self,
+        roots: tuple[str, ...],
+        selected: tuple[str, ...],
+        cutoff: str,
+        physical_manifest: object,
+        guardian_associations: tuple[GuardianAssociation, ...] = (),
+    ) -> Declaration:
+        """Allocate the future AttemptId without claiming or dispatching an attempt."""
+        helper = load_closed_work_contract()
+        declaration = Declaration(
+            operation_id=str(uuid4()),
+            home_identity=self.home_identity,
+            roots=roots,
+            selected=selected,
+            cutoff=cutoff,
+            profile_sha256=helper.evidence.digest.hex(),
+            schema_version=schema_version(helper),
+            guardian_associations=association_bindings(guardian_associations),
+            physical_manifest=decode_targets(physical_manifest),
+            digest="",
+        )
+        declaration = declaration.model_copy(update={"digest": declaration.calculated_digest()})
+        with self._lock:
+            self._declarations[declaration.operation_id] = declaration
+        return declaration
+
+    def _receipt(self, operation_id: str) -> Path:
+        return self.receipts / f"{_identifier(operation_id)}.sqlite"
+
+    def status(self, operation_id: str) -> dict[str, Any]:
+        """Observe saved delivery only; absent receipt does not prove a prior RPC stopped."""
+        path = self._receipt(operation_id)
+        report: dict[str, Any] = {
+            "operation_id": _identifier(operation_id),
+            "outcome": "unknown",
+            "roots": [],
+            "receipt": str(path),
+            "dispatch_replayed": False,
+        }
+        if not path.exists():
+            report["state"] = "receipt_absent"
+            report["detail"] = "No durable claim observed; a prior RPC may still be preparing."
+            return report
+        try:
+            (stored,) = inspect(path)
+        except (OSError, RecoveryError) as error:
+            report.update(state="receipt_unavailable", detail=str(error))
+            return report
+        if str(stored.start.attempt_id.value) != _identifier(operation_id):
+            message = "Receipt identity differs from the operation identifier."
+            raise ValueError(message)
+        report.update(
+            state="saved",
+            lifecycle_unresolved=stored.lifecycle_unresolved,
+            roots=[
+                {
+                    "unit_id": str(unit.unit.unit_id.value),
+                    "scope": json.loads(unit.unit.evidence.data),
+                    "original_native_outcome": unit.terminal_kind.value
+                    if unit.terminal_kind
+                    else None,
+                    "outcome": unit.effective_terminal_kind.value
+                    if unit.effective_terminal_kind
+                    else "unknown",
+                    "unresolved": unit.unresolved,
+                }
+                for unit in stored.units
+            ],
+        )
+        declaration = json.loads(stored.start.evidence.data).get("operation_declaration")
+        skipped = []
+        if isinstance(declaration, dict):
+            declared = {row["scope"]["root"] for row in report["roots"]}
+            skipped = [root for root in declaration["roots"] if root not in declared]
+        report["skipped_roots"] = skipped
+        outcomes = {unit.effective_terminal_kind for unit in stored.units}
+        if not stored.startup_unresolved and not stored.lifecycle_unresolved:
+            values = {outcome.value if outcome else "unknown" for outcome in outcomes}
+            if "unknown" in values:
+                report["outcome"] = "unknown"
+            elif "partial" in values or ("confirmed" in values and (skipped or len(values) > 1)):
+                report["outcome"] = "partial"
+            elif values:
+                report["outcome"] = next(iter(values))
+        return report
+
+    def apply(self, declaration: Declaration) -> dict[str, Any]:
+        """Claim exclusively using existing journal creation, with no deletion replay."""
+        identifier = _identifier(declaration.operation_id)
+        if (
+            identifier != declaration.operation_id
+            or not declaration.roots
+            or not declaration.selected
+            or tuple(sorted(set(declaration.roots))) != declaration.roots
+            or tuple(sorted(set(declaration.selected))) != declaration.selected
+        ):
+            message = "Declaration requires canonical unique roots and a nonempty exact selection."
+            raise ValueError(message)
+        if declaration.digest != declaration.calculated_digest():
+            message = "Declaration digest does not match the exact payload."
+            raise ValueError(message)
+        with self._lock:
+            previous = self._declarations.get(identifier)
+            if previous is not None and previous != declaration:
+                message = "Operation identifier is already bound to a different declaration."
+                raise ValueError(message)
+            path = self._receipt(identifier)
+            if path.exists():
+                try:
+                    (stored,) = inspect(path)
+                except OSError, RecoveryError:
+                    return self.status(identifier)
+                saved = json.loads(stored.start.evidence.data)
+                if saved.get("operation_declaration") != declaration.model_dump(mode="json"):
+                    message = "Saved operation identifier has a different declaration."
+                    raise ValueError(message)
+                return self.status(identifier)
+            if identifier in self._results:
+                return self._results[identifier]
+            if previous is None:
+                return self.status(identifier)
+            self._results[identifier] = self.status(identifier)
+            self._validate_current(declaration)
+            self.receipts.mkdir(parents=True, exist_ok=True)
+            report, _ = execute(
+                ExecutionRequest(
+                    command="apply",
+                    receipt=path,
+                    home=self.home,
+                    cutoff=UtcCutoff(datetime.fromisoformat(declaration.cutoff)),
+                    closed_work=tuple(ThreadId.parse(value) for value in declaration.roots),
+                    select_thread=tuple(ThreadId.parse(value) for value in declaration.selected),
+                    helper=self.helper,
+                    attempt_id=AttemptId(UUID(identifier)),
+                    declaration=declaration.model_dump(mode="json"),
+                    reviewed_physical_manifest=manifest_bytes(declaration.physical_manifest),
+                    reviewed_guardian_associations=tuple(
+                        binding.association for binding in declaration.guardian_associations
+                    ),
+                )
+            )
+            result = {**report, "operation_id": identifier, "dispatch_replayed": False}
+            self._results[identifier] = result
+            return result
+
+    def _validate_current(self, declaration: Declaration) -> None:
+        metadata = self.home.stat()
+        helper = load_closed_work_contract()
+        if (
+            declaration.home_identity != self.home_identity
+            or (metadata.st_dev, metadata.st_ino) != self.home_identity
+            or declaration.profile_sha256 != helper.evidence.digest.hex()
+            or declaration.schema_version != schema_version(helper)
+        ):
+            message = "The startup home or qualified profile identity has changed."
+            raise ValueError(message)
+        if self.helper is None:
+            message = "No qualified helper is available in the startup configuration."
+            raise ValueError(message)
+
+    def reconcile(self, operation_id: str) -> dict[str, Any]:
+        """Observe saved intents through the current non-dispatch reconciliation path."""
+        with self._lock:
+            path = self._receipt(operation_id)
+            if not path.exists():
+                return self.status(operation_id)
+            self.status(operation_id)
+            report, _ = execute(ExecutionRequest(command="reconcile", receipt=path))
+            whole = self.status(operation_id)
+            return {
+                **report,
+                "operation_id": _identifier(operation_id),
+                "dispatch_replayed": False,
+                "outcome": "unknown" if report["outcome"] == "unknown" else whole["outcome"],
+                "skipped_roots": whole.get("skipped_roots", []),
+            }
+
+    async def apply_owned(self, declaration: Declaration) -> dict[str, Any]:
+        """Keep backend ownership through cancellation and join native cleanup."""
+        task = asyncio.create_task(asyncio.to_thread(self.apply, declaration))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # AnyIO cancellation is level-triggered. Shield its scope while the
+            # independently owned backend completes; preserve the original
+            # exception so the SDK recognizes its request cancellation scope.
+            with CancelScope(shield=True):
+                while not task.done():
+                    try:
+                        await asyncio.shield(asyncio.gather(task, return_exceptions=True))
+                    except asyncio.CancelledError:
+                        continue
+            raise

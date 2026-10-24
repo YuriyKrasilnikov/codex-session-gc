@@ -1,0 +1,119 @@
+--- a/codex-rs/state/src/sqlite.rs
++++ b/codex-rs/state/src/sqlite.rs
+@@ -446,6 +446,116 @@
+         Ok(pool)
+     }
+ 
++    /// Retains existing-storage ownership without initialization, migration or repair.
++    /// Admission and deletion must use the returned transaction connection.
++    pub async fn begin_existing_cleanup(
++        &self,
++        path: &Path,
++        busy_timeout: Duration,
++    ) -> Result<(SqlitePool, sqlx::Transaction<'static, sqlx::Sqlite>), Error> {
++        let mut journal = path.as_os_str().to_os_string();
++        journal.push("-journal");
++        if tokio::fs::try_exists(Path::new(&journal))
++            .await
++            .map_err(Error::Io)?
++        {
++            return Err(Error::Protocol(
++                "rollback journal requires external reconciliation".to_string(),
++            ));
++        }
++        let readonly = self.open_read_only_pool(path, Some(busy_timeout)).await?;
++        let mut observation = readonly.begin().await?;
++        let _: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema")
++            .fetch_one(&mut *observation)
++            .await?;
++        let options = SqliteConnectOptions::new()
++            .filename(path)
++            .create_if_missing(false)
++            .synchronous(SqliteSynchronous::Full)
++            .busy_timeout(busy_timeout)
++            .log_statements(LevelFilter::Off);
++        let pool = SqlitePoolOptions::new()
++            .max_connections(1)
++            .connect_with(options)
++            .await?;
++        let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
++        let _: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema")
++            .fetch_one(&mut *transaction)
++            .await?;
++        observation.rollback().await?;
++        readonly.close().await;
++        Ok((pool, transaction))
++    }
++
++    /// Requires the exact native schema on a retained cleanup transaction.
++    /// Reference migrations run only against a transient in-memory database.
++    pub async fn validate_cleanup_schema(
++        &self,
++        path: &Path,
++        connection: &mut sqlx::SqliteConnection,
++    ) -> anyhow::Result<()> {
++        let spec = RUNTIME_DBS
++            .iter()
++            .find(|spec| spec.path(self.home()) == path)
++            .ok_or_else(|| anyhow::anyhow!("unknown native database path"))?;
++        let migrator = match spec.kind {
++            DbKind::State => &crate::migrations::STATE_MIGRATOR,
++            DbKind::Logs => &crate::migrations::LOGS_MIGRATOR,
++            DbKind::Goals => &crate::migrations::GOALS_MIGRATOR,
++            DbKind::Memories => &crate::migrations::MEMORIES_MIGRATOR,
++            DbKind::Queue => &crate::migrations::QUEUE_MIGRATOR,
++            DbKind::ThreadHistory => &crate::migrations::THREAD_HISTORY_MIGRATOR,
++        };
++        let reference = SqlitePoolOptions::new()
++            .max_connections(1)
++            .connect("sqlite::memory:")
++            .await?;
++        migrator.run(&reference).await?;
++        let schema_sql = "SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND name != '_sqlx_migrations' ORDER BY type, name";
++        let mut expected: Vec<(String, String, String, Option<String>)> =
++            sqlx::query_as(schema_sql).fetch_all(&reference).await?;
++        let observed: Vec<(String, String, String, Option<String>)> = sqlx::query_as(schema_sql)
++            .fetch_all(&mut *connection)
++            .await?;
++        let versions_sql =
++            "SELECT version, checksum, success FROM _sqlx_migrations ORDER BY version";
++        let mut expected_versions: Vec<(i64, Vec<u8>, i64)> =
++            sqlx::query_as(versions_sql).fetch_all(&reference).await?;
++        let observed_versions: Vec<(i64, Vec<u8>, i64)> = sqlx::query_as(versions_sql)
++            .fetch_all(&mut *connection)
++            .await?;
++        reference.close().await;
++        // The only supported state contract is exact deployed schema 61.
++        if matches!(spec.kind, DbKind::State) {
++            expected.push(("table".to_owned(),"guardian_review_feedback".to_owned(),"guardian_review_feedback".to_owned(),Some("CREATE TABLE guardian_review_feedback (\n    id TEXT PRIMARY KEY NOT NULL,\n    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,\n    record BLOB NOT NULL\n)".to_owned())));
++            expected.push(("table".to_owned(),"thread_read_receipts".to_owned(),"thread_read_receipts".to_owned(),Some("CREATE TABLE thread_read_receipts (\n    thread_id TEXT PRIMARY KEY NOT NULL,\n    first_unread_turn TEXT,\n    revision TEXT NOT NULL,\n    last_published_turn TEXT\n)".to_owned())));
++            expected_versions.push((
++                60,
++                vec![
++                    215, 240, 207, 10, 105, 250, 113, 153, 154, 255, 205, 72, 204, 116, 178, 208,
++                    162, 99, 123, 139, 189, 167, 59, 213, 129, 149, 71, 204, 219, 21, 84, 58, 117,
++                    210, 57, 49, 31, 160, 127, 207, 105, 155, 233, 188, 188, 24, 116, 168,
++                ],
++                1,
++            ));
++            expected_versions.push((
++                61,
++                vec![
++                    74, 131, 55, 4, 139, 185, 88, 162, 31, 213, 39, 44, 27, 214, 112, 96, 92, 132,
++                    212, 6, 53, 52, 39, 13, 62, 65, 205, 197, 197, 162, 232, 101, 240, 254, 106,
++                    227, 195, 54, 222, 216, 115, 135, 126, 226, 234, 16, 242, 224,
++                ],
++                1,
++            ));
++            expected.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
++        }
++        anyhow::ensure!(
++            observed == expected && observed_versions == expected_versions,
++            "native database schema is not qualified for bounded cleanup"
++        );
++        Ok(())
++    }
++
+     /// Open an existing Codex SQLite database without creating or modifying it.
+     pub async fn open_read_only_pool(
+         &self,

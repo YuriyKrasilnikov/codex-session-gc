@@ -1,0 +1,109 @@
+--- a/codex-rs/state/src/runtime/threads.rs
++++ b/codex-rs/state/src/runtime/threads.rs
+@@ -1166,25 +1166,72 @@
+             return Ok(0);
+         }
+ 
++        for thread_id in thread_ids {
++            let mut logs_connection = self.logs_pool.acquire().await?;
++            Self::delete_thread_logs_in(&mut logs_connection, *thread_id).await?;
++            self.thread_queue.delete_thread_queue(*thread_id).await?;
++            self.delete_versioned_thread_memory(*thread_id).await?;
++            self.thread_goals.delete_thread_goal(*thread_id).await?;
++        }
++
++        let mut tx = self.pool.begin().await?;
++        let rows_affected = Self::delete_thread_state_rows_in(&mut tx, thread_ids).await?;
++        tx.commit().await?;
++        Ok(rows_affected)
++    }
++
++    /// Executes native log cleanup using the caller's retained connection.
++    pub async fn delete_thread_logs_in(
++        connection: &mut sqlx::SqliteConnection,
++        thread_id: ThreadId,
++    ) -> anyhow::Result<u64> {
++        Ok(sqlx::query("DELETE FROM logs WHERE thread_id = ?")
++            .bind(thread_id.to_string())
++            .execute(connection)
++            .await?
++            .rows_affected())
++    }
++
++    /// Removes exact selected-owner supplemental rows from an already qualified state61 connection.
++    /// The caller retains the transaction and validates physical row bounds before any effects.
++    /// Explicit deletion does not depend on the connection enabling foreign-key cascades.
++    pub async fn delete_thread_state61_supplemental_rows_in(
++        connection: &mut sqlx::SqliteConnection,
++        thread_ids: &[ThreadId],
++    ) -> anyhow::Result<(u64, u64)> {
++        let mut feedback_rows = 0;
++        let mut receipt_rows = 0;
++        for thread_id in thread_ids {
++            let thread_id = thread_id.to_string();
++            feedback_rows +=
++                sqlx::query("DELETE FROM guardian_review_feedback WHERE thread_id = ?")
++                    .bind(&thread_id)
++                    .execute(&mut *connection)
++                    .await?
++                    .rows_affected();
++            receipt_rows += sqlx::query("DELETE FROM thread_read_receipts WHERE thread_id = ?")
++                .bind(&thread_id)
++                .execute(&mut *connection)
++                .await?
++                .rows_affected();
++        }
++        Ok((feedback_rows, receipt_rows))
++    }
++
++    /// Removes native catalog rows using the caller's retained transaction connection.
++    /// The caller owns eligibility, effect-bound validation, commit and interruption handling.
++    pub async fn delete_thread_state_rows_in(
++        connection: &mut sqlx::SqliteConnection,
++        thread_ids: &[ThreadId],
++    ) -> anyhow::Result<u64> {
+         let thread_id_strings = thread_ids
+             .iter()
+             .map(ThreadId::to_string)
+             .collect::<Vec<_>>();
+-        for (thread_id, thread_id_string) in thread_ids.iter().zip(&thread_id_strings) {
+-            sqlx::query("DELETE FROM logs WHERE thread_id = ?")
+-                .bind(thread_id_string)
+-                .execute(self.logs_pool.as_ref())
+-                .await?;
+-            self.thread_queue.delete_thread_queue(*thread_id).await?;
+-            self.delete_versioned_thread_memory(*thread_id).await?;
+-            self.thread_goals.delete_thread_goal(*thread_id).await?;
+-        }
+-
+-        let mut tx = self.pool.begin().await?;
+         for thread_id_string in &thread_id_strings {
+             sqlx::query("DELETE FROM thread_dynamic_tools WHERE thread_id = ?")
+                 .bind(thread_id_string)
+-                .execute(&mut *tx)
++                .execute(&mut *connection)
+                 .await?;
+         }
+         for thread_id_string in &thread_id_strings {
+@@ -1193,19 +1240,17 @@
+             )
+             .bind(thread_id_string)
+             .bind(thread_id_string)
+-            .execute(&mut *tx)
++            .execute(&mut *connection)
+             .await?;
+         }
+         let mut rows_affected = 0;
+         for thread_id_string in &thread_id_strings {
+             rows_affected += sqlx::query("DELETE FROM threads WHERE id = ?")
+                 .bind(thread_id_string)
+-                .execute(&mut *tx)
++                .execute(&mut *connection)
+                 .await?
+                 .rows_affected();
+         }
+-        tx.commit().await?;
+-
+         Ok(rows_affected)
+     }
+ }
