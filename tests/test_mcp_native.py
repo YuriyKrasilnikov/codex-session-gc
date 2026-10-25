@@ -443,6 +443,18 @@ def test_guardian_sdk_exact_effects_association_restart_and_parent_writer(
         async with parent_appender(home, paths[ROOT]):
             async with server(home, native_helper, receipts) as session:
                 catalogue = await call(session, "query_catalogue", {})
+                child = next(row for row in catalogue["histories"] if row["id"] == CHILD)
+                filtered = await call(
+                    session,
+                    "query_catalogue",
+                    {
+                        "snapshot_id": catalogue["snapshot_id"],
+                        "cwd": child["cwd"],
+                        "archive_state": child["archive_state"],
+                        "scope": "guardians",
+                    },
+                )
+                assert [row["id"] for row in filtered["histories"]] == [CHILD]
                 prepared = await call(
                     session,
                     "prepare_cleanup",

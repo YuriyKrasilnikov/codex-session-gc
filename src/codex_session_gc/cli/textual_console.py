@@ -34,9 +34,14 @@ from codex_session_gc.cli.console_tasks import (
     confirmed_intent,
     parse_cutoff,
 )
-from codex_session_gc.domain import ThreadId, UtcCutoff
+from codex_session_gc.domain import ArchiveState, ThreadId, UtcCutoff
 from codex_session_gc.inventory.catalogue import SessionCatalogue, read_session_catalogue
-from codex_session_gc.inventory.query import CatalogueGroup, CatalogueIndex, CatalogueQuery
+from codex_session_gc.inventory.query import (
+    CatalogueGroup,
+    CatalogueIndex,
+    CatalogueQuery,
+    CatalogueScope,
+)
 
 if TYPE_CHECKING:
     import argparse
@@ -71,6 +76,20 @@ def _bound(text: str) -> int | None:
     if value < 0:
         raise ValueError("Size must be nonnegative stored bytes.")
     return value
+
+
+def _directory(value: object) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    raise ValueError("Choose a stored directory or all directories.")
+
+
+def _archive(value: object) -> ArchiveState | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return ArchiveState(value)
+    raise ValueError("Choose a stored archive state or all archive states.")
 
 
 class SessionApp(App[tuple[str, int]]):
@@ -138,15 +157,35 @@ class SessionApp(App[tuple[str, int]]):
                 placeholder="Activity strictly before UTC",
                 id="before",
             )
+            yield Select[str | None](
+                [(Text("All directories"), None)], value=None, allow_blank=False, id="cwd"
+            )
             yield Select(
-                [("All histories", "all"), ("Main histories", "main"), ("Agents", "agents")],
-                value="all",
+                [
+                    ("All histories", CatalogueScope.ALL),
+                    ("Main histories", CatalogueScope.MAIN),
+                    ("Agents (all)", CatalogueScope.AGENTS),
+                    ("Ordinary agents", CatalogueScope.ORDINARY_AGENTS),
+                    ("Guardians", CatalogueScope.GUARDIANS),
+                ],
+                value=CatalogueScope.ALL,
                 allow_blank=False,
                 id="scope",
             )
         with Horizontal(classes="filters"):
             yield Input(placeholder="Minimum stored bytes", id="minimum")
             yield Input(placeholder="Maximum stored bytes", id="maximum")
+            yield Select[ArchiveState | None](
+                [
+                    ("All archive states", None),
+                    ("Archived", ArchiveState.ARCHIVED),
+                    ("Not archived", ArchiveState.NOT_ARCHIVED),
+                    ("Archive unknown", ArchiveState.UNKNOWN),
+                ],
+                value=None,
+                allow_blank=False,
+                id="archive",
+            )
             yield Select(
                 [
                     ("Largest total", "total"),
@@ -223,6 +262,19 @@ class SessionApp(App[tuple[str, int]]):
                 for group in all_groups
             )
             self.query_one("#work", Select).set_options(options)
+            directory_select = self.query_one("#cwd", Select)
+            previous_directory = directory_select.value
+            directories = {entry.cwd for entry in catalogue.entries}
+            if isinstance(previous_directory, str):
+                directories.add(previous_directory)
+            directory_options: list[tuple[Text, str | None]] = [(Text("All directories"), None)]
+            directory_options.extend(
+                (Text(clean(directory) or "(empty directory)"), directory)
+                for directory in sorted(directories)
+            )
+            directory_select.set_options(directory_options)
+            if isinstance(previous_directory, str):
+                directory_select.value = previous_directory
             self.query_one("#heading", Static).update(
                 f"{clean(str(self.home))} — {len(catalogue.entries):,} histories. "
                 "Sizes: observed stored file bytes; unknowns retained."
@@ -257,6 +309,8 @@ class SessionApp(App[tuple[str, int]]):
                 self.cutoff = UtcCutoff(before)
             work = self.query_one("#work", Select).value
             roots = (self.work_roots[str(work)],) if str(work) in self.work_roots else ()
+            directory = _directory(self.query_one("#cwd", Select).value)
+            archive = _archive(self.query_one("#archive", Select).value)
             query = CatalogueQuery(
                 text=self.query_one("#search", Input).value,
                 before=before,
@@ -265,6 +319,8 @@ class SessionApp(App[tuple[str, int]]):
                 scope=cast("Any", self.query_one("#scope", Select).value),
                 sort=cast("Any", self.query_one("#sort", Select).value),
                 roots=roots,
+                cwd=directory,
+                archive_state=archive,
             )
             self.groups = self.index.query(query)
             self.valid_filters = True

@@ -13,11 +13,12 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
-from textual.widgets import DataTable, Input
+from textual.widgets import DataTable, Input, Select
 
 from codex_session_gc.cli.console_tasks import parse_cutoff
 from codex_session_gc.cli.main import main
 from codex_session_gc.cli.textual_console import SessionApp
+from codex_session_gc.domain import ArchiveState
 from codex_session_gc.recovery import LaunchStatus, inspect
 from tests.mcp_native_fixture import CHILD, OTHER, ROOT, logical_rows, make_guardian_home, make_home
 from tests.test_mcp_native import assert_selected_effects, call, native_helper, server
@@ -91,6 +92,10 @@ def test_actual_adapters_remove_all_owned_revert_formats_and_preserve_provider( 
     expected_size = paths[CHILD].stat().st_size + old.stat().st_size
     root = CHILD if guardian else ROOT
     receipt = tmp_path / "cli-receipt.sqlite"
+    with sqlite3.connect(home / "state_5.sqlite") as connection:
+        (stored_cwd,) = connection.execute(
+            "SELECT cwd FROM threads WHERE id=?", (CHILD,)
+        ).fetchone()
 
     async def mcp() -> Path:
         async with server(home, native_helper, receipts) as session:
@@ -124,9 +129,13 @@ def test_actual_adapters_remove_all_owned_revert_formats_and_preserve_provider( 
         async with browser.run_test(size=(120, 40)) as pilot:
             while not browser.query_one(DataTable).row_count:
                 await pilot.pause(0.01)
+            browser.query_one("#cwd", Select).value = stored_cwd
+            browser.query_one("#archive", Select).value = ArchiveState.NOT_ARCHIVED
+            browser.query_one("#scope", Select).value = "guardians"
             browser.query_one("#search", Input).value = CHILD
             await pilot.pause()
             await pilot.click("#select")
+            assert {str(identifier.value) for identifier in browser.selected} == {CHILD}
             await pilot.click("#preview")
             while not browser.query_one("#confirm", Input).display:
                 await pilot.pause(0.01)

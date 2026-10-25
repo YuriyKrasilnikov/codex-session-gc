@@ -19,6 +19,7 @@ from uuid import uuid4
 import pytest
 from textual.widgets import DataTable, Input, Select, Static
 
+from codex_session_gc.cli import mcp_server
 from codex_session_gc.cli import textual_console as ui
 from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.domain import ArchiveState, ThreadId, UtcCutoff
@@ -26,8 +27,10 @@ from codex_session_gc.execution.closed_work_profile import load_closed_work_cont
 from codex_session_gc.execution.confirmed_declaration import ReviewedSelection, create_declaration
 from codex_session_gc.execution.physical_manifest import decode_targets
 from codex_session_gc.inventory.catalogue import SessionCatalogue, SessionEntry, SessionSource
+from codex_session_gc.inventory.query import CatalogueScope
 from tests.current_storage_fixture import _catalogue_home as catalogue_home
 from tests.current_storage_fixture import _review_manifest, _stored_rollout
+from tests.test_catalogue_query import _A, _B, _C, _CWD, _E, _mixed_index
 
 if TYPE_CHECKING:
     from codex_session_gc.cli.console_tasks import Intent
@@ -137,6 +140,92 @@ def test_filters_groups_and_exact_bulk_selection(
             assert browser.reviewed.reviewed_guardian_associations == ()
             await pilot.click("#cancel")
             assert browser.reviewed is None
+
+    asyncio.run(scenario())
+
+
+def test_exact_directory_archive_and_source_filters_match_mcp_without_storage_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalogue_data = _mixed_index().catalogue
+    reads = []
+    known_bytes = 50
+
+    def read(home: Path) -> SessionCatalogue:
+        reads.append(home)
+        return catalogue_data
+
+    monkeypatch.setattr(ui, "read_session_catalogue", read)
+    monkeypatch.setattr(mcp_server, "read_session_catalogue", read)
+
+    async def scenario() -> None:
+        service = mcp_server.CatalogueService(tmp_path, capability=McpCapability.READ_ONLY)
+        listed = await service.query_catalogue()
+        browser = ui.SessionApp(tmp_path, CUTOFF, None, tmp_path.parent / "receipts")
+        async with browser.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            browser.query_one("#cwd", Select).value = _CWD
+            browser.query_one("#archive", Select).value = ArchiveState.ARCHIVED
+            browser.query_one("#scope", Select).value = "agents"
+            await pilot.pause()
+            result = await service.query_catalogue(
+                snapshot_id=listed["snapshot_id"],
+                cwd=_CWD,
+                archive_state=ArchiveState.ARCHIVED,
+                scope=CatalogueScope.AGENTS,
+            )
+            assert {entry["id"] for entry in result["histories"]} == {str(_B.value), str(_C.value)}
+            assert {item for group in browser.groups for item in group.matching_ids} == {_B, _C}
+            assert any(
+                group.root.id == _A and _A not in group.matching_ids for group in browser.groups
+            )
+            assert result["groups"][str(_A.value)]["root"]["id"] == str(_A.value)
+            await pilot.click("#select")
+            assert set(browser.selected) == {_B, _C}
+            assert _A not in browser.selected
+            for scope, expected in [
+                (CatalogueScope.ORDINARY_AGENTS, {_B}),
+                (CatalogueScope.GUARDIANS, {_C}),
+            ]:
+                browser.query_one("#scope", Select).value = scope
+                await pilot.pause()
+                result = await service.query_catalogue(
+                    snapshot_id=listed["snapshot_id"],
+                    cwd=_CWD,
+                    archive_state=ArchiveState.ARCHIVED,
+                    scope=scope,
+                )
+                assert {item for group in browser.groups for item in group.matching_ids} == expected
+                assert {entry["id"] for entry in result["histories"]} == {
+                    str(x.value) for x in expected
+                }
+                assert set(browser.selected) == {_B, _C}
+            browser.query_one("#scope", Select).value = CatalogueScope.ALL
+            browser.query_one("#archive", Select).value = ArchiveState.UNKNOWN
+            browser.query_one("#minimum", Input).value = "50"
+            await pilot.pause()
+            result = await service.query_catalogue(
+                snapshot_id=listed["snapshot_id"],
+                cwd=_CWD,
+                archive_state=ArchiveState.UNKNOWN,
+                min_bytes=50,
+            )
+            assert {item for group in browser.groups for item in group.matching_ids} == {_E}
+            (entry,) = result["histories"]
+            assert entry["stored_bytes"] is None
+            assert entry["known_stored_bytes"] == known_bytes
+            browser.query_one("#maximum", Input).value = "50"
+            await pilot.pause()
+            assert not browser.groups
+            result = await service.query_catalogue(
+                snapshot_id=listed["snapshot_id"],
+                cwd=_CWD,
+                archive_state=ArchiveState.UNKNOWN,
+                min_bytes=50,
+                max_bytes=50,
+            )
+            assert not result["histories"]
+            assert reads == [tmp_path, tmp_path]
 
     asyncio.run(scenario())
 

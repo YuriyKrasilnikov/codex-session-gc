@@ -37,6 +37,14 @@ An exact stored-byte total is distinct from its observed lower bound and from
 allocated or reclaimed space. Incomplete observations expose unknown totals;
 conditional reclaim is a selected stored-byte estimate, never measured recovery.
 
+Catalogue predicates apply to each history's stored source, archive state and cwd.
+Exact cwd matching is literal and case-sensitive, with no path resolution or
+normalization. The combined agents scope includes ordinary agents and Guardians;
+narrower scopes distinguish their stored source classifications. Full work context
+and its byte totals remain visible when only a child matches. A contextual parent
+does not become selected automatically. Filters reuse detached metadata and keep
+unknown totals distinct from known lower bounds.
+
 Preview is read-only and non-executable. Apply observes fresh facts rather than
 executing a saved preview. Textual and MCP confirmation bind the home identity,
 exact qualified profile, operation UUID, cutoff, roots, selected IDs, physical

@@ -8,14 +8,16 @@ import pytest
 
 from codex_session_gc.domain import ArchiveState, ThreadId
 from codex_session_gc.inventory.catalogue import SessionCatalogue, SessionEntry, SessionSource
-from codex_session_gc.inventory.query import CatalogueIndex, CatalogueQuery
+from codex_session_gc.inventory.query import CatalogueIndex, CatalogueQuery, CatalogueScope
 from tests.current_storage_fixture import _stored_rollout
 
 _A = ThreadId.parse("11111111-1111-4111-8111-111111111111")
 _B = ThreadId.parse("22222222-2222-4222-8222-222222222222")
 _C = ThreadId.parse("33333333-3333-4333-8333-333333333333")
 _D = ThreadId.parse("44444444-4444-4444-8444-444444444444")
+_E = ThreadId.parse("55555555-5555-4555-8555-555555555555")
 _DATE = datetime(2026, 1, 1, tzinfo=UTC)
+_CWD = "/project/[Alpha] + draft"
 
 
 def _entry(identifier: ThreadId, size: int | None, parent: ThreadId | None = None) -> SessionEntry:
@@ -129,6 +131,8 @@ def test_group_activity_incompleteness_and_duplicate_members_deduplicated() -> N
         {"before": datetime(2026, 1, 1)},
         {"scope": "unknown"},
         {"sort": "unknown"},
+        {"archive_state": "unknown_value"},
+        {"cwd": True},
     ],
 )
 def test_invalid_queries_refuse_without_widening(query: dict[str, object]) -> None:
@@ -143,3 +147,92 @@ def test_equal_known_amounts_use_exactness_then_stable_identity() -> None:
     assert [group.root.id for group in index.query(CatalogueQuery())] == [_C, _A]
     assert {group.root.id for group in index.query(CatalogueQuery(min_bytes=100))} == {_A, _C}
     assert [group.root.id for group in index.query(CatalogueQuery(max_bytes=100))] == [_C]
+
+
+def _mixed_index() -> CatalogueIndex:
+    return CatalogueIndex(
+        SessionCatalogue(
+            (
+                replace(_entry(_A, 100), cwd=_CWD, archive_state=ArchiveState.NOT_ARCHIVED),
+                replace(_entry(_B, 300, _A), cwd=_CWD),
+                replace(_entry(_C, 200), cwd=_CWD, source=SessionSource.GUARDIAN),
+                replace(_entry(_D, 500), cwd=_CWD + "/child"),
+                replace(
+                    _entry(_E, 50),
+                    cwd=_CWD,
+                    archive_state=ArchiveState.UNKNOWN,
+                    stored_bytes=None,
+                    source=SessionSource.UNKNOWN,
+                    root_id=None,
+                ),
+            ),
+            (),
+            source_changed=False,
+        )
+    )
+
+
+def _matches(index: CatalogueIndex, query: CatalogueQuery) -> set[ThreadId]:
+    return {identifier for group in index.query(query) for identifier in group.matching_ids}
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        (CatalogueScope.ALL, {_A, _B, _C, _E}),
+        (CatalogueScope.MAIN, {_A}),
+        (CatalogueScope.AGENTS, {_B, _C}),
+        (CatalogueScope.ORDINARY_AGENTS, {_B}),
+        (CatalogueScope.GUARDIANS, {_C}),
+    ],
+)
+def test_source_scopes_and_exact_directory_use_stored_classification(
+    scope: CatalogueScope, expected: set[ThreadId]
+) -> None:
+    assert _matches(_mixed_index(), CatalogueQuery(cwd=_CWD, scope=scope)) == expected
+
+
+@pytest.mark.parametrize(
+    ("archive", "expected"),
+    [
+        (ArchiveState.ARCHIVED, {_B, _C}),
+        (ArchiveState.NOT_ARCHIVED, {_A}),
+        (ArchiveState.UNKNOWN, {_E}),
+    ],
+)
+def test_archive_predicate_is_per_history_and_keeps_full_context(
+    archive: ArchiveState, expected: set[ThreadId]
+) -> None:
+    index = _mixed_index()
+    assert _matches(index, CatalogueQuery(cwd=_CWD, archive_state=archive)) == expected
+    (group,) = index.query(
+        CatalogueQuery(cwd=_CWD, archive_state=ArchiveState.ARCHIVED, scope="ordinary_agents")
+    )
+    assert group.root.id == _A
+    assert group.matching_ids == (_B,)
+    assert {entry.id for entry in group.entries} == {_A, _B}
+    assert group.total_stored_bytes == 400
+    assert group.own_stored_bytes == 100
+
+
+def test_exact_cwd_is_literal_case_sensitive_and_never_normalized() -> None:
+    index = _mixed_index()
+    assert _matches(index, CatalogueQuery(text="[alpha]")) == {_A, _B, _C, _D, _E}
+    assert _matches(index, CatalogueQuery(cwd=_CWD)) == {_A, _B, _C, _E}
+    assert not index.query(CatalogueQuery(cwd=_CWD.lower()))
+    assert not index.query(CatalogueQuery(cwd=_CWD + "/"))
+    assert not index.query(CatalogueQuery(cwd="/project/./[Alpha] + draft"))
+    assert not index.query(CatalogueQuery(cwd="/project/Alpha + draft"))
+
+
+def test_exact_filters_preserve_incomplete_byte_bounds_and_query_detachment() -> None:
+    index = _mixed_index()
+    query = CatalogueQuery(cwd=_CWD, archive_state=ArchiveState.UNKNOWN, min_bytes=50)
+    (group,) = index.query(query)
+    assert group.matching_ids == (_E,)
+    assert group.own_known_stored_bytes == 50
+    assert group.own_stored_bytes is None
+    assert not group.selectable
+    assert not index.query(replace(query, max_bytes=50))
+    assert _matches(index, query) == {_E}
+    assert _matches(index, CatalogueQuery(cwd=_CWD, scope="agents", min_bytes=200)) == {_B, _C}

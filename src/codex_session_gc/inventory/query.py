@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
+from codex_session_gc.domain import ArchiveState
 from codex_session_gc.inventory.catalogue import SessionSource
 
 if TYPE_CHECKING:
@@ -15,6 +17,16 @@ if TYPE_CHECKING:
 
     from codex_session_gc.domain import ThreadId
     from codex_session_gc.inventory.catalogue import SessionCatalogue, SessionEntry, StoredRollout
+
+
+class CatalogueScope(StrEnum):
+    """Select source classifications without treating Guardian association as spawn ownership."""
+
+    ALL = "all"
+    MAIN = "main"
+    AGENTS = "agents"
+    ORDINARY_AGENTS = "ordinary_agents"
+    GUARDIANS = "guardians"
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,15 +37,22 @@ class CatalogueQuery:
     before: datetime | None = None
     min_bytes: int | None = None
     max_bytes: int | None = None
-    scope: Literal["all", "main", "agents"] = "all"
+    scope: CatalogueScope | str = CatalogueScope.ALL
     sort: Literal["total", "own", "agents", "activity"] = "total"
     roots: tuple[ThreadId, ...] = ()
+    cwd: str | None = None
+    archive_state: ArchiveState | str | None = None
 
     def __post_init__(self) -> None:
         """Reject ambiguous instants and invalid bounds rather than widening queries."""
+        object.__setattr__(self, "scope", CatalogueScope(self.scope))
+        if self.archive_state is not None:
+            object.__setattr__(self, "archive_state", ArchiveState(self.archive_state))
+        if self.cwd is not None and not isinstance(self.cwd, str):
+            raise ValueError("The exact stored cwd must be text.")
         if self.before is not None and self.before.utcoffset() is None:
             raise ValueError("The activity cutoff requires a timezone.")
-        if self.scope not in {"all", "main", "agents"} or self.sort not in {
+        if self.sort not in {
             "total",
             "own",
             "agents",
@@ -76,13 +95,24 @@ class CatalogueGroup:
     conditional_reclaim_bytes: int | None = None
 
 
+def _source_matches(source: SessionSource, scope: CatalogueScope | str) -> bool:
+    if scope is CatalogueScope.MAIN:
+        return source is SessionSource.MAIN
+    if scope is CatalogueScope.AGENTS:
+        return source in {SessionSource.AGENT, SessionSource.GUARDIAN}
+    if scope is CatalogueScope.ORDINARY_AGENTS:
+        return source is SessionSource.AGENT
+    if scope is CatalogueScope.GUARDIANS:
+        return source is SessionSource.GUARDIAN
+    return scope is CatalogueScope.ALL
+
+
 def _matches(entry: SessionEntry, query: CatalogueQuery) -> bool:
-    if query.scope == "main" and entry.source is not SessionSource.MAIN:
-        return False
-    if query.scope == "agents" and entry.source not in {
-        SessionSource.AGENT,
-        SessionSource.GUARDIAN,
-    }:
+    if (
+        not _source_matches(entry.source, query.scope)
+        or (query.cwd is not None and entry.cwd != query.cwd)
+        or (query.archive_state is not None and entry.archive_state is not query.archive_state)
+    ):
         return False
     if query.text.casefold() not in f"{entry.title}\n{entry.cwd}\n{entry.id.value}".casefold():
         return False

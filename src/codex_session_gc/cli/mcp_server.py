@@ -20,12 +20,12 @@ from mcp.types import ToolAnnotations
 from codex_session_gc.cli.console_display import discover_helper
 from codex_session_gc.cli.console_tasks import Intent, async_preview, parse_cutoff
 from codex_session_gc.cli.mcp_capability import McpCapability
-from codex_session_gc.domain import ThreadId
+from codex_session_gc.domain import ArchiveState, ThreadId
 from codex_session_gc.execution.confirmed_declaration import Declaration
 from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
 from codex_session_gc.execution.selection_provenance import reviewed_associations
 from codex_session_gc.inventory.catalogue import SessionEntry, read_session_catalogue
-from codex_session_gc.inventory.query import CatalogueIndex, CatalogueQuery
+from codex_session_gc.inventory.query import CatalogueIndex, CatalogueQuery, CatalogueScope
 
 if TYPE_CHECKING:
     from codex_session_gc.inventory.query import CatalogueGroup
@@ -123,9 +123,11 @@ class CatalogueService:
         before: str | None = None,
         min_bytes: int | None = None,
         max_bytes: int | None = None,
-        scope: Literal["all", "main", "agents"] = "all",
+        scope: CatalogueScope = CatalogueScope.ALL,
         sort: Literal["total", "own", "agents", "activity"] = "total",
         roots: list[str] | None = None,
+        cwd: str | None = None,
+        archive_state: ArchiveState | None = None,
         offset: int = 0,
         limit: int = 50,
     ) -> dict[str, Any]:
@@ -141,6 +143,8 @@ class CatalogueService:
             scope=scope,
             sort=sort,
             roots=tuple(ThreadId.parse(value) for value in roots or []),
+            cwd=cwd,
+            archive_state=archive_state,
         )
         identity, index = await self._snapshot(snapshot_id, refresh=refresh)
         groups = index.query(query)

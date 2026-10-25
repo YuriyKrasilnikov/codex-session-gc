@@ -122,7 +122,11 @@ until the complete cleanup preview. MAIN, ordinary agent, Guardian and
 unknown source labels come from stored source metadata; a missing parent does
 not make a history MAIN.
 
-Filter by text, last activity, stored-byte bounds, history type and work group.
+Filter by text, exact stored directory, archive state, last activity, stored-byte
+bounds, history type and work group. Directory choices compare stored cwd strings
+literally and case-sensitively, including punctuation and brackets; paths are not
+resolved or normalized. Agents (all) includes ordinary agents and Guardians;
+separate choices narrow to either source classification.
 A minimum byte bound can be proved by the known lower bound; a maximum requires
 an exact total. Both bounds apply together. Sort by total size, own size, agent
 size or activity. The date matches each
@@ -299,6 +303,12 @@ starting the server itself does not.
 Reconnect the client to load changed server code. Ask for the largest project
 groups, agents last active before a chosen date, or a preview for explicit IDs.
 Query and details share a cached catalogue identity; explicit refresh replaces it.
+`query_catalogue` accepts `cwd` for exact stored-directory equality and
+`archive_state` values `archived`, `not_archived` or `unknown`. Its `scope` values
+`ordinary_agents` and `guardians` narrow the existing combined `agents` scope.
+These predicates combine with text, date, size and work filters on detached
+metadata. Contextual parents remain in group summaries and are not matching
+histories unless their own facts match. Changing filters does not reread storage.
 Preparation reads fresh scoped facts and returns a conditional report without a
 journal or deletion. Pages contain at most 100 histories; preparation accepts at
 most 200 distinct IDs per request. Larger selections can use the terminal UI.

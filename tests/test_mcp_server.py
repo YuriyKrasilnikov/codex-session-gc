@@ -48,6 +48,21 @@ from codex_session_gc.recovery import AttemptId, inspect
 from tests.current_storage_fixture import _A, _B, _LIMITS, _id
 from tests.current_storage_fixture import _catalogue_home as _home
 from tests.mcp_native_fixture import CHILD, ROOT, logical_rows, make_home
+from tests.test_catalogue_query import (
+    _A as QUERY_ROOT,
+)
+from tests.test_catalogue_query import (
+    _B as QUERY_AGENT,
+)
+from tests.test_catalogue_query import (
+    _C as QUERY_GUARDIAN,
+)
+from tests.test_catalogue_query import (
+    _CWD as QUERY_CWD,
+)
+from tests.test_catalogue_query import (
+    _E as QUERY_UNKNOWN,
+)
 from tests.test_closed_work_apply import _setup
 from tests.test_closed_work_reconcile import _delete_selected
 
@@ -284,6 +299,75 @@ def test_read_only_status_reads_existing_cleanup_without_appending_evidence(
 
     asyncio.run(asyncio.wait_for(check(), timeout=30))
     assert hashlib.sha256(receipt.read_bytes()).digest() == before
+
+
+def test_sdk_exact_directory_archive_and_source_predicates_share_one_snapshot(
+    tmp_path: Path,
+) -> None:
+    bootstrap = """
+import sys
+from pathlib import Path
+from codex_session_gc.cli import mcp_server
+from codex_session_gc.cli.mcp_capability import McpCapability
+from tests.test_catalogue_query import _mixed_index
+calls=0
+def read(home):
+    global calls
+    calls+=1
+    if calls>1: raise RuntimeError('Unexpected catalogue refresh')
+    return _mixed_index().catalogue
+mcp_server.read_session_catalogue=read
+mcp_server.run(Path(sys.argv[1]),capability=McpCapability.READ_ONLY)
+"""
+
+    async def check() -> None:
+        parameters = StdioServerParameters(
+            command=sys.executable, args=["-c", bootstrap, str(tmp_path)], env=dict(os.environ)
+        )
+        async with stdio_client(parameters) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            initial = _data(await session.call_tool("query_catalogue", {}))
+            arguments = {
+                "snapshot_id": initial["snapshot_id"],
+                "cwd": QUERY_CWD,
+                "archive_state": "archived",
+            }
+            for scope, expected in [
+                ("agents", {QUERY_AGENT, QUERY_GUARDIAN}),
+                ("ordinary_agents", {QUERY_AGENT}),
+                ("guardians", {QUERY_GUARDIAN}),
+            ]:
+                result = _data(
+                    await session.call_tool("query_catalogue", {**arguments, "scope": scope})
+                )
+                assert {row["id"] for row in result["histories"]} == {
+                    str(x.value) for x in expected
+                }
+                if QUERY_AGENT in expected:
+                    assert result["groups"][str(QUERY_ROOT.value)]["root"]["id"] == str(
+                        QUERY_ROOT.value
+                    )
+                    assert str(QUERY_ROOT.value) not in {row["id"] for row in result["histories"]}
+            literal = _data(
+                await session.call_tool(
+                    "query_catalogue", {**arguments, "cwd": "/project/Alpha + draft"}
+                )
+            )
+            assert literal["histories"] == []
+            incomplete = _data(
+                await session.call_tool(
+                    "query_catalogue", {**arguments, "archive_state": "unknown", "min_bytes": 50}
+                )
+            )
+            assert [row["id"] for row in incomplete["histories"]] == [str(QUERY_UNKNOWN.value)]
+            assert incomplete["histories"][0]["known_stored_bytes"] == 50
+            assert incomplete["histories"][0]["stored_bytes"] is None
+            refused = await session.call_tool(
+                "query_catalogue", {**arguments, "archive_state": "invalid"}
+            )
+            assert refused.is_error
+
+    asyncio.run(asyncio.wait_for(check(), timeout=60))
 
 
 def test_actual_adapter_cancellation_reaps_owned_worker_and_removes_copies(tmp_path: Path) -> None:

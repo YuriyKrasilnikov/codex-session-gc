@@ -25,6 +25,10 @@ eight outstanding chunks. Results reduce in enumeration order. Each batch settle
 before recursion or parent descriptor closure; the pool joins before return.
 Detached metadata supports filtering, grouping and paging without holding SQL open.
 Unknown membership retains known lower bounds rather than inventing exact totals.
+`CatalogueQuery` owns the conjunctive source, archive and literal-directory
+predicates. Textual and MCP consume the same matching IDs from `CatalogueIndex`,
+retaining complete group context and totals. Filters do not reread storage; an
+explicit catalogue refresh replaces their detached snapshot.
 
 ## Confirmation and execution
 
