@@ -6,9 +6,11 @@ from __future__ import annotations
 import errno
 import os
 import sqlite3
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -87,6 +89,133 @@ def test_invalid_topology_never_invents_selectable_root(tmp_path: Path, kind: st
     assert row.root_id is None
     assert row.issue == "invalid_spawn_topology"
     assert result.diagnostics
+
+
+def _chain_entries(count: int) -> list[catalogue.SessionEntry]:
+    return [
+        catalogue.SessionEntry(
+            ThreadId(UUID(int=number)),
+            "",
+            "",
+            None,
+            ArchiveState.NOT_ARCHIVED,
+            None,
+            None,
+            (),
+            0,
+            None,
+            None,
+        )
+        for number in range(1, count + 1)
+    ]
+
+
+def test_deep_catalogue_chain_has_linear_identity_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Doubling a valid deep chain does not quadruple identity operations."""
+    original_hash = ThreadId.__hash__
+    calls = 0
+
+    def counted_hash(value: ThreadId) -> int:
+        nonlocal calls
+        calls += 1
+        return original_hash(value)
+
+    monkeypatch.setattr(ThreadId, "__hash__", counted_hash)
+    measurements = []
+    for count in (1200, 2400):
+        entries = _chain_entries(count)
+        edges = tuple(
+            (str(parent.id.value), str(child.id.value), "closed")
+            for parent, child in pairwise(entries)
+        )
+        calls = 0
+        diagnostics: list[str] = []
+        observed = catalogue._topology(edges, entries, diagnostics)  # noqa: SLF001
+        measurements.append(calls)
+        assert not diagnostics
+        assert all(entry.root_id == entries[0].id for entry in observed)
+        assert len(observed) == count
+    assert measurements[1] < measurements[0] * 3
+
+
+def test_topology_reuses_roots_without_hiding_invalid_branches() -> None:
+    entries = _chain_entries(9)
+    relations = ((1, 2), (2, 3), (1, 4), (5, 6), (6, 5), (6, 7), (2, 8), (4, 8), (8, 9))
+    edges = tuple(
+        (str(entries[parent - 1].id.value), str(entries[child - 1].id.value), "closed")
+        for parent, child in relations
+    )
+    diagnostics: list[str] = []
+    result = {
+        entry.id: entry
+        for entry in catalogue._topology(edges, entries, diagnostics)  # noqa: SLF001
+    }
+    assert all(result[entries[i - 1].id].root_id == entries[0].id for i in (1, 2, 3, 4))
+    assert all(result[entries[i - 1].id].root_id is None for i in (5, 6, 7, 8, 9))
+    assert all(result[entries[i - 1].id].issue == "invalid_spawn_topology" for i in (5, 6, 7, 8, 9))
+
+
+def test_repeated_malformed_children_have_linear_set_work() -> None:
+    """Account for built-in set updates even when CPython reuses cached hashes."""
+    measurements = []
+    for count in (1200, 2400):
+        entries = _chain_entries(count)
+        edges = tuple((str(entries[0].id.value), "malformed", "closed") for _ in range(count))
+        work = 0
+
+        def measure(_frame: Any, event: str, function: Any) -> None:
+            nonlocal work
+            if event == "c_call":
+                # Merging into an already full invalid set still visits its
+                # members in C, even without any Python __hash__ invocation.
+                target = getattr(function, "__self__", None)
+                work += (
+                    max(1, len(target))
+                    if isinstance(target, set) and function.__name__ == "update"
+                    else 1
+                )
+
+        diagnostics: list[str] = []
+        previous = sys.getprofile()
+        try:
+            sys.setprofile(measure)
+            observed = catalogue._topology(edges, entries, diagnostics)  # noqa: SLF001
+        finally:
+            sys.setprofile(previous)
+        measurements.append(work)
+        assert len(observed) == count
+        assert all(entry.root_id is None for entry in observed)
+        assert all(entry.issue == "invalid_spawn_topology" for entry in observed)
+        assert diagnostics.count("invalid_spawn_child") == count
+        assert diagnostics.count("invalid_spawn_topology") == count
+    assert measurements[1] < measurements[0] * 3
+
+
+def test_malformed_child_invalidates_all_work_without_losing_valid_relations() -> None:
+    entries = _chain_entries(4)
+    first, second, third, fourth = (entry.id for entry in entries)
+    edges = (
+        (str(first.value), str(second.value), "closed"),
+        (str(third.value), "malformed", "closed"),
+        (str(second.value), str(third.value), "active"),
+        (str(fourth.value), "malformed", "open"),
+    )
+    diagnostics: list[str] = []
+    result = {
+        entry.id: entry
+        for entry in catalogue._topology(edges, entries, diagnostics)  # noqa: SLF001
+    }
+    assert set(result) == {first, second, third, fourth}
+    assert all(entry.root_id is None for entry in result.values())
+    assert result[first].children == (second,)
+    assert result[second].parent_id == first
+    assert result[second].children == (third,)
+    assert result[second].agent_status == "closed"
+    assert result[third].parent_id == second
+    assert result[third].agent_status == "active"
+    assert diagnostics == ["invalid_spawn_child"] * 2 + ["invalid_spawn_topology"] * 4
 
 
 @pytest.mark.parametrize("kind", ["missing", "multiple", "corrupt", "schema", "symlink"])

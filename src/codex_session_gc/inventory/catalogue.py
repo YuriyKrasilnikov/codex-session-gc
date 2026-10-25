@@ -380,7 +380,33 @@ def _rows(
     return entries, namespace.complete and not namespace.ambiguous
 
 
-def _topology(  # noqa: C901, PLR0912, PLR0915
+def _roots(
+    parents: dict[ThreadId, set[ThreadId]], invalid: set[ThreadId]
+) -> dict[ThreadId, ThreadId | None]:
+    """Classify each parent chain once, including cycles and invalid branches."""
+    roots: dict[ThreadId, ThreadId | None] = {}
+    for identifier in parents:
+        current = identifier
+        path: set[ThreadId] = set()
+        root = None
+        while current not in roots and current not in path and current not in invalid:
+            path.add(current)
+            incoming = parents.get(current)
+            if incoming is None or len(incoming) > 1:
+                break
+            if not incoming:
+                root = current
+                break
+            current = next(iter(incoming))
+        else:
+            root = roots.get(current)
+        for member in path:
+            roots[member] = root
+        roots[identifier] = root
+    return roots
+
+
+def _topology(  # noqa: C901, PLR0912
     edges: tuple[tuple[object, ...], ...], entries: list[SessionEntry], diagnostics: list[str]
 ) -> tuple[SessionEntry, ...]:
     identifiers = {entry.id for entry in entries}
@@ -388,13 +414,13 @@ def _topology(  # noqa: C901, PLR0912, PLR0915
     children: dict[ThreadId, set[ThreadId]] = {identifier: set() for identifier in identifiers}
     statuses: dict[ThreadId, str] = {}
     invalid: set[ThreadId] = set()
+    unidentified_child = False
     for raw_parent, raw_child, status in edges:
         try:
             child = ThreadId.parse(raw_child)
         except TypeError, ValueError:
             diagnostics.append("invalid_spawn_child")
-            # An unidentifiable child could belong to any visible work.
-            invalid.update(identifiers)
+            unidentified_child = True
             continue
         try:
             parent = ThreadId.parse(raw_parent)
@@ -414,6 +440,10 @@ def _topology(  # noqa: C901, PLR0912, PLR0915
                 statuses[child] = status
         if parent in identifiers:
             children[parent].add(child)
+    if unidentified_child:
+        # An unidentifiable child could belong to any visible work. Repeated
+        # malformed edges do not require merging the entire namespace again.
+        invalid.update(identifiers)
     pending = list(invalid)
     while pending:
         identifier = pending.pop()
@@ -421,20 +451,10 @@ def _topology(  # noqa: C901, PLR0912, PLR0915
             if neighbour not in invalid:
                 invalid.add(neighbour)
                 pending.append(neighbour)
+    roots = _roots(parents, invalid)
     result = []
     for entry in entries:
-        current = entry.id
-        visited: set[ThreadId] = set()
-        root = None
-        while current in identifiers and current not in visited and current not in invalid:
-            visited.add(current)
-            incoming = parents[current]
-            if not incoming:
-                root = current
-                break
-            if len(incoming) != 1:
-                break
-            current = next(iter(incoming))
+        root = roots[entry.id]
         issue = entry.issue
         if root is None:
             issue = "invalid_spawn_topology"
