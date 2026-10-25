@@ -1,0 +1,115 @@
+name: Python source checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: '0.12.8'
+  UV_ARCHIVE_SHA256: 2e2b37e9811e17675a9e70bed5e1a58fc8c0388be63d751d72cc735188c149ff
+  PYTHON_VERSION: '3.14.7'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  python:
+    name: Python source checks
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Require the selected hosted runner and acquisition tools
+        run: |
+          set -eu
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          . /etc/os-release
+          test "$ID" = ubuntu
+          test "$VERSION_ID" = 26.04
+          command -v git
+          command -v curl
+          git --version
+          curl --version
+          uname -a
+      - name: Allocate isolated job resources
+        run: |
+          set -eu
+          gc_ci_root="$(mktemp -d "$RUNNER_TEMP/codex-session-gc-python.XXXXXX")"
+          mkdir "$gc_ci_root/tmp"
+          {
+            echo "GC_CI_ROOT=$gc_ci_root"
+            echo "TMPDIR=$gc_ci_root/tmp"
+            echo "UV_CACHE_DIR=$gc_ci_root/cache"
+            echo "UV_PYTHON_INSTALL_DIR=$gc_ci_root/python"
+            echo "UV_PROJECT_ENVIRONMENT=$gc_ci_root/venv"
+            echo "MYPY_CACHE_DIR=$gc_ci_root/mypy-cache"
+            echo "RUFF_CACHE_DIR=$gc_ci_root/ruff-cache"
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/src"
+          } >> "$GITHUB_ENV"
+          df -h "$gc_ci_root"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          checksum: ${{ env.UV_ARCHIVE_SHA256 }}
+          enable-cache: false
+          cache-local-path: ${{ env.UV_CACHE_DIR }}
+      - name: Prepare pinned Python and locked tools
+        run: |
+          set -eu
+          uv python install --no-config "$PYTHON_VERSION"
+          gc_ci_python="$(uv python find --no-config "$PYTHON_VERSION")"
+          echo "GC_CI_PYTHON=$gc_ci_python" >> "$GITHUB_ENV"
+          uv sync --locked --no-config --no-install-project --no-build --no-python-downloads --python "$gc_ci_python"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -c 'import codex_session_gc, os; from pathlib import Path; source = Path(codex_session_gc.__file__).resolve(); expected = Path(os.environ["GITHUB_WORKSPACE"]) / "src"; print(source); assert source.is_relative_to(expected.resolve())'
+      - name: Record actual runtime and source identities
+        run: |
+          set -eu
+          export GC_CI_SOURCE_COMMIT="$(git rev-parse HEAD)"
+          export GC_CI_UV_ACTUAL="$(uv --version)"
+          export GC_CI_IMAGE_OS="$ImageOS"
+          export GC_CI_IMAGE_VERSION="$ImageVersion"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_runtime > "$GC_CI_ROOT/runtime.json"
+          cat "$GC_CI_ROOT/runtime.json"
+      - name: Lint and type-check
+        run: |
+          set -eu
+          "$UV_PROJECT_ENVIRONMENT/bin/ruff" check src tests tools
+          "$UV_PROJECT_ENVIRONMENT/bin/ruff" format --check src tests tools
+          "$UV_PROJECT_ENVIRONMENT/bin/mypy" src tools
+      - name: Run Python partition without the separately required native partition
+        run: |
+          set -eu
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_pytest tests tools/tests --ignore=tests/test_mcp_native.py --ignore=tests/test_mcp_disconnect.py --ignore=tests/test_mixed_native.py --basetemp "$GC_CI_ROOT/tests" -o "cache_dir=$GC_CI_ROOT/pytest-cache" --junitxml "$GC_CI_ROOT/python.xml"
+          echo 'Python source partition passed. Native and installed interfaces are evaluated by the matched-artifacts job.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain test report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.GC_CI_ROOT }}/python.xml
+            ${{ env.GC_CI_ROOT }}/runtime.json
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Remove only owned job resources
+        if: always()
+        run: |
+          set -eu
+          if [ -n "${GC_CI_ROOT:-}" ]; then
+            case "$GC_CI_ROOT" in
+              "$RUNNER_TEMP"/codex-session-gc-python.*) rm -rf -- "$GC_CI_ROOT" ;;
+              *) echo 'Unexpected cleanup path' >&2; exit 1 ;;
+            esac
+          fi

@@ -1,0 +1,173 @@
+name: Qualified native and installed artifacts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: '0.12.8'
+  UV_ARCHIVE_SHA256: 2e2b37e9811e17675a9e70bed5e1a58fc8c0388be63d751d72cc735188c149ff
+  PYTHON_VERSION: '3.14.7'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  matched-artifacts:
+    name: Qualified native and installed artifacts
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Require the selected hosted runner and acquisition tools
+        run: |
+          set -eu
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          . /etc/os-release
+          test "$ID" = ubuntu
+          test "$VERSION_ID" = 26.04
+          command -v git
+          command -v curl
+          git --version
+          curl --version
+          uname -a
+      - name: Allocate isolated job resources
+        run: |
+          set -eu
+          gc_ci_root="$(mktemp -d "$RUNNER_TEMP/codex-session-gc-artifacts.XXXXXX")"
+          mkdir "$gc_ci_root/tmp" "$gc_ci_root/release"
+          {
+            echo "GC_CI_ROOT=$gc_ci_root"
+            echo "TMPDIR=$gc_ci_root/tmp"
+            echo "UV_CACHE_DIR=$gc_ci_root/cache"
+            echo "UV_PYTHON_INSTALL_DIR=$gc_ci_root/python"
+            echo "UV_PROJECT_ENVIRONMENT=$gc_ci_root/venv"
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/src"
+          } >> "$GITHUB_ENV"
+          test "$(uname -m)" = x86_64
+          ldd --version | head -1
+          df -h "$gc_ci_root"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          checksum: ${{ env.UV_ARCHIVE_SHA256 }}
+          enable-cache: false
+          cache-local-path: ${{ env.UV_CACHE_DIR }}
+      - name: Prepare pinned Python and locked tools
+        run: |
+          set -eu
+          uv python install --no-config "$PYTHON_VERSION"
+          gc_ci_python="$(uv python find --no-config "$PYTHON_VERSION")"
+          echo "GC_CI_PYTHON=$gc_ci_python" >> "$GITHUB_ENV"
+          uv sync --locked --no-config --group build --no-install-project --no-build --no-python-downloads --python "$gc_ci_python"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -c 'import platform; assert platform.machine() == "x86_64"; assert platform.libc_ver() == ("glibc", "2.43"); assert platform.python_version() == "3.14.7"'
+      - name: Record actual runtime and source identities
+        run: |
+          set -eu
+          export GC_CI_SOURCE_COMMIT="$(git rev-parse HEAD)"
+          export GC_CI_UV_ACTUAL="$(uv --version)"
+          export GC_CI_IMAGE_OS="$ImageOS"
+          export GC_CI_IMAGE_VERSION="$ImageVersion"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_runtime > "$GC_CI_ROOT/runtime.json"
+          cat "$GC_CI_ROOT/runtime.json"
+      - name: Verify native inputs and acquire only the pinned qualified helper
+        run: |
+          set -eu
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_native > "$GC_CI_ROOT/native-source.json"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_native --describe > "$GC_CI_ROOT/anchors.json"
+          gc_ci_url="$("$UV_PROJECT_ENVIRONMENT/bin/python" -c 'from tools.ci_native import QUALIFIED; print(QUALIFIED.url)')"
+          gc_ci_bytes="$("$UV_PROJECT_ENVIRONMENT/bin/python" -c 'from tools.ci_native import QUALIFIED; print(QUALIFIED.bundle_bytes)')"
+          curl --fail --location --proto '=https' --max-time 180 --max-filesize "$gc_ci_bytes" --output "$GC_CI_ROOT/qualified.tar.gz" -- "$gc_ci_url"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_native --bundle "$GC_CI_ROOT/qualified.tar.gz" --helper "$GC_CI_ROOT/helper" > "$GC_CI_ROOT/native-reuse.json"
+      - name: Evaluate the required real native interface cases
+        env:
+          GC_MCP_NATIVE_HELPER: ${{ env.GC_CI_ROOT }}/helper
+        run: |
+          set -eu
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_pytest tests/test_mcp_native.py tests/test_mcp_disconnect.py tests/test_mixed_native.py --basetemp "$GC_CI_ROOT/native-tests" -o "cache_dir=$GC_CI_ROOT/native-cache" --junitxml "$GC_CI_ROOT/native.xml"
+      - name: Build real source distribution, wheel and matched bundle
+        run: |
+          set -eu
+          gc_ci_version="$("$UV_PROJECT_ENVIRONMENT/bin/python" -c 'import tomllib; from pathlib import Path; print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])')"
+          echo "GC_CI_VERSION=$gc_ci_version" >> "$GITHUB_ENV"
+          uv build --sdist --no-config --no-python-downloads --no-build-isolation --python "$UV_PROJECT_ENVIRONMENT/bin/python" --out-dir "$GC_CI_ROOT/release"
+          uv build --wheel "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version.tar.gz" --no-config --no-python-downloads --no-build-isolation --python "$UV_PROJECT_ENVIRONMENT/bin/python" --out-dir "$GC_CI_ROOT/release"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" tools/build_release.py --wheel "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version-py3-none-any.whl" --helper "$GC_CI_ROOT/helper" --output "$GC_CI_ROOT/release/codex-session-gc-$gc_ci_version-linux-x86_64"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_release --sdist "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version.tar.gz" --wheel "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version-py3-none-any.whl" --bundle "$GC_CI_ROOT/release/codex-session-gc-$gc_ci_version-linux-x86_64" --helper "$GC_CI_ROOT/helper" > "$GC_CI_ROOT/structure.json"
+      - name: Install the actual bundle outside the checkout
+        run: |
+          set -eu
+          uv venv --no-project --no-python-downloads --python "$GC_CI_PYTHON" "$GC_CI_ROOT/installed-venv"
+          uv export --locked --no-config --no-python-downloads --only-group test --no-emit-project --format requirements-txt > "$GC_CI_ROOT/test-requirements.txt"
+          cd "$GC_CI_ROOT/release/codex-session-gc-$GC_CI_VERSION-linux-x86_64"
+          uv pip install --python "$GC_CI_ROOT/installed-venv/bin/python" --require-hashes --only-binary :all: -r install-requirements.txt
+          uv pip install --python "$GC_CI_ROOT/installed-venv/bin/python" --require-hashes --only-binary :all: -r "$GC_CI_ROOT/test-requirements.txt"
+          mkdir "$GC_CI_ROOT/installed-tests"
+          cp -R "$GITHUB_WORKSPACE/tests" "$GC_CI_ROOT/installed-tests/tests"
+          cp "$GITHUB_WORKSPACE/tools/ci_pytest.py" "$GC_CI_ROOT/installed-tests/ci_pytest.py"
+          cp "$GITHUB_WORKSPACE/pyproject.toml" "$GC_CI_ROOT/installed-tests/pyproject.toml"
+      - name: Evaluate installed doctor, CLI, Textual and MCP
+        env:
+          GC_MCP_NATIVE_HELPER: ${{ env.GC_CI_ROOT }}/release/codex-session-gc-${{ env.GC_CI_VERSION }}-linux-x86_64/codex-session-gc-native
+        run: |
+          set -eu
+          unset PYTHONPATH
+          cd "$GC_CI_ROOT/installed-tests"
+          "$GC_CI_ROOT/installed-venv/bin/python" -c 'import codex_session_gc, sys; from pathlib import Path; source = Path(codex_session_gc.__file__).resolve(); print(source); assert source.is_relative_to(Path(sys.prefix).resolve())'
+          "$GC_CI_ROOT/installed-venv/bin/python" ci_pytest.py tests/test_doctor.py tests/test_closed_work_cli.py tests/test_closed_work_execution_cli.py tests/test_textual_console.py tests/test_mcp_server.py tests/test_mcp_native.py tests/test_mcp_disconnect.py tests/test_mixed_native.py --basetemp "$GC_CI_ROOT/installed-homes" -o "cache_dir=$GC_CI_ROOT/installed-cache" --junitxml "$GC_CI_ROOT/installed.xml"
+      - name: Archive only verified release outputs
+        run: |
+          set -eu
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -C "$GC_CI_ROOT/release" -czf "$GC_CI_ROOT/release/codex-session-gc-$GC_CI_VERSION-linux-x86_64.tar.gz" "codex-session-gc-$GC_CI_VERSION-linux-x86_64"
+          cd "$GC_CI_ROOT/release"
+          sha256sum "codex-session-gc-$GC_CI_VERSION-linux-x86_64.tar.gz" "codex_session_gc-$GC_CI_VERSION-py3-none-any.whl" "codex_session_gc-$GC_CI_VERSION.tar.gz" > SHA256SUMS
+          echo 'Matched source, native and installed-artifact gates passed on this workflow source. No release publication was performed.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain verified artifacts and receipts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: matched-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.GC_CI_ROOT }}/release/codex-session-gc-${{ env.GC_CI_VERSION }}-linux-x86_64.tar.gz
+            ${{ env.GC_CI_ROOT }}/release/codex_session_gc-${{ env.GC_CI_VERSION }}-py3-none-any.whl
+            ${{ env.GC_CI_ROOT }}/release/codex_session_gc-${{ env.GC_CI_VERSION }}.tar.gz
+            ${{ env.GC_CI_ROOT }}/release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+      - name: Retain bounded native and installed test receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: artifact-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.GC_CI_ROOT }}/runtime.json
+            ${{ env.GC_CI_ROOT }}/anchors.json
+            ${{ env.GC_CI_ROOT }}/native-source.json
+            ${{ env.GC_CI_ROOT }}/native-reuse.json
+            ${{ env.GC_CI_ROOT }}/structure.json
+            ${{ env.GC_CI_ROOT }}/native.xml
+            ${{ env.GC_CI_ROOT }}/installed.xml
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Remove only owned job resources
+        if: always()
+        run: |
+          set -eu
+          if [ -n "${GC_CI_ROOT:-}" ]; then
+            case "$GC_CI_ROOT" in
+              "$RUNNER_TEMP"/codex-session-gc-artifacts.*) rm -rf -- "$GC_CI_ROOT" ;;
+              *) echo 'Unexpected cleanup path' >&2; exit 1 ;;
+            esac
+          fi

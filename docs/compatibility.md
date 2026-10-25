@@ -134,6 +134,30 @@ candidate qualification rather than a newly calculated digest being accepted
 automatically. Package structure, native execution and installed interface checks
 remain separate acceptance boundaries.
 
+The workflows use the managed `ubuntu-26.04` x86-64 runner with pinned actions,
+uv 0.12.8 and Python 3.14.7. They check runner identity and git/curl availability
+before source acquisition, and record the actual image version, kernel, libc,
+Python, uv, checkout commit and lock identity. The hosted image label is mutable;
+these records identify a run rather than promise an immutable operating system.
+The artifact lane refuses an unsupported ABI instead of selecting another helper.
+
+The source lane imports from the checkout's `src` directory and evaluates Ruff,
+mypy and the Python test partition. The required native lane supplies the exact
+qualified helper to `test_mcp_native.py`, `test_mcp_disconnect.py` and
+`test_mixed_native.py`; those modules are explicitly excluded from the source
+lane. The CI pytest observer makes skipped cases fail their declared partition.
+Rust qualification fixtures are not rebuilt or rerun for Python-only changes.
+
+The artifact lane builds the sdist, builds its wheel, checks the matched bundle,
+and installs that bundle into a separate environment outside the checkout.
+Installed tests remove the source import path, verify the installed module origin,
+and exercise doctor, CLI, Textual, MCP and receipt observation without replay.
+Each run uses disposable test homes and temporary caches, bounded job timeouts,
+read-only repository permissions and short-lived result artifacts. It does not
+publish a release. A successful hosted run qualifies only its recorded source,
+artifacts and named interfaces; local container compatibility probes do not
+substitute for that run or establish the full upstream application lifecycle.
+
 ## Profile identity and receipt consumers
 
 The saved qualified profile is the entire Payload, including the raw contract JSON
