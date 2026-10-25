@@ -7,22 +7,30 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from anyio import CancelScope
 
-from codex_session_gc.domain import GuardianAssociation, ThreadId, UtcCutoff
-from codex_session_gc.execution.closed_work_operation import ExecutionRequest, execute
+from codex_session_gc.execution.closed_work_operation import (
+    ExecutionRequest,
+    confirmed_execution_request,
+    execute,
+)
 from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
-from codex_session_gc.execution.confirmed_declaration import Declaration, schema_version
-from codex_session_gc.execution.physical_manifest import decode_targets, manifest_bytes
-from codex_session_gc.execution.selection_provenance import association_bindings
-from codex_session_gc.recovery import AttemptId, RecoveryError, inspect
+from codex_session_gc.execution.confirmed_declaration import (
+    Declaration,
+    ReviewedSelection,
+    create_declaration,
+    validate_current_declaration,
+)
+from codex_session_gc.execution.physical_manifest import decode_targets
+from codex_session_gc.recovery import RecoveryError, inspect
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from codex_session_gc.domain import GuardianAssociation
 
 
 def _identifier(value: str) -> str:
@@ -56,19 +64,18 @@ class ConfirmedOperations:
     ) -> Declaration:
         """Allocate the future AttemptId without claiming or dispatching an attempt."""
         helper = load_closed_work_contract()
-        declaration = Declaration(
-            operation_id=str(uuid4()),
+        declaration = create_declaration(
+            ReviewedSelection(
+                roots=roots,
+                selected=selected,
+                cutoff=cutoff,
+                guardian_associations=guardian_associations,
+                physical_manifest=decode_targets(physical_manifest),
+            ),
+            operation_id=uuid4(),
             home_identity=self.home_identity,
-            roots=roots,
-            selected=selected,
-            cutoff=cutoff,
-            profile_sha256=helper.evidence.digest.hex(),
-            schema_version=schema_version(helper),
-            guardian_associations=association_bindings(guardian_associations),
-            physical_manifest=decode_targets(physical_manifest),
-            digest="",
+            helper=helper,
         )
-        declaration = declaration.model_copy(update={"digest": declaration.calculated_digest()})
         with self._lock:
             self._declarations[declaration.operation_id] = declaration
         return declaration
@@ -172,20 +179,11 @@ class ConfirmedOperations:
             self._validate_current(declaration)
             self.receipts.mkdir(parents=True, exist_ok=True)
             report, _ = execute(
-                ExecutionRequest(
-                    command="apply",
+                confirmed_execution_request(
+                    declaration,
                     receipt=path,
                     home=self.home,
-                    cutoff=UtcCutoff(datetime.fromisoformat(declaration.cutoff)),
-                    closed_work=tuple(ThreadId.parse(value) for value in declaration.roots),
-                    select_thread=tuple(ThreadId.parse(value) for value in declaration.selected),
                     helper=self.helper,
-                    attempt_id=AttemptId(UUID(identifier)),
-                    declaration=declaration.model_dump(mode="json"),
-                    reviewed_physical_manifest=manifest_bytes(declaration.physical_manifest),
-                    reviewed_guardian_associations=tuple(
-                        binding.association for binding in declaration.guardian_associations
-                    ),
                 )
             )
             result = {**report, "operation_id": identifier, "dispatch_replayed": False}
@@ -195,14 +193,10 @@ class ConfirmedOperations:
     def _validate_current(self, declaration: Declaration) -> None:
         metadata = self.home.stat()
         helper = load_closed_work_contract()
-        if (
-            declaration.home_identity != self.home_identity
-            or (metadata.st_dev, metadata.st_ino) != self.home_identity
-            or declaration.profile_sha256 != helper.evidence.digest.hex()
-            or declaration.schema_version != schema_version(helper)
-        ):
+        if (metadata.st_dev, metadata.st_ino) != self.home_identity:
             message = "The startup home or qualified profile identity has changed."
             raise ValueError(message)
+        validate_current_declaration(declaration, self.home_identity, helper)
         if self.helper is None:
             message = "No qualified helper is available in the startup configuration."
             raise ValueError(message)

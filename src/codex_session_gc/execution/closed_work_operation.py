@@ -8,7 +8,9 @@ import json
 import math
 import sqlite3
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from codex_session_gc.domain import GuardianAssociation, ThreadId, UtcCutoff
 from codex_session_gc.execution.closed_work_apply import DispatchLimits, apply_closed_work
@@ -20,6 +22,11 @@ from codex_session_gc.execution.closed_work_profile import (
 )
 from codex_session_gc.execution.closed_work_reconcile import FinalState, reconcile
 from codex_session_gc.execution.closed_work_request import review_targets
+from codex_session_gc.execution.confirmed_declaration import (
+    Declaration,
+    saved_declaration,
+    validate_current_declaration,
+)
 from codex_session_gc.execution.physical_manifest import manifest_bytes, validate_reviewed_manifest
 from codex_session_gc.execution.resource_policy import (
     READ_BYTES,
@@ -99,6 +106,31 @@ class ExecutionRequest:
         if self.default_provider == "":
             message = "The default provider must be nonempty."
             raise ValueError(message)
+
+
+def confirmed_execution_request(
+    declaration: Declaration,
+    *,
+    receipt: Path,
+    home: Path,
+    helper: Path | None,
+) -> ExecutionRequest:
+    """Project an exact reviewed binding into the existing one-shot application path."""
+    return ExecutionRequest(
+        command="apply",
+        receipt=receipt,
+        home=home,
+        cutoff=UtcCutoff(datetime.fromisoformat(declaration.cutoff)),
+        closed_work=tuple(ThreadId.parse(value) for value in declaration.roots),
+        select_thread=tuple(ThreadId.parse(value) for value in declaration.selected),
+        helper=helper,
+        attempt_id=AttemptId(UUID(declaration.operation_id)),
+        declaration=declaration.model_dump(mode="json"),
+        reviewed_physical_manifest=manifest_bytes(declaration.physical_manifest),
+        reviewed_guardian_associations=tuple(
+            binding.association for binding in declaration.guardian_associations
+        ),
+    )
 
 
 def _limits(arguments: ExecutionRequest) -> tuple[CollectionLimits, DispatchLimits]:
@@ -196,6 +228,7 @@ def _apply(
         selected_threads=selected,
         physical_inventory=facts.physical_inventory,
     )
+    _confirmed_context(arguments, helper)
     _reviewed_context(arguments, facts, combined, arguments.home, collection)
     if combined.errors:
         report["selectionErrors"] = list(combined.errors)
@@ -384,6 +417,29 @@ def _reconcile(
         if stored.lifecycle_unresolved and not any(unit.unresolved for unit in stored.units)
         else _aggregate(outcomes)
     ).value
+
+
+def _confirmed_context(arguments: ExecutionRequest, helper: QualifiedHelperContract) -> None:
+    """Bind a supplied declaration to this execution before journal creation or dispatch."""
+    if arguments.declaration is None:
+        return
+    if arguments.attempt_id is None or arguments.home is None or arguments.cutoff is None:
+        message = "A confirmed declaration requires its attempt, home and cutoff."
+        raise ValueError(message)
+    declaration = saved_declaration(arguments.declaration, arguments.attempt_id.value, helper)
+    metadata = arguments.home.stat()
+    validate_current_declaration(declaration, (metadata.st_dev, metadata.st_ino), helper)
+    if (
+        declaration.roots != tuple(str(value.value) for value in sorted(arguments.closed_work))
+        or declaration.selected
+        != tuple(str(value.value) for value in sorted(arguments.select_thread or ()))
+        or declaration.cutoff != arguments.cutoff.timestamp.isoformat()
+        or manifest_bytes(declaration.physical_manifest) != arguments.reviewed_physical_manifest
+        or tuple(binding.association for binding in declaration.guardian_associations)
+        != arguments.reviewed_guardian_associations
+    ):
+        message = "The confirmed declaration differs from this execution's reviewed inputs."
+        raise ValueError(message)
 
 
 def _reviewed_context(

@@ -6,16 +6,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, StrictInt, field_validator, model_validator
 
-from codex_session_gc.domain import UtcCutoff
+from codex_session_gc.domain import GuardianAssociation, UtcCutoff
 from codex_session_gc.execution.closed_work_request import DatabaseKind, QualifiedHelperContract
 from codex_session_gc.execution.physical_manifest import WireTarget, decode_targets
-from codex_session_gc.execution.selection_provenance import GuardianBinding, reviewed_associations
+from codex_session_gc.execution.selection_provenance import (
+    GuardianBinding,
+    association_bindings,
+    reviewed_associations,
+)
 
 
 class Declaration(BaseModel):
@@ -100,6 +105,54 @@ def schema_version(helper: QualifiedHelperContract) -> int:
     """Identify the exact declared state migration version; full identity remains hashed."""
     state = next(database for database in helper.databases if database.kind is DatabaseKind.STATE)
     return max((migration[0] for migration in state.migrations), default=0)
+
+
+@dataclass(frozen=True)
+class ReviewedSelection:
+    """Observed selection inputs before binding an operation, home and profile identity."""
+
+    roots: tuple[str, ...]
+    selected: tuple[str, ...]
+    cutoff: str
+    physical_manifest: tuple[WireTarget, ...]
+    guardian_associations: tuple[GuardianAssociation, ...] = ()
+
+
+def create_declaration(
+    selection: ReviewedSelection,
+    *,
+    operation_id: UUID,
+    home_identity: tuple[int, int],
+    helper: QualifiedHelperContract,
+) -> Declaration:
+    """Bind supplied observed inputs without allocating an operation or touching storage."""
+    declaration = Declaration(
+        operation_id=str(operation_id),
+        home_identity=home_identity,
+        roots=selection.roots,
+        selected=selection.selected,
+        cutoff=selection.cutoff,
+        profile_sha256=helper.evidence.digest.hex(),
+        schema_version=schema_version(helper),
+        guardian_associations=association_bindings(selection.guardian_associations),
+        physical_manifest=selection.physical_manifest,
+        digest="",
+    )
+    return declaration.model_copy(update={"digest": declaration.calculated_digest()})
+
+
+def validate_current_declaration(
+    declaration: Declaration, home_identity: tuple[int, int], helper: QualifiedHelperContract
+) -> None:
+    """Require the reviewed home and profile without refreshing any bound input."""
+    if (
+        declaration.home_identity != home_identity
+        or declaration.profile_sha256 != helper.evidence.digest.hex()
+        or declaration.schema_version != schema_version(helper)
+    ):
+        message = "The startup home or qualified profile identity has changed."
+        raise ValueError(message)
+    saved_declaration(declaration.model_dump(mode="json"), UUID(declaration.operation_id), helper)
 
 
 def saved_declaration(

@@ -22,12 +22,17 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from codex_session_gc.cli.console_tasks import Intent, apply_intent, confirmed_intent, preview
 from codex_session_gc.cli.mcp_server import CatalogueService
-from codex_session_gc.domain import GuardianAssociation, LastActivity, ThreadId
+from codex_session_gc.domain import GuardianAssociation, LastActivity, ThreadId, UtcCutoff
 from codex_session_gc.execution import closed_work_operation, confirmed_operation
 from codex_session_gc.execution.closed_work_apply import apply_closed_work
 from codex_session_gc.execution.closed_work_reconcile import FinalState, reconcile
 from codex_session_gc.execution.closed_work_request import ClosedWorkFacts, review_targets
-from codex_session_gc.execution.confirmed_declaration import Declaration
+from codex_session_gc.execution.confirmed_declaration import (
+    Declaration,
+    ReviewedSelection,
+    create_declaration,
+)
+from codex_session_gc.execution.physical_manifest import decode_targets
 from codex_session_gc.inventory.query import CatalogueIndex
 from codex_session_gc.planning.closed_work import select_closed_work
 from codex_session_gc.recovery import AttemptId, inspect
@@ -260,6 +265,135 @@ def test_confirmed_operation_concurrent_duplicate_payload_binding_and_restart(
     with pytest.raises(ValueError, match="different declaration"):
         restarted.apply(changed)
     assert observed.read_text().splitlines() == [root]
+
+
+def test_shared_binding_preserves_mcp_bounds_and_one_shot_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts, _, options, observed = _setup(tmp_path)
+    monkeypatch.setattr(
+        closed_work_operation, "load_closed_work_contract", lambda: options["helper"]
+    )
+    monkeypatch.setattr(closed_work_operation, "read_closed_work_facts", lambda *_a, **_k: facts)
+    root, child = (str(_id(number).value) for number in (1, 2))
+    metadata = options["codex_home"].stat()
+    inputs = ReviewedSelection(
+        roots=(root,),
+        selected=(root, child),
+        cutoff=facts.cutoff.timestamp.isoformat(),
+        physical_manifest=decode_targets(
+            _manifest(facts, (root,), (root, child), options["codex_home"])
+        ),
+    )
+    operation = UUID("00000000-0000-4000-8000-000000000001")
+    declaration = create_declaration(
+        inputs,
+        operation_id=operation,
+        home_identity=(metadata.st_dev, metadata.st_ino),
+        helper=options["helper"],
+    )
+    equivalent = create_declaration(
+        replace(inputs, physical_manifest=decode_targets(declaration.physical_manifest)),
+        operation_id=operation,
+        home_identity=(metadata.st_dev, metadata.st_ino),
+        helper=options["helper"],
+    )
+    assert equivalent == declaration
+    request = closed_work_operation.confirmed_execution_request(
+        declaration,
+        home=options["codex_home"],
+        helper=options["helper_executable"],
+        receipt=options["journal"],
+    )
+    assert request.attempt_id == AttemptId(operation)
+    assert request.closed_work == (_id(1),)
+    assert request.select_thread == (_id(1), _id(2))
+    assert request.declaration == declaration.model_dump(mode="json")
+    assert request.receipt == options["journal"]
+    assert request.home == options["codex_home"]
+    assert request.helper == options["helper_executable"]
+    assert not options["journal"].exists()
+    result, status = closed_work_operation.execute(request)
+    assert status == 0, result
+    assert observed.read_text().splitlines() == [root]
+    (saved,) = inspect(options["journal"])
+    assert saved.start.attempt_id == AttemptId(operation)
+    assert json.loads(saved.start.evidence.data)["operation_declaration"] == declaration.model_dump(
+        mode="json"
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation", ["home", "profile", "cutoff", "attempt", "manifest", "guardian"]
+)
+def test_shared_execution_binding_refuses_changed_inputs_before_receipt_or_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    facts, _, options, observed = _setup(tmp_path)
+    monkeypatch.setattr(confirmed_operation, "load_closed_work_contract", lambda: options["helper"])
+    helper = options["helper"]
+    monkeypatch.setattr(closed_work_operation, "load_closed_work_contract", lambda: helper)
+    monkeypatch.setattr(closed_work_operation, "read_closed_work_facts", lambda *_a, **_k: facts)
+    service = confirmed_operation.ConfirmedOperations(
+        options["codex_home"], options["helper_executable"], tmp_path / "receipts"
+    )
+    root, child = (str(_id(number).value) for number in (1, 2))
+    declaration = service.prepare(
+        (root,),
+        (root, child),
+        facts.cutoff.timestamp.isoformat(),
+        _manifest(facts, (root,), (root, child), options["codex_home"]),
+    )
+    request = closed_work_operation.confirmed_execution_request(
+        declaration,
+        home=options["codex_home"],
+        helper=options["helper_executable"],
+        receipt=options["journal"],
+    )
+    if mutation == "home":
+        other = tmp_path / "other-home"
+        other.mkdir()
+        request = replace(request, home=other)
+    elif mutation == "profile":
+        helper = replace(helper, evidence=replace(helper.evidence, data=b"changed profile"))
+    elif mutation == "cutoff":
+        request = replace(request, cutoff=UtcCutoff(facts.cutoff.timestamp.replace(year=2031)))
+    elif mutation == "attempt":
+        request = replace(request, attempt_id=AttemptId(UUID(int=42)))
+    elif mutation == "manifest":
+        request = replace(request, reviewed_physical_manifest=None)
+    else:
+        request = replace(
+            request, reviewed_guardian_associations=(GuardianAssociation(_id(1), _id(3)),)
+        )
+    result, status = closed_work_operation.execute(request)
+    assert status == 3
+    assert result["outcome"] == "refused"
+    assert not options["journal"].exists()
+    assert not observed.exists()
+
+
+def test_mcp_replaced_startup_home_refuses_before_receipt_or_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts, _, options, observed = _setup(tmp_path)
+    monkeypatch.setattr(confirmed_operation, "load_closed_work_contract", lambda: options["helper"])
+    service = confirmed_operation.ConfirmedOperations(
+        options["codex_home"], options["helper_executable"], tmp_path / "receipts"
+    )
+    root = str(_id(1).value)
+    declaration = service.prepare(
+        (root,),
+        (root,),
+        facts.cutoff.timestamp.isoformat(),
+        _manifest(facts, (root,), (root,), options["codex_home"]),
+    )
+    options["codex_home"].rename(tmp_path / "original-home")
+    options["codex_home"].mkdir()
+    with pytest.raises(ValueError, match="identity has changed"):
+        service.apply(declaration)
+    assert service.status(declaration.operation_id)["state"] == "receipt_absent"
+    assert not observed.exists()
 
 
 def test_changed_reviewed_candidate_set_refuses_before_receipt_or_dispatch(
