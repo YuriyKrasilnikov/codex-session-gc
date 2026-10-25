@@ -14,18 +14,37 @@ import tempfile
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from codex_session_gc.domain import GuardianAssociation, ThreadId, UtcCutoff
-from codex_session_gc.execution.closed_work_operation import ExecutionRequest, execute
+from codex_session_gc.execution.closed_work_operation import confirmed_execution_request, execute
+from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
 from codex_session_gc.execution.closed_work_request import review_targets
-from codex_session_gc.execution.physical_manifest import manifest_bytes, validate_reviewed_manifest
+from codex_session_gc.execution.confirmed_declaration import (
+    Declaration,
+    ReviewedSelection,
+    create_declaration,
+)
+from codex_session_gc.execution.physical_manifest import (
+    decode_targets,
+    manifest_bytes,
+    validate_reviewed_manifest,
+)
 from codex_session_gc.execution.selection_provenance import (
     association_bindings,
     check_reviewed_associations,
     reviewed_associations,
 )
+
+
+class PreviewMode(StrEnum):
+    """Observation stays independent of allocating a confirmation operation."""
+
+    OBSERVE = "observe"
+    CONFIRM = "confirm"
 
 
 @dataclass(frozen=True)
@@ -38,6 +57,7 @@ class Intent:
     selected: tuple[ThreadId, ...]
     reviewed_guardian_associations: tuple[GuardianAssociation, ...] | None = None
     reviewed_physical_manifest: bytes | None = None
+    declaration: Declaration | None = None
 
     def __post_init__(self) -> None:
         """Reject ambiguous duplicate inputs before any storage observation."""
@@ -47,6 +67,19 @@ class Intent:
             validate_reviewed_manifest(self.reviewed_physical_manifest, self.selected)
         if self.reviewed_guardian_associations is not None:
             check_reviewed_associations(self.reviewed_guardian_associations, self.selected)
+        if self.declaration is not None:
+            declaration = self.declaration
+            if (
+                declaration.digest != declaration.calculated_digest()
+                or declaration.roots != tuple(str(value.value) for value in sorted(self.roots))
+                or declaration.selected
+                != tuple(str(value.value) for value in sorted(self.selected))
+                or declaration.cutoff != self.cutoff.timestamp.isoformat()
+                or manifest_bytes(declaration.physical_manifest) != self.reviewed_physical_manifest
+                or tuple(binding.association for binding in declaration.guardian_associations)
+                != self.reviewed_guardian_associations
+            ):
+                raise ValueError("Confirmation binding differs from the reviewed intent.")
 
     def payload(self) -> dict[str, Any]:
         """Serialize only explicit inputs to the private read-only worker."""
@@ -66,11 +99,34 @@ def parse_cutoff(text: str) -> UtcCutoff:
     return UtcCutoff(parsed)
 
 
-def preview(intent: Intent) -> dict[str, Any]:
+def preview(intent: Intent, *, mode: PreviewMode = PreviewMode.OBSERVE) -> dict[str, Any]:
     """Explain an exact selection using scoped metadata and selected headers."""
-    return preview_selection(
+    if mode is PreviewMode.CONFIRM:
+        helper = load_closed_work_contract()
+        metadata = intent.home.stat()
+        home_identity = (metadata.st_dev, metadata.st_ino)
+    report = preview_selection(
         intent.home, intent.cutoff, frozenset(intent.roots), frozenset(intent.selected)
     )
+    if mode is PreviewMode.CONFIRM and not report["errors"] and report["deletions"]:
+        current = intent.home.stat()
+        if (current.st_dev, current.st_ino) != home_identity:
+            raise ValueError("The home identity changed during preview.")
+        reviewed = _reviewed_intent(intent, report)
+        declaration = create_declaration(
+            ReviewedSelection(
+                roots=tuple(str(value.value) for value in sorted(reviewed.roots)),
+                selected=tuple(str(value.value) for value in sorted(reviewed.selected)),
+                cutoff=reviewed.cutoff.timestamp.isoformat(),
+                physical_manifest=decode_targets(report["physical_manifest"]),
+                guardian_associations=reviewed.reviewed_guardian_associations or (),
+            ),
+            operation_id=uuid4(),
+            home_identity=home_identity,
+            helper=helper,
+        )
+        report["declaration"] = declaration.model_dump(mode="json")
+    return report
 
 
 def preview_selection(
@@ -164,7 +220,7 @@ def preview_selection(
     }
 
 
-def confirmed_intent(original: Intent, report: dict[str, Any]) -> Intent:
+def _reviewed_intent(original: Intent, report: dict[str, Any]) -> Intent:
     """Bind confirmation to the displayed inputs and exact candidate subset."""
     if any(report.get(k) != v for k, v in original.payload().items()) or report.get("errors"):
         raise ValueError("Preview does not match the selected inputs or contains errors.")
@@ -188,19 +244,30 @@ def confirmed_intent(original: Intent, report: dict[str, Any]) -> Intent:
     )
 
 
+def confirmed_intent(original: Intent, report: dict[str, Any]) -> Intent:
+    """Keep the worker's exact identity binding through explicit terminal confirmation."""
+    reviewed = _reviewed_intent(original, report)
+    return Intent(
+        reviewed.home,
+        reviewed.cutoff,
+        reviewed.roots,
+        reviewed.selected,
+        reviewed.reviewed_guardian_associations,
+        reviewed.reviewed_physical_manifest,
+        Declaration.model_validate(report.get("declaration")),
+    )
+
+
 def apply_intent(intent: Intent, helper: Path, receipt: Path) -> tuple[dict[str, Any], int]:
     """Reuse the existing execution lifecycle with an explicit immutable subset."""
+    if intent.declaration is None:
+        raise ValueError("Apply requires the reviewed confirmation binding.")
     return execute(
-        ExecutionRequest(
-            command="apply",
+        confirmed_execution_request(
+            intent.declaration,
             receipt=receipt,
             home=intent.home,
-            cutoff=intent.cutoff,
-            closed_work=intent.roots,
-            select_thread=intent.selected,
             helper=helper,
-            reviewed_guardian_associations=intent.reviewed_guardian_associations,
-            reviewed_physical_manifest=intent.reviewed_physical_manifest,
         )
     )
 
@@ -222,7 +289,9 @@ def _preview_result(path: Path) -> dict[str, Any]:
     return result
 
 
-async def async_preview(intent: Intent) -> dict[str, Any]:
+async def async_preview(
+    intent: Intent, *, mode: PreviewMode = PreviewMode.OBSERVE
+) -> dict[str, Any]:
     """Own one read-only process without global signals, including through cancellation.
 
     Cancellation shields spawn and cleanup. The worker gets five seconds to exit
@@ -254,7 +323,9 @@ async def async_preview(intent: Intent) -> dict[str, Any]:
             directory.cleanup()
 
     try:
-        (path / "input.json").write_text(json.dumps(intent.payload()), encoding="utf-8")
+        (path / "input.json").write_text(
+            json.dumps({**intent.payload(), "mode": mode.value}), encoding="utf-8"
+        )
         launch = asyncio.create_task(
             asyncio.create_subprocess_exec(
                 sys.executable,
@@ -293,7 +364,7 @@ def _worker(directory: Path) -> None:
             tuple(ThreadId.parse(x) for x in data["roots"]),
             tuple(ThreadId.parse(x) for x in data["selected"]),
         )
-        result = preview(intent)
+        result = preview(intent, mode=PreviewMode(data["mode"]))
     except Exception as error:  # noqa: BLE001
         result = {"error": str(error)}
     (directory / "result.json").write_text(json.dumps(result), encoding="utf-8")

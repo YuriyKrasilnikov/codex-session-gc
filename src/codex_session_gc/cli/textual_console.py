@@ -28,6 +28,7 @@ from codex_session_gc.cli.console_display import (
 )
 from codex_session_gc.cli.console_tasks import (
     Intent,
+    PreviewMode,
     apply_intent,
     async_preview,
     confirmed_intent,
@@ -485,7 +486,7 @@ class SessionApp(App[tuple[str, int]]):
     async def _preview(self, intent: Intent) -> None:
         report: dict[str, Any] | None = None
         try:
-            report = await async_preview(intent)
+            report = await async_preview(intent, mode=PreviewMode.CONFIRM)
             labels = (
                 {
                     str(entry.id.value): clean(f"{entry.title[:300]} | {entry.cwd[:300]}")

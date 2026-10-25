@@ -20,7 +20,14 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
-from codex_session_gc.cli.console_tasks import Intent, apply_intent, confirmed_intent, preview
+from codex_session_gc.cli import console_tasks
+from codex_session_gc.cli.console_tasks import (
+    Intent,
+    PreviewMode,
+    apply_intent,
+    confirmed_intent,
+    preview,
+)
 from codex_session_gc.cli.mcp_server import CatalogueService
 from codex_session_gc.domain import GuardianAssociation, LastActivity, ThreadId, UtcCutoff
 from codex_session_gc.execution import closed_work_operation, confirmed_operation
@@ -584,7 +591,8 @@ def test_reviewed_guardian_association_change_refuses_before_receipt_or_dispatch
     )
     monkeypatch.setattr(confirmed_operation, "load_closed_work_contract", lambda: options["helper"])
     original = Intent(home, facts.cutoff, (_id(3),), (_id(3),))
-    report = preview(original)
+    monkeypatch.setattr(console_tasks, "load_closed_work_contract", lambda: options["helper"])
+    report = preview(original, mode=PreviewMode.CONFIRM)
     reviewed = confirmed_intent(original, report)
     associations = reviewed.reviewed_guardian_associations
     assert associations is not None
@@ -611,3 +619,86 @@ def test_reviewed_guardian_association_change_refuses_before_receipt_or_dispatch
     assert result["outcome"] == "refused"
     assert "association changed" in result["detail"]
     assert not observed.exists()
+
+
+@pytest.mark.parametrize("mutation", ["home", "profile"])
+def test_terminal_confirmation_retains_preview_identity_until_apply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    facts, _, options, observed = _setup(tmp_path)
+    helper = options["helper"]
+    monkeypatch.setattr(console_tasks, "load_closed_work_contract", lambda: helper)
+    monkeypatch.setattr(closed_work_operation, "load_closed_work_contract", lambda: helper)
+    monkeypatch.setattr(closed_work_operation, "read_closed_work_facts", lambda *_a, **_k: facts)
+    original = Intent(options["codex_home"], facts.cutoff, (_id(1),), (_id(1), _id(2)))
+    report = preview(original, mode=PreviewMode.CONFIRM)
+    reviewed = confirmed_intent(original, report)
+    assert reviewed.declaration is not None
+    assert reviewed.declaration.model_dump(mode="json") == report["declaration"]
+    if mutation == "home":
+        options["codex_home"].rename(tmp_path / "previous-home")
+        options["codex_home"].mkdir()
+    else:
+        helper = replace(helper, evidence=replace(helper.evidence, data=b"changed profile"))
+    result, status = apply_intent(reviewed, options["helper_executable"], options["journal"])
+    assert status == 3
+    assert result["outcome"] == "refused"
+    assert not options["journal"].exists()
+    assert not observed.exists()
+
+
+def test_terminal_confirmation_uses_one_preview_uuid_and_never_replays_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts, _, options, observed = _setup(tmp_path)
+    monkeypatch.setattr(console_tasks, "load_closed_work_contract", lambda: options["helper"])
+    monkeypatch.setattr(
+        closed_work_operation, "load_closed_work_contract", lambda: options["helper"]
+    )
+    original = Intent(options["codex_home"], facts.cutoff, (_id(1),), (_id(1), _id(2)))
+    reviewed = confirmed_intent(original, preview(original, mode=PreviewMode.CONFIRM))
+    assert reviewed.declaration is not None
+    result, status = apply_intent(reviewed, options["helper_executable"], options["journal"])
+    assert status == 0, result
+    assert result["attemptId"] == reviewed.declaration.operation_id
+    (saved,) = inspect(options["journal"])
+    assert str(saved.start.attempt_id.value) == reviewed.declaration.operation_id
+    assert json.loads(saved.start.evidence.data)["operation_declaration"] == (
+        reviewed.declaration.model_dump(mode="json")
+    )
+    consumed = observed.read_bytes()
+    _, repeated_status = apply_intent(reviewed, options["helper_executable"], options["journal"])
+    assert repeated_status == 3
+    assert observed.read_bytes() == consumed
+
+
+def test_terminal_confirmation_binds_only_preview_candidates_from_larger_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts, _, options, observed = _setup(tmp_path)
+    monkeypatch.setattr(console_tasks, "load_closed_work_contract", lambda: options["helper"])
+    monkeypatch.setattr(
+        closed_work_operation, "load_closed_work_contract", lambda: options["helper"]
+    )
+    with sqlite3.connect(options["codex_home"] / "state_5.sqlite") as connection:
+        connection.execute(
+            "UPDATE threads SET updated_at_ms=? WHERE id=?",
+            (int(facts.cutoff.timestamp.timestamp() * 1000), str(_id(3).value)),
+        )
+    original = Intent(
+        options["codex_home"], facts.cutoff, (_id(1), _id(3)), (_id(1), _id(2), _id(3))
+    )
+    report = preview(original, mode=PreviewMode.CONFIRM)
+    assert report["selected"] == [str(_id(number).value) for number in (1, 2, 3)]
+    assert report["deletions"] == [str(_id(number).value) for number in (1, 2)]
+    assert report["retained"]
+    reviewed = confirmed_intent(original, report)
+    assert reviewed.selected == (_id(1), _id(2))
+    result, status = apply_intent(reviewed, options["helper_executable"], options["journal"])
+    assert status == 4, result
+    assert observed.read_text().splitlines() == [str(_id(1).value)]
+    (saved,) = inspect(options["journal"])
+    assert (
+        json.loads(saved.start.evidence.data)["operation_declaration"]["selected"]
+        == (report["deletions"])
+    )

@@ -38,11 +38,12 @@ allocated or reclaimed space. Incomplete observations expose unknown totals;
 conditional reclaim is a selected stored-byte estimate, never measured recovery.
 
 Preview is read-only and non-executable. Apply observes fresh facts rather than
-executing a saved preview. Textual confirmation binds the home path, cutoff, roots, selected IDs, physical
-manifest and Guardian associations. It does not bind the preview's qualified
-profile or startup home identity. MCP uses a stronger declaration that additionally
-binds startup home identity and the exact qualified profile. A changed Guardian
-association refuses dispatch. A declaration digest does not establish human
+executing a saved preview. Textual and MCP confirmation bind the home identity,
+exact qualified profile, operation UUID, cutoff, roots, selected IDs, physical
+manifest and Guardian associations. Textual carries the declaration from its
+reviewed preview through literal `DELETE`; ordinary read-only previews allocate
+no operation. Changed home/profile identities or Guardian associations refuse
+dispatch. A declaration digest does not establish human
 consent; the caller must explicitly authorize cleanup.
 
 ## Native execution

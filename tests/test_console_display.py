@@ -7,6 +7,7 @@ import hashlib
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 import pytest
 
@@ -14,6 +15,11 @@ from codex_session_gc.cli import console_display as ui
 from codex_session_gc.cli import console_tasks as tasks
 from codex_session_gc.cli.main import main
 from codex_session_gc.domain import GuardianAssociation, ThreadId, UtcCutoff
+from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
+from codex_session_gc.execution.confirmed_declaration import ReviewedSelection, create_declaration
+from codex_session_gc.execution.parent_relation import GuardianParent, relation_payload
+from codex_session_gc.execution.physical_manifest import decode_targets
+from codex_session_gc.execution.selection_provenance import association_bindings
 from tests.current_storage_fixture import _review_manifest
 
 if TYPE_CHECKING:
@@ -25,11 +31,43 @@ _UNKNOWN = ThreadId.parse("00000000-0000-7000-8000-000000000003")
 _DATE = UtcCutoff(datetime(2030, 1, 1, tzinfo=UTC))
 
 
-def _report(intent: tasks.Intent, deletions: tuple[ThreadId, ...] | None = None) -> dict[str, Any]:
+def _report(
+    intent: tasks.Intent,
+    deletions: tuple[ThreadId, ...] | None = None,
+    associations: tuple[GuardianAssociation, ...] = (),
+) -> dict[str, Any]:
+    selected = deletions or intent.selected
+    targets = _review_manifest(selected)
+    parents = {
+        str(association.guardian_thread_id.value): GuardianParent(
+            association.associated_parent_thread_id
+        )
+        for association in associations
+    }
+    for target in targets:
+        if target["thread_id"] in parents:
+            target["source"] = {"subagent": {"other": "guardian"}}
+            target["parent_relation"] = relation_payload(parents[target["thread_id"]])
+    metadata = intent.home.stat()
+    declaration = create_declaration(
+        ReviewedSelection(
+            roots=tuple(str(value.value) for value in sorted(intent.roots)),
+            selected=tuple(str(value.value) for value in sorted(selected)),
+            cutoff=intent.cutoff.timestamp.isoformat(),
+            physical_manifest=decode_targets(targets),
+            guardian_associations=associations,
+        ),
+        operation_id=uuid4(),
+        home_identity=(metadata.st_dev, metadata.st_ino),
+        helper=load_closed_work_contract(),
+    )
     return {
         **intent.payload(),
-        "guardian_associations": [],
-        "physical_manifest": _review_manifest(deletions or intent.selected),
+        "guardian_associations": [
+            binding.model_dump(mode="json") for binding in association_bindings(associations)
+        ],
+        "physical_manifest": targets,
+        "declaration": declaration.model_dump(mode="json"),
         "shared_retained_bytes": 0,
         "conditional_reclaim_bytes": None,
         "deletions": [str(x.value) for x in deletions or intent.selected],
@@ -142,13 +180,7 @@ def test_result_keeps_per_work_reasons_and_sanitizes_terminal_control() -> None:
 
 def test_guardian_review_displays_and_freezes_historical_parent(tmp_path: Path) -> None:
     intent = tasks.Intent(tmp_path, _DATE, (_AGENT,), (_AGENT,))
-    report = _report(intent)
-    report["guardian_associations"] = [
-        {
-            "guardian_thread_id": str(_AGENT.value),
-            "associated_parent_thread_id": str(_UNKNOWN.value),
-        }
-    ]
+    report = _report(intent, associations=(GuardianAssociation(_AGENT, _UNKNOWN),))
     text = "\n".join(ui.preview_lines(report))
     assert str(_UNKNOWN.value) in text
     reviewed = tasks.confirmed_intent(intent, report)

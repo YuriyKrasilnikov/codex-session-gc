@@ -14,12 +14,16 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 import pytest
 from textual.widgets import DataTable, Input, Select, Static
 
 from codex_session_gc.cli import textual_console as ui
 from codex_session_gc.domain import ArchiveState, ThreadId, UtcCutoff
+from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
+from codex_session_gc.execution.confirmed_declaration import ReviewedSelection, create_declaration
+from codex_session_gc.execution.physical_manifest import decode_targets
 from codex_session_gc.inventory.catalogue import SessionCatalogue, SessionEntry, SessionSource
 from tests.current_storage_fixture import _catalogue_home as catalogue_home
 from tests.current_storage_fixture import _review_manifest, _stored_rollout
@@ -64,6 +68,18 @@ def catalogue() -> SessionCatalogue:
 
 
 def report(intent: Intent) -> dict[str, Any]:
+    metadata = intent.home.stat()
+    declaration = create_declaration(
+        ReviewedSelection(
+            roots=tuple(str(value.value) for value in sorted(intent.roots)),
+            selected=tuple(str(value.value) for value in sorted(intent.selected)),
+            cutoff=intent.cutoff.timestamp.isoformat(),
+            physical_manifest=decode_targets(_review_manifest(intent.selected)),
+        ),
+        operation_id=uuid4(),
+        home_identity=(metadata.st_dev, metadata.st_ino),
+        helper=load_closed_work_contract(),
+    )
     return {
         **intent.payload(),
         "guardian_associations": [],
@@ -75,6 +91,7 @@ def report(intent: Intent) -> dict[str, Any]:
         "retained": [],
         "errors": [],
         "conditional": True,
+        "declaration": declaration.model_dump(mode="json"),
     }
 
 
@@ -90,7 +107,8 @@ def test_filters_groups_and_exact_bulk_selection(
         browser = app(tmp_path, monkeypatch)
         captured = []
 
-        async def preview(intent: Intent) -> dict[str, Any]:
+        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
+            assert mode is ui.PreviewMode.CONFIRM
             captured.append(intent)
             return report(intent)
 
@@ -129,7 +147,8 @@ def test_preview_cancel_waits_for_owned_cleanup(
         browser = app(tmp_path, monkeypatch)
         started, cleaned = asyncio.Event(), asyncio.Event()
 
-        async def preview(_intent: Intent) -> dict[str, Any]:
+        async def preview(_intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
+            assert mode is ui.PreviewMode.CONFIRM
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -159,7 +178,8 @@ def test_dispatch_cannot_quit_or_dispatch_twice(
         entered, release = asyncio.Event(), asyncio.Event()
         calls = []
 
-        async def preview(intent: Intent) -> dict[str, Any]:
+        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
+            assert mode is ui.PreviewMode.CONFIRM
             return report(intent)
 
         def execute(intent: Intent, _helper: Path, _receipt: Path) -> tuple[dict[str, Any], int]:
@@ -197,7 +217,7 @@ def test_async_preview_public_report_and_cancellation_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from codex_session_gc.cli import console_tasks  # noqa: PLC0415
-    from tests.current_storage_fixture import _MAIN, _native_home  # noqa: PLC0415
+    from tests.current_storage_fixture import _GRANDCHILD, _MAIN, _native_home  # noqa: PLC0415
 
     home = tmp_path / "home"
     home.mkdir()
@@ -212,8 +232,20 @@ def test_async_preview_public_report_and_cancellation_cleanup(
         result = await console_tasks.async_preview(intent)
         assert result["home"] == str(home)
         assert result["selected"] == [_MAIN]
+        assert "declaration" not in result
         assert list(temporary.iterdir()) == []
-        task = asyncio.create_task(console_tasks.async_preview(intent))
+        leaf = console_tasks.Intent(home, CUTOFF, (identifier,), (ThreadId.parse(_GRANDCHILD),))
+        bound = await console_tasks.async_preview(leaf, mode=ui.PreviewMode.CONFIRM)
+        reviewed = console_tasks.confirmed_intent(leaf, bound)
+        assert reviewed.declaration is not None
+        metadata = home.stat()
+        assert reviewed.declaration.home_identity == (metadata.st_dev, metadata.st_ino)
+        assert (
+            reviewed.declaration.profile_sha256 == load_closed_work_contract().evidence.digest.hex()
+        )
+        assert reviewed.declaration.model_dump(mode="json") == bound["declaration"]
+        assert list(temporary.iterdir()) == []
+        task = asyncio.create_task(console_tasks.async_preview(leaf, mode=ui.PreviewMode.CONFIRM))
         await asyncio.sleep(0)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -292,7 +324,8 @@ def test_review_locks_selection_and_resets_confirmation(
     async def scenario() -> None:
         browser = app(tmp_path, monkeypatch)
 
-        async def preview(intent: Intent) -> dict[str, Any]:
+        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
+            assert mode is ui.PreviewMode.CONFIRM
             return report(intent)
 
         monkeypatch.setattr(ui, "async_preview", preview)
@@ -329,7 +362,8 @@ def test_retention_and_errors_visible_without_executable_candidates(
     async def scenario() -> None:
         browser = app(tmp_path, monkeypatch)
 
-        async def preview(intent: Intent) -> dict[str, Any]:
+        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
+            assert mode is ui.PreviewMode.CONFIRM
             return {
                 **report(intent),
                 "deletions": [],
@@ -360,7 +394,8 @@ def test_forced_teardown_joins_dispatched_backend(
         entered, release = asyncio.Event(), asyncio.Event()
         loop = asyncio.get_running_loop()
 
-        async def preview(intent: Intent) -> dict[str, Any]:
+        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
+            assert mode is ui.PreviewMode.CONFIRM
             return report(intent)
 
         def execute(_intent: Intent, _helper: Path, _receipt: Path) -> tuple[dict[str, Any], int]:
@@ -473,7 +508,8 @@ def test_dispatch_requires_literal_confirmation(
         browser = app(tmp_path, monkeypatch)
         calls = []
 
-        async def preview(intent: Intent) -> dict[str, Any]:
+        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
+            assert mode is ui.PreviewMode.CONFIRM
             return report(intent)
 
         def execute(*_args: object) -> tuple[dict[str, Any], int]:

@@ -23,6 +23,7 @@ from mcp.types import TextContent
 
 from codex_session_gc.cli.console_tasks import (
     Intent,
+    PreviewMode,
     apply_intent,
     confirmed_intent,
     parse_cutoff,
@@ -346,11 +347,11 @@ def test_ui_apply_intent_deletes_only_explicit_child_with_real_helper(
     before = logical_rows(home)
     retained = {identifier: paths[identifier].read_bytes() for identifier in (ROOT, OTHER)}
     receipt = tmp_path / "ui-receipt.sqlite"
-    result, status = apply_intent(
-        Intent(home, parse_cutoff("2030-01-01"), (ThreadId.parse(ROOT),), (ThreadId.parse(CHILD),)),
-        native_helper,
-        receipt,
+    original = Intent(
+        home, parse_cutoff("2030-01-01"), (ThreadId.parse(ROOT),), (ThreadId.parse(CHILD),)
     )
+    reviewed = confirmed_intent(original, preview(original, mode=PreviewMode.CONFIRM))
+    result, status = apply_intent(reviewed, native_helper, receipt)
     assert status == 0
     assert result["outcome"] == "confirmed", result
     assert len(result["roots"]) == 1
@@ -496,7 +497,7 @@ def test_guardian_ui_reviewed_apply_exact_effects_with_parent_writer(
     original = Intent(
         home, parse_cutoff("2030-01-01"), (ThreadId.parse(CHILD),), (ThreadId.parse(CHILD),)
     )
-    reviewed = confirmed_intent(original, preview(original))
+    reviewed = confirmed_intent(original, preview(original, mode=PreviewMode.CONFIRM))
     assert reviewed.reviewed_guardian_associations is not None
     (association,) = reviewed.reviewed_guardian_associations
     assert str(association.associated_parent_thread_id.value) == ROOT

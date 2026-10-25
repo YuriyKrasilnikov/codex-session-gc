@@ -32,6 +32,12 @@ Preparation is conditional. UI cancellation before dispatch joins its preview
 worker. After dispatch the adapter joins the owned operation and preserves result
 and receipt even if a transport response is lost. MCP fixes helper and receipt
 location at startup; tools cannot substitute executable paths or receipt roots.
+Textual requests a confirmation preview explicitly; ordinary observation allocates
+no operation. Its worker binds the observed home identity, qualified profile and
+exact selection to one operation UUID. The reviewed declaration travels unchanged
+through confirmation into the shared execution mapping. Fresh execution checks
+those identities and the reviewed physical/Guardian context before a receipt or
+native dispatch.
 
 The native command is launched through the packaged `owned_launch.py` gate. It
 requires an exact grant within five seconds before replacing its own process.

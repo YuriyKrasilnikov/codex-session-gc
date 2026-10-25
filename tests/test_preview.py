@@ -13,7 +13,8 @@ from uuid import UUID
 
 import pytest
 
-from codex_session_gc.cli.console_tasks import Intent, confirmed_intent, preview
+from codex_session_gc.cli import console_tasks
+from codex_session_gc.cli.console_tasks import Intent, PreviewMode, confirmed_intent, preview
 from codex_session_gc.cli.main import main
 from codex_session_gc.domain import ThreadId, UtcCutoff
 from codex_session_gc.execution.closed_work_facts import read_closed_work_facts
@@ -85,7 +86,7 @@ def test_preview_and_cli_share_exact_conditional_selection(
     assert expected["incomingReferencesComplete"]
     assert not expected["closureCertified"]
     assert not expected["executable"]
-    reviewed = confirmed_intent(intent, expected)
+    reviewed = confirmed_intent(intent, preview(intent, mode=PreviewMode.CONFIRM))
     assert (
         reviewed.payload(),
         intent.reviewed_guardian_associations,
@@ -129,6 +130,18 @@ def test_preview_reads_selected_headers_independently_of_history_body_size(tmp_p
     assert observed["sizes"] == [2 * 1024**3]
     assert consumed < 1024**2
     assert set(tmp_path.rglob("*")) == before_files
+
+
+def test_observation_preview_allocates_no_confirmation_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Read-only reports require neither a UUID nor an executable confirmation binding."""
+    intent = work_home(tmp_path)
+    monkeypatch.setattr(console_tasks, "uuid4", lambda: pytest.fail("Allocated an operation"))
+    report = preview(intent)
+    assert report["deletions"] == [str(AGENT.value)]
+    assert "declaration" not in report
+    assert not report["executable"]
 
 
 def _read_bytes() -> int:
@@ -179,7 +192,10 @@ def test_confirmation_is_independent_of_input_order(tmp_path: Path) -> None:
     intent = Intent(tmp_path, CUTOFF, (ROOT,), (AGENT, ROOT))
     report = preview(intent)
     assert report == preview(Intent(tmp_path, CUTOFF, (ROOT,), (ROOT, AGENT)))
-    assert set(confirmed_intent(intent, report).selected) == {ROOT, AGENT}
+    assert set(confirmed_intent(intent, preview(intent, mode=PreviewMode.CONFIRM)).selected) == {
+        ROOT,
+        AGENT,
+    }
     with pytest.raises(ValueError, match=r".+"):
         Intent(tmp_path, CUTOFF, (ROOT,), (AGENT, AGENT))
 
