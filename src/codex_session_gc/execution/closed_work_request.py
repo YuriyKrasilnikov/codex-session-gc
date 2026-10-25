@@ -343,7 +343,7 @@ def prepare_request(  # noqa: C901, PLR0912, PLR0915
             if namespace[contract.kind] is None:
                 continue
             with _read_transaction(source, budget) as connection:
-                _validate_schema(connection, contract)
+                validate_database_schema(connection, contract)
                 bounds.append(
                     _bound(
                         connection,
@@ -428,7 +428,8 @@ def prepare_request(  # noqa: C901, PLR0912, PLR0915
         raise PreparationRefused(str(error)) from error
 
 
-def _validate_schema(connection: sqlite3.Connection, contract: DatabaseContract) -> None:
+def validate_database_schema(connection: sqlite3.Connection, contract: DatabaseContract) -> None:
+    """Compare exact DDL and migration identities on a caller-owned connection."""
     exception = "" if contract.kind is DatabaseKind.BOARD else " AND name!='_sqlx_migrations'"
     rows = tuple(
         connection.execute(
@@ -440,13 +441,18 @@ def _validate_schema(connection: sqlite3.Connection, contract: DatabaseContract)
     if rows != contract.schema:
         raise PreparationRefused("The database schema is outside the qualified contract.")
     if contract.kind is not DatabaseKind.BOARD:
-        migrations = tuple(
-            (version, bytes(checksum), bool(success))
-            for version, checksum, success in connection.execute(
-                "SELECT version,checksum,success FROM _sqlx_migrations ORDER BY version"
-            )
-        )
-        if migrations != contract.migrations:
+        migration_rows: list[MigrationRow] = []
+        for version, checksum, success in connection.execute(
+            "SELECT version,checksum,success FROM _sqlx_migrations ORDER BY version"
+        ):
+            if type(version) is not int:
+                raise PreparationRefused("Migration versions must be SQLite INTEGER values.")
+            if type(success) is not int or success not in (0, 1):
+                raise PreparationRefused("Migration success must be SQLite INTEGER 0 or 1.")
+            if type(checksum) is not bytes:
+                raise PreparationRefused("Migration checksums must be SQLite BLOB values.")
+            migration_rows.append((version, checksum, bool(success)))
+        if tuple(migration_rows) != contract.migrations:
             raise PreparationRefused("The migration identities are unqualified.")
 
 

@@ -82,6 +82,32 @@ The project is licensed under [Apache-2.0](LICENSE). [NOTICE](NOTICE) retains
 upstream attribution. The `third_party` directory contains dependency notices and
 their source index; these accompany source packages, wheels and release bundles.
 
+## Diagnose compatibility
+
+Observe the installed profile, supplied helper and exact database schemas before
+investigating a Codex update:
+
+```sh
+codex-session-gc doctor --home /absolute/codex-home --helper /absolute/release/codex-session-gc-native
+codex-session-gc doctor --home /absolute/codex-home --helper /absolute/release/codex-session-gc-native --json
+```
+
+The report shows the raw installed profile SHA-256, source identity, expected and
+observed helper digests, and each declared database's schema/migration result.
+An absent optional database differs from a missing authoritative state database,
+a mismatch, or an unavailable observation. Exit status is 0 when the supplied
+helper and present databases match, 1 for a known mismatch or missing state, and
+3 for incomplete observations without a known mismatch. Omitting `--helper`
+leaves that observation unknown. `--max-read-bytes` and `--timeout-seconds`
+control observation bounds using the existing execution defaults.
+
+Doctor does not change user tables or histories, copy storage, create receipts,
+launch the helper, or acquire application maintenance/writer ownership. Ordinary
+SQLite read transactions can create or update WAL/SHM coordination files and use
+SQLite locks. Results are separate observations, not a global snapshot or
+permission to delete; execution still requires native ownership and fresh checks.
+See [compatibility](docs/compatibility.md) for the supported boundary.
+
 ## Browse and select
 
 The browser opens with the largest work groups first. Each group shows its own

@@ -639,7 +639,7 @@ def _observe(
             continue
         source = request.sqlite_home / contract.kind.value
         with collector._read_transaction(source, budget) as connection:
-            collector._validate_schema(connection, contract)
+            collector.validate_database_schema(connection, contract)
             _effects_absent(connection, contract.kind, request, budget)
     if any(
         collector._sample(request.sqlite_home / kind.value) != identity

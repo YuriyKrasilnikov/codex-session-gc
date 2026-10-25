@@ -8,14 +8,17 @@ import argparse
 import json
 import sqlite3
 import sys
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from codex_session_gc import diagnostics
 from codex_session_gc.cli import closed_work_execution
 from codex_session_gc.cli.console_display import preview_lines
 from codex_session_gc.cli.console_tasks import preview_selection
 from codex_session_gc.domain import ThreadId, UtcCutoff
+from codex_session_gc.execution.resource_policy import READ_BYTES, TIMEOUT_SECONDS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -60,6 +63,12 @@ def _parser() -> argparse.ArgumentParser:
     """Expose one supported cleanup route and its browsing adapters."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    doctor = commands.add_parser("doctor", help="Observe helper and exact storage compatibility")
+    doctor.add_argument("--home", type=Path, required=True)
+    doctor.add_argument("--helper", type=Path)
+    doctor.add_argument("--max-read-bytes", type=int, default=READ_BYTES)
+    doctor.add_argument("--timeout-seconds", type=float, default=TIMEOUT_SECONDS)
+    doctor.add_argument("--json", action="store_true")
     ui = commands.add_parser("ui", help="Browse and select histories with Textual")
     ui.add_argument("--home", type=Path)
     ui.add_argument("--helper", type=Path)
@@ -113,6 +122,23 @@ def _print_preview(report: dict[str, Any]) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one current command; unsupported commands fail during argument parsing."""
     arguments = _parser().parse_args(argv)
+    if arguments.command == "doctor":
+        try:
+            doctor_report = diagnostics.inspect_compatibility(
+                arguments.home.expanduser().absolute(),
+                arguments.helper.expanduser().absolute() if arguments.helper is not None else None,
+                maximum_read_bytes=arguments.max_read_bytes,
+                timeout_seconds=arguments.timeout_seconds,
+            )
+        except ValueError as error:
+            _parser().error(str(error))
+        output = (
+            json.dumps(asdict(doctor_report), sort_keys=True)
+            if arguments.json
+            else diagnostics.terminal(doctor_report)
+        )
+        sys.stdout.write(output + "\n")
+        return doctor_report.exit_code
     if arguments.command == "ui":
         from codex_session_gc.cli import textual_console  # noqa: PLC0415
 

@@ -28,6 +28,32 @@ Download a matched bundle; changing only the helper or only a profile JSON file
 is not an upgrade. Existing receipt consumers must be retained while their
 outcomes remain unresolved.
 
+## Read-only compatibility observations
+
+`doctor --home /absolute/codex-home --helper /absolute/release/codex-session-gc-native`
+reports the installed raw profile hash and source identity, the supplied helper's
+expected/observed digest, and exact schema/migration matches for each database
+named by that profile. Add `--json` for structured observations. The schema
+comparator is shared with cleanup preparation and reconciliation; the catalogue's
+weaker advisory column/foreign-key check remains distinct.
+
+A loaded profile describes the installed package's existing qualification; loading
+it does not qualify new bytes. The helper must be a regular executable with the
+exact declared digest and unchanged observed identity. Missing optional databases
+stay absent; missing authoritative state, exact-schema mismatch and unknown
+observations have separate results. Unreadable/corrupt storage, unsafe paths,
+exceeded observation bounds and a missing helper are unknown, not compatibility
+proof. Use `--max-read-bytes` and `--timeout-seconds` for the existing resource
+bounds; these do not establish a whole-home snapshot.
+
+The command opens separate ordinary read-only SQLite transactions. It does not
+change user tables or histories, copy storage, create receipts, launch the helper,
+or acquire application maintenance/writer ownership. SQLite may create or update
+WAL/SHM files and take normal coordination locks. Concurrent storage may change
+after or between observations. Even a matching report does not validate selected
+row/file effects, acquire native ownership, certify closure or authorize deletion.
+Follow the qualification procedure below when an execution contract changes.
+
 ## Maintaining compatibility after a Codex change
 
 1. Record `codex --version`, the installed executable identity and the exact storage
