@@ -80,11 +80,15 @@ Follow the qualification procedure below when an execution contract changes.
 
 ## Current validation boundaries
 
-Native storage tests use disposable LocalThreadStore producers and independent
-SQL/file oracles. Positive revert cases preserve distinct logical and immutable
-physical IDs; retained providers must remain readable. Compression witnesses
-identify their actual stock producer and plain SQL pointer. Synthetic zstd frames
-and header mutations test admission only; they are not stock producer evidence.
+Native storage qualification tests use disposable LocalThreadStore producers and
+independent SQL/file oracles. Positive revert cases preserve distinct logical and
+immutable physical IDs; retained providers must remain readable. Compression
+witnesses identify their actual stock producer and plain SQL pointer. Separate
+CLI/Textual/MCP integration cases run the exact qualified helper against synthetic
+homes, including mixed plain/zstd, legacy/paginated and historical representations.
+They verify selected effects, retained readability and observation after restart.
+Admission and effect cases using synthetic frames or mutated headers do not
+establish stock producer evidence or a complete Core lifecycle guarantee.
 
 Nonempty `.rollout-materialize-*` objects must refuse observation/cleanup rather
 than become selected histories. Unrelated empty regular objects remain untouched.
@@ -104,8 +108,12 @@ certify every lifecycle behavior of an installed Codex process.
 
 ## Development checks
 
-Use the project's Python 3.14 environment. Run `python -m pytest` for the Python
-suite, Ruff for lint/format and mypy under the declared project configuration.
+Use the project's Python 3.14 environment with the default development dependencies
+and pinned build group (`uv sync --locked --group build`). Source packaging tests
+import the pinned Hatch backend. Node must also be on PATH for the ordinary
+JavaScript confirmation regression; it is not an application runtime dependency.
+Run `python -m pytest` for the Python suite, Ruff for lint/format and mypy under the
+declared project configuration.
 Native scripts require explicit `GC_NATIVE_BINARY` and `GC_NATIVE_FIXTURE` paths
 for the matching candidate; fixture-feature executables never enter the release.
 Use an explicit disposable `--basetemp` for pytest. Schema/digest admission and
@@ -122,10 +130,21 @@ then build the sdist and build the wheel from that sdist using
 Build dependencies are excluded from the bundle's runtime requirements.
 
 The release structure checker (`python -m tools.ci_release` from a checkout)
-checks wheel RECORD entries, source metadata, the raw profile, declared legal
-files and every assembled bundle payload hash. These checks do not execute the
-helper or qualify installed interfaces. CI tools are checkout tools, not part of
-the supported installed application or source-distribution test interface.
+derives selected files from the pinned Hatch configuration and compares complete
+source-distribution and wheel membership and bytes, including explicitly generated
+metadata. The assembler uses the same wheel source map. Checks also bind wheel
+RECORD entries, the raw profile, legal files, bundle payloads and hash-locked
+requirements to their declared source. The source-map companion is included in the
+source distribution; CI entrypoints remain checkout tools.
+
+Adding `--installed-site-packages /absolute/site-packages` compares installed
+project package and metadata files with the verified wheel. Named installer
+records and source-derived bytecode are classified separately; their bytes are
+not claimed to equal source bytes. Generated command wrappers and other installed
+distributions are outside this file comparison. These checks do not execute the
+helper or qualify installed behavior; CLI, Textual and MCP require separate
+behavioral gates. The complete artifact checker command is in the linked native
+build instructions.
 
 Native reuse is admitted only when the checkout's complete declared native input
 set, raw profile and downloaded qualified release artifact match their pinned
@@ -150,8 +169,10 @@ Rust qualification fixtures are not rebuilt or rerun for Python-only changes.
 
 The artifact lane builds the sdist, builds its wheel, checks the matched bundle,
 and installs that bundle into a separate environment outside the checkout.
-Installed tests remove the source import path, verify the installed module origin,
-and exercise doctor, CLI, Textual, MCP and receipt observation without replay.
+The installed-file gate compares project bytes against the selected source and
+wheel before behavioral tests. Installed tests remove the source import path,
+verify the installed module origin, and exercise doctor, CLI, Textual, MCP and
+receipt observation without replay.
 Each run uses disposable test homes and temporary caches, bounded job timeouts,
 read-only repository permissions and short-lived result artifacts. It does not
 publish a release. A successful hosted run qualifies only its recorded source,

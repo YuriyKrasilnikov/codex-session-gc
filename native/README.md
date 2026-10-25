@@ -294,8 +294,9 @@ checkout's Python entry point with that absolute helper path. Rebuilding native
 source is intended for maintainers changing or validating the native contract.
 A digest mismatch remains a refusal, even after a successful build.
 
-After a candidate helper and exact bundled profile have been qualified, synchronize
-the Python development environment and build the source distribution first. The
+Run these commands from the source checkout after the candidate helper and exact
+bundled profile have been qualified. Synchronize the Python development environment
+and build the source distribution first. The
 commands below assume the already-qualified release helper has been retained at
 `/absolute/qualified/codex-session-gc-native` and the output directories are absent:
 
@@ -307,6 +308,7 @@ mkdir -p build/release-0.3.0
 uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.3.0
 uv build --wheel build/release-0.3.0/codex_session_gc-0.3.0.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.3.0
 .venv/bin/python -m tools.build_release --wheel build/release-0.3.0/codex_session_gc-0.3.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.3.0/codex-session-gc-0.3.0-linux-x86_64
+.venv/bin/python -m tools.ci_release --sdist build/release-0.3.0/codex_session_gc-0.3.0.tar.gz --wheel build/release-0.3.0/codex_session_gc-0.3.0-py3-none-any.whl --bundle build/release-0.3.0/codex-session-gc-0.3.0-linux-x86_64 --helper /absolute/qualified/codex-session-gc-native
 ```
 
 The build group pins the existing Hatchling backend in `pyproject.toml`; its
@@ -319,10 +321,19 @@ requirements from the existing lock offline, excluding build dependencies.
 Record the backend version from the wheel's `WHEEL` metadata; source reconstruction
 does not promise identical binary bytes on a different machine.
 
-The assembler checks wheel version, Python/dependency metadata, exact raw profile,
-helper digest and license/notice payload against the selected source. It refuses
-an existing output directory. Inspect the sdist/wheel contents, the wheel RECORD
-and all bundle manifest hashes before creating downloadable assets:
+The assembler uses the pinned Hatch file map to compare every selected Python
+file, resource and explicitly generated wheel metadata against the current source.
+It also checks the exact raw profile, helper digest and license/notice payload,
+and refuses an existing output directory. The checker command above verifies the
+complete source distribution, wheel and bundle against that source, including
+RECORD integrity and the runtime/install requirements.
+
+After installing the matched bundle outside the checkout, repeat that checker
+command with `--installed-site-packages /absolute/site-packages`. It compares
+installed project package and metadata bytes, classifying named installer records
+and source-derived bytecode separately. Generated command wrappers and other
+installed distributions are outside that file comparison. CLI/UI/MCP behavior
+still requires separate execution checks. Archive only the verified artifacts:
 
 ```sh
 tar -C build/release-0.3.0 -czf build/release-0.3.0/codex-session-gc-0.3.0-linux-x86_64.tar.gz codex-session-gc-0.3.0-linux-x86_64
