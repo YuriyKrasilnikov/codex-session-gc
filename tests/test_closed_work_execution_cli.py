@@ -74,7 +74,14 @@ def test_cli_real_owned_composition_preserves_parent_agents_and_subset(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    argv, options, observed, _ = _case(tmp_path, monkeypatch)
+    argv, options, observed, facts = _case(tmp_path, monkeypatch)
+    observations = []
+
+    def observe(*_a: object, **_k: object) -> ClosedWorkFacts:
+        observations.append(facts)
+        return facts
+
+    monkeypatch.setattr(online, "read_closed_work_facts", observe)
     argv += [
         "--select-thread",
         str(_id(2).value),
@@ -97,7 +104,73 @@ def test_cli_real_owned_composition_preserves_parent_agents_and_subset(
     (stored,) = inspect(options["journal"])
     request = json.loads(stored.units[0].request.data)
     assert request["provider"] == "operator-default"
+    context = json.loads(stored.start.evidence.data)
+    declaration = context["operation_declaration"]
+    assert declaration["operation_id"] == report["attemptId"] == str(stored.start.attempt_id.value)
+    assert declaration["selected"] == [str(_id(2).value)]
+    assert declaration["physical_manifest"] == request["targets"]
+    assert context["journal"] == str(options["journal"])
+    assert context["collection_limits"]["maximum_total_bytes"] == 33554432
+    assert context["collection_limits"]["deadline_seconds"] == 30
+    assert context["dispatch_limits"]["deadline_seconds"] == 30
+    assert len(observations) == 1
     assert observed.read_text().splitlines() == [str(_id(1).value)]
+
+
+def test_direct_cli_keeps_requested_retention_and_reconciles_admitted_scope_without_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv, options, observed, facts = _case(tmp_path, monkeypatch, "partial")
+    fresh = replace(
+        facts,
+        snapshot=replace(
+            facts.snapshot,
+            threads=tuple(
+                replace(record, last_activity=LastActivity(facts.cutoff.timestamp))
+                if record.id == _id(1)
+                else record
+                for record in facts.snapshot.threads
+            ),
+        ),
+    )
+    observations = []
+
+    def observe(*_a: object, **_k: object) -> ClosedWorkFacts:
+        observations.append(fresh)
+        return fresh
+
+    monkeypatch.setattr(online, "read_closed_work_facts", observe)
+    assert main(argv) == 4
+    report = json.loads(capsys.readouterr().out)
+    (row,) = report["roots"]
+    assert row["requestedThreads"] == [str(_id(number).value) for number in (1, 2)]
+    assert row["selectedThreads"] == [str(_id(2).value)]
+    assert row["retained"] == [
+        {
+            "threadId": str(_id(1).value),
+            "reason": "recent_or_unknown_last_activity",
+            "witness": None,
+        }
+    ]
+    (saved,) = inspect(options["journal"])
+    context = json.loads(saved.start.evidence.data)
+    declaration = context["operation_declaration"]
+    assert declaration["selected"] == [str(_id(2).value)]
+    assert context["scopes"][0]["requested_threads"] == declaration["selected"]
+    consumed = observed.read_bytes()
+    _delete_selected(options["codex_home"], selected=(str(_id(2).value),))
+    assert main(["reconcile", "--online", "--receipt", str(options["journal"]), "--json"]) == 0
+    reconciled = json.loads(capsys.readouterr().out)
+    assert reconciled["outcome"] == "confirmed"
+    assert reconciled["roots"][0]["finalObservedState"] == "CONFIRMED_FINAL_STATE"
+    assert observed.read_bytes() == consumed
+    assert len(observations) == 1
+    with sqlite3.connect(options["codex_home"] / "state_5.sqlite") as connection:
+        assert connection.execute(
+            "SELECT id FROM threads WHERE id=?", (str(_id(1).value),)
+        ).fetchone()
 
 
 def test_skipped_root_keeps_partial_aggregate_and_reasons(

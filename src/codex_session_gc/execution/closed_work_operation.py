@@ -10,7 +10,7 @@ import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from codex_session_gc.domain import GuardianAssociation, ThreadId, UtcCutoff
 from codex_session_gc.execution.closed_work_apply import DispatchLimits, apply_closed_work
@@ -24,6 +24,8 @@ from codex_session_gc.execution.closed_work_reconcile import FinalState, reconci
 from codex_session_gc.execution.closed_work_request import review_targets
 from codex_session_gc.execution.confirmed_declaration import (
     Declaration,
+    ReviewedSelection,
+    create_declaration,
     saved_declaration,
     validate_current_declaration,
 )
@@ -257,6 +259,22 @@ def _apply(
     if not eligible:
         report["detail"] = "No eligible selected threads; no helper was dispatched."
         return
+    declaration = arguments.declaration
+    attempt_id = arguments.attempt_id
+    if declaration is None:
+        binding = _fresh_binding(arguments, helper, facts, combined, collection)
+        declaration = binding.model_dump(mode="json")
+        attempt_id = AttemptId(UUID(binding.operation_id))
+        eligible = tuple(
+            select_closed_work(
+                facts.snapshot,
+                facts.cutoff,
+                selection.roots,
+                selected_threads=selection.conditional_candidates,
+                physical_inventory=facts.physical_inventory,
+            )
+            for selection in eligible
+        )
     result = apply_closed_work(
         facts,
         eligible,
@@ -268,8 +286,8 @@ def _apply(
         default_provider=arguments.default_provider or "openai",
         collection_limits=collection,
         dispatch_limits=dispatch,
-        attempt_id=arguments.attempt_id,
-        declaration=arguments.declaration,
+        attempt_id=attempt_id,
+        declaration=declaration,
     )
     report["attemptId"] = str(result.attempt_id.value)
     report["lifecycleRecorded"] = result.lifecycle_recorded
@@ -417,6 +435,33 @@ def _reconcile(
         if stored.lifecycle_unresolved and not any(unit.unresolved for unit in stored.units)
         else _aggregate(outcomes)
     ).value
+
+
+def _fresh_binding(
+    arguments: ExecutionRequest,
+    helper: QualifiedHelperContract,
+    facts: ClosedWorkFacts,
+    selection: ClosedWorkSelection,
+    collection: CollectionLimits,
+) -> Declaration:
+    """Bind fresh conditional effects without rereading the physical namespace."""
+    if arguments.home is None:
+        message = "Fresh confirmation requires the selected home."
+        raise ValueError(message)
+    targets = review_targets(facts, selection, arguments.home, collection)
+    metadata = arguments.home.stat()
+    return create_declaration(
+        ReviewedSelection(
+            roots=tuple(str(value.value) for value in sorted(selection.roots)),
+            selected=tuple(target.thread_id for target in targets),
+            cutoff=facts.cutoff.timestamp.isoformat(),
+            physical_manifest=targets,
+            guardian_associations=selection.guardian_associations,
+        ),
+        operation_id=arguments.attempt_id.value if arguments.attempt_id is not None else uuid4(),
+        home_identity=(metadata.st_dev, metadata.st_ino),
+        helper=helper,
+    )
 
 
 def _confirmed_context(arguments: ExecutionRequest, helper: QualifiedHelperContract) -> None:

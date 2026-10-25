@@ -46,6 +46,13 @@ no operation. Changed home/profile identities or Guardian associations refuse
 dispatch. A declaration digest does not establish human
 consent; the caller must explicitly authorize cleanup.
 
+Direct CLI apply creates its binding from fresh facts before creating a receipt,
+without an additional confirmation step or a saved-preview input. Its response
+preserves the caller's original requested histories and retention reasons. The
+receipt records the admitted execution scope: only the exact eligible candidates
+enter its selected and requested execution sets. Reconciliation observes that
+saved scope without repeating deletion.
+
 ## Native execution
 
 Only the separately qualified native helper mutates session storage. It must
