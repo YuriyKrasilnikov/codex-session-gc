@@ -273,8 +273,10 @@ refusals. They do not authorize or edit a new profile automatically. A changed
 storage contract requires corresponding observation/native-bound changes and
 artifact-bound qualification evidence before the Python resource is updated.
 Then run the Python suite against the coherent source/profile/helper combination.
-After `uv sync --locked`, explicitly supply the qualified helper to its real MCP
-and native integration cases using their separate environment variable:
+Prepare the full Python suite with `uv sync --locked --group build` and ensure
+Node is on PATH for the JavaScript confirmation regression. Node is not an
+application runtime dependency. Explicitly supply the qualified helper to the real
+MCP and native integration cases using their separate environment variable:
 
 ```sh
 GC_MCP_NATIVE_HELPER=/absolute/qualified/codex-session-gc-native .venv/bin/python -m pytest --basetemp /absolute/new-disposable-tests
