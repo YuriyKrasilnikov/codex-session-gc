@@ -17,12 +17,14 @@ import selectors
 import subprocess
 import time
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from hashlib import sha256
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from codex_session_gc.execution.process_identity import (
     OWNED_MARKER_ENV,
+    IdentityObservationError,
     observe_owned_child,
     owned_launcher_command,
 )
@@ -53,8 +55,30 @@ _EXIT = {
 }
 
 
+class PreGrantCleanup(StrEnum):
+    """Known process cleanup after a refusal that released no native input."""
+
+    NOT_STARTED = "not_started"
+    REAPED = "reaped"
+    UNRESOLVED = "unresolved"
+
+
 class OneShotError(Exception):
-    """Pre-grant refusal: no request bytes were released to the helper."""
+    """Pre-grant refusal with an explicit owned-process cleanup obligation."""
+
+    def __init__(self, message: str, *, cleanup: PreGrantCleanup) -> None:
+        """Require a typed cleanup observation with every refusal."""
+        if type(cleanup) is not PreGrantCleanup:
+            raise TypeError("A pre-grant refusal requires a typed cleanup observation.")
+        super().__init__(message)
+        self.cleanup = cleanup
+
+
+class _PreGrantStage(StrEnum):
+    SPAWN = "spawn"
+    IDENTITY = "identity"
+    REGISTRATION = "registration"
+    DISPATCH_INTENT = "dispatch_intent"
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,9 +129,12 @@ def dispatch_once(
             LaunchIntent(binding.launch_id, binding.generation, binding.purpose, request),
         )
     except Exception as error:
-        raise OneShotError("Launch intent was refused; no child was started.") from error
+        raise OneShotError(
+            "Launch intent was refused; no child was started.", cleanup=PreGrantCleanup.NOT_STARTED
+        ) from error
     process = None
     registered = False
+    stage = _PreGrantStage.SPAWN
     try:
         process = subprocess.Popen(
             [str(launcher.executable), *launcher.arguments],
@@ -118,23 +145,28 @@ def dispatch_once(
             pass_fds=launcher.inherited_descriptors,
             bufsize=0,
         )
+        stage = _PreGrantStage.IDENTITY
         identity = observe_owned_child(process.pid, environment)
-        if identity is None:
-            raise OneShotError("The waiting child identity is unavailable.")  # noqa: TRY301
+        stage = _PreGrantStage.REGISTRATION
         register_launch(
             binding.receipt,
             binding.attempt_id,
             LaunchRegistration(binding.launch_id, binding.generation, identity.incarnation()),
         )
         registered = True
+        stage = _PreGrantStage.DISPATCH_INTENT
         record_dispatch_intent(
             binding.receipt, binding.attempt_id, unit_id, request, evidence, identity.incarnation()
         )
     except BaseException as error:
-        reaped = process is None or _reap(process, cleanup_seconds)
-        cleanup = _failure_evidence("pre_grant_refusal", b"", b"", None)
+        cleanup_status = _pre_grant_cleanup(process, cleanup_seconds)
+        cleanup = _pre_grant_evidence(error, stage, process, cleanup=cleanup_status)
+        detail = (
+            f"Pre-grant refusal: stage={stage.value}; cleanup={cleanup_status.value}; "
+            f"returncode={process.returncode if process is not None else None}: {error}"
+        )
         try:
-            if registered and reaped:
+            if registered and cleanup_status is PreGrantCleanup.REAPED:
                 record_launch_closure(
                     binding.receipt,
                     binding.attempt_id,
@@ -152,12 +184,11 @@ def dispatch_once(
                     cleanup,
                 )
         except Exception as cleanup_error:  # noqa: BLE001
-            message = f"Pre-grant refusal; journal cleanup failed: {cleanup_error}"
-            raise OneShotError(message) from error
+            message = f"{detail}; journal cleanup failed: {cleanup_error}"
+            raise OneShotError(message, cleanup=cleanup_status) from error
         if not isinstance(error, Exception):
             raise
-        message = f"Pre-grant refusal; owned child reaped={reaped}: {error}"
-        raise OneShotError(message) from error
+        raise OneShotError(detail, cleanup=cleanup_status) from error
     return _finish(
         binding, process, unit_id, request, deadline, maximum_output_bytes, cleanup_seconds
     )
@@ -324,19 +355,55 @@ def _invalid_constant(value: str) -> object:
 
 
 def _failure_evidence(detail: str, stdout: bytes, stderr: bytes, code: int | None) -> Payload:
+    return _observation_evidence(
+        {
+            "detail": detail,
+            "returncode": code,
+            "stdout_sha256": sha256(stdout).hexdigest(),
+            "stderr_sha256": sha256(stderr).hexdigest(),
+        }
+    )
+
+
+def _pre_grant_evidence(
+    error: BaseException,
+    stage: _PreGrantStage,
+    process: subprocess.Popen[bytes] | None,
+    *,
+    cleanup: PreGrantCleanup,
+) -> Payload:
+    return _observation_evidence(
+        {
+            "detail": "pre_grant_refusal",
+            "returncode": process.returncode if process is not None else None,
+            "pre_grant": {
+                "stage": stage.value,
+                "error_type": type(error).__name__,
+                "errno": error.errno if isinstance(error, OSError) else None,
+                "identity": error.diagnostic.as_dict()
+                if isinstance(error, IdentityObservationError)
+                else None,
+                "cleanup": cleanup.value,
+                "child_started": True if process is not None else None,
+                "child_reaped": cleanup is PreGrantCleanup.REAPED,
+            },
+        }
+    )
+
+
+def _observation_evidence(value: dict[str, object]) -> Payload:
     return Payload(
         "application/codex-session-gc.one-shot-observation+json",
         1,
-        json.dumps(
-            {
-                "detail": detail,
-                "returncode": code,
-                "stdout_sha256": sha256(stdout).hexdigest(),
-                "stderr_sha256": sha256(stderr).hexdigest(),
-            },
-            sort_keys=True,
-        ).encode(),
+        json.dumps(value, sort_keys=True).encode(),
     )
+
+
+def _pre_grant_cleanup(process: subprocess.Popen[bytes] | None, seconds: float) -> PreGrantCleanup:
+    """Retain uncertainty if construction may have started a child without returning it."""
+    if process is None:
+        return PreGrantCleanup.UNRESOLVED
+    return PreGrantCleanup.REAPED if _reap(process, seconds) else PreGrantCleanup.UNRESOLVED
 
 
 def _reap(process: subprocess.Popen[bytes], seconds: float) -> bool:

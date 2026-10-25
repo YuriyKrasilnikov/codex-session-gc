@@ -27,7 +27,12 @@ from codex_session_gc.execution.closed_work_request import (
     prepare_request,
 )
 from codex_session_gc.execution.launch import LaunchBinding
-from codex_session_gc.execution.one_shot import OneShotError, OneShotResult, dispatch_once
+from codex_session_gc.execution.one_shot import (
+    OneShotError,
+    OneShotResult,
+    PreGrantCleanup,
+    dispatch_once,
+)
 from codex_session_gc.execution.progress import (
     ProgressChannel,
     ProgressEvent,
@@ -208,6 +213,7 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
             for s, u in zip(selections, units, strict=True)
         ]
         outcome = TerminalKind.CONFIRMED
+        cleanup = PreGrantCleanup.NOT_STARTED
         for index, (selection, unit) in enumerate(zip(selections, units, strict=True)):
             if progress is not None:
                 progress.publish(
@@ -236,7 +242,13 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
                 )
             except (ValueError, OSError, OneShotError) as error:
                 results[index] = RootResult(results[index].root, unit, None, None, str(error))
-                outcome = TerminalKind.REFUSED
+                if isinstance(error, OneShotError):
+                    cleanup = error.cleanup
+                outcome = (
+                    TerminalKind.UNKNOWN
+                    if cleanup is PreGrantCleanup.UNRESOLVED
+                    else TerminalKind.REFUSED
+                )
                 if progress is not None:
                     progress.publish(
                         ProgressEvent(ProgressKind.ROOT_RESULT, attempt, results[index].root)
@@ -264,7 +276,7 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
         detail = "Declared work processed; inspect per-root outcomes."
         try:
             (stored,) = inspect(journal)
-            if all(
+            if cleanup in {PreGrantCleanup.NOT_STARTED, PreGrantCleanup.REAPED} and all(
                 launch.status
                 in {LaunchStatus.CLOSED, LaunchStatus.OBSERVED_ABSENT, LaunchStatus.FENCED}
                 for launch in stored.launches

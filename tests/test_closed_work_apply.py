@@ -16,11 +16,19 @@ from uuid import UUID
 
 import pytest
 
-from codex_session_gc.execution import closed_work_apply
+from codex_session_gc.execution import closed_work_apply, one_shot, process_identity
 from codex_session_gc.execution.closed_work_apply import DispatchLimits, apply_closed_work
+from codex_session_gc.execution.operation_status import project_operation_status
 from codex_session_gc.execution.progress import ProgressChannel, ProgressKind
 from codex_session_gc.planning.closed_work import select_closed_work
-from codex_session_gc.recovery import AttemptId, ReceiptIdentityError, TerminalKind, inspect
+from codex_session_gc.recovery import (
+    AttemptId,
+    LaunchStatus,
+    ReceiptIdentityError,
+    TerminalKind,
+    TransitionError,
+    inspect,
+)
 from tests.current_storage_fixture import _LIMITS, _fixture, _id
 
 if TYPE_CHECKING:
@@ -273,3 +281,140 @@ def test_mixed_confirmed_and_refused_is_partial_without_reclassifying_roots(tmp_
     assert result.outcome is TerminalKind.PARTIAL
     assert [root.outcome for root in result.roots] == [TerminalKind.CONFIRMED, TerminalKind.REFUSED]
     assert len(observed.read_text().splitlines()) == 2
+
+
+@pytest.mark.parametrize("cleanup", ["reaped", "unresolved", "constructor_unknown"])
+def test_pre_grant_cleanup_controls_definitive_lifecycle_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cleanup: str
+) -> None:
+    facts, selections, options, observed = _setup(tmp_path)
+
+    class _WaitingProcess:
+        pid = 543210
+        returncode = -15 if cleanup == "reaped" else None
+
+    def spawn(*_args: object, **_kwargs: object) -> _WaitingProcess:
+        if cleanup == "constructor_unknown":
+            message = "Controlled constructor error without a returned process handle"
+            raise OSError(message)
+        return _WaitingProcess()
+
+    def unavailable(*_args: object) -> process_identity.ChildIdentity:
+        diagnostic = process_identity.IdentityDiagnostic(
+            process_identity.IdentityStage.ENVIRONMENT,
+            process_identity.IdentityFailure.IO,
+            process_identity.IdentityRead.INITIAL,
+        )
+        raise process_identity.IdentityObservationError(diagnostic)
+
+    monkeypatch.setattr(one_shot.subprocess, "Popen", spawn)
+    monkeypatch.setattr(one_shot, "observe_owned_child", unavailable)
+    monkeypatch.setattr(one_shot, "_reap", lambda *_args: cleanup == "reaped")
+
+    result = apply_closed_work(facts, selections, **options)
+
+    assert not observed.exists()
+    (stored,) = inspect(options["journal"])
+    assert all(unit.request is None for unit in stored.units)
+    projected = project_operation_status(stored)
+    (launch,) = stored.launches
+    assert launch.status is LaunchStatus.FENCED
+    assert launch.registration is None
+    assert launch.terminal is not None
+    evidence = json.loads(launch.terminal.data)
+    if cleanup in {"unresolved", "constructor_unknown"}:
+        assert result.outcome is TerminalKind.UNKNOWN
+        assert not result.lifecycle_recorded
+        assert stored.shutdown is None
+        assert stored.lifecycle is None
+        assert projected.outcome is TerminalKind.UNKNOWN
+        assert projected.lifecycle_unresolved
+    else:
+        assert result.outcome is TerminalKind.REFUSED
+        assert result.lifecycle_recorded
+        assert stored.shutdown is not None
+        assert stored.lifecycle_kind is TerminalKind.CONFIRMED
+        assert projected.outcome is TerminalKind.REFUSED
+        assert not projected.lifecycle_unresolved
+    expected_cleanup = "unresolved" if cleanup == "constructor_unknown" else cleanup
+    assert evidence["pre_grant"]["cleanup"] == expected_cleanup
+    if cleanup == "constructor_unknown":
+        assert evidence["pre_grant"]["child_started"] is None
+
+
+def test_unresolved_later_launcher_keeps_prior_delivery_and_whole_attempt_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts, selections, options, observed = _setup(tmp_path)
+    popen = one_shot.subprocess.Popen
+    started = False
+
+    class _WaitingProcess:
+        pid = 543210
+        returncode = None
+
+    def identity(*_args: object) -> process_identity.ChildIdentity:
+        diagnostic = process_identity.IdentityDiagnostic(
+            process_identity.IdentityStage.ENVIRONMENT,
+            process_identity.IdentityFailure.IO,
+            process_identity.IdentityRead.INITIAL,
+        )
+        raise process_identity.IdentityObservationError(diagnostic)
+
+    def spawn(*args: object, **kwargs: object):
+        nonlocal started
+        if not started:
+            started = True
+            return popen(*args, **kwargs)
+        monkeypatch.setattr(one_shot, "observe_owned_child", identity)
+        monkeypatch.setattr(one_shot, "_reap", lambda *_args: False)
+        return _WaitingProcess()
+
+    monkeypatch.setattr(one_shot.subprocess, "Popen", spawn)
+
+    result = apply_closed_work(facts, selections, **options)
+
+    assert result.outcome is TerminalKind.UNKNOWN
+    assert not result.lifecycle_recorded
+    assert observed.read_text().splitlines() == [str(next(iter(selections[0].roots)).value)]
+    (stored,) = inspect(options["journal"])
+    assert stored.units[0].terminal_kind is TerminalKind.CONFIRMED
+    assert stored.units[1].request is None
+    assert stored.launches[0].status is LaunchStatus.CLOSED
+    assert stored.launches[1].status is LaunchStatus.FENCED
+    assert stored.shutdown is None
+    assert stored.lifecycle is None
+    projected = project_operation_status(stored)
+    assert projected.outcome is TerminalKind.UNKNOWN
+    assert projected.lifecycle_unresolved
+
+
+def test_proven_pre_spawn_refusal_settles_without_a_launch_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts, selections, options, observed = _setup(tmp_path)
+
+    def refuse_intent(*_args: object) -> None:
+        message = "Controlled refusal before process construction"
+        raise TransitionError(message)
+
+    monkeypatch.setattr(one_shot, "record_launch_intent", refuse_intent)
+    monkeypatch.setattr(
+        one_shot.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("Process construction must remain unreachable"),
+    )
+
+    result = apply_closed_work(facts, selections, **options)
+
+    assert not observed.exists()
+    (stored,) = inspect(options["journal"])
+    assert not stored.launches
+    assert all(unit.request is None for unit in stored.units)
+    assert result.outcome is TerminalKind.REFUSED
+    assert result.lifecycle_recorded
+    assert stored.shutdown is not None
+    assert stored.lifecycle is None
+    projected = project_operation_status(stored)
+    assert projected.outcome is TerminalKind.REFUSED
+    assert not projected.lifecycle_unresolved

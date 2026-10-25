@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import errno
+import json
 import os
 import subprocess
 import sys
@@ -89,7 +91,6 @@ def test_owned_identity_is_alive_then_absent() -> None:
     environment = {"PATH": os.environ["PATH"], OWNED_MARKER_ENV: "identity-marker"}
     child = _child("import time; time.sleep(2)", environment)
     identity = observe_owned_child(child.pid, environment)
-    assert identity is not None
     assert child_presence(identity) is Presence.ALIVE
     assert child.stdin is not None
     child.stdin.close()
@@ -105,7 +106,6 @@ def test_same_child_identity_drift_is_ambiguous(
     environment = {"PATH": os.environ["PATH"], OWNED_MARKER_ENV: "drift-marker"}
     child = _child("import time; time.sleep(2)", environment)
     identity = observe_owned_child(child.pid, environment)
-    assert identity is not None
     changed = replace(identity, **{field: "changed"})
     monkeypatch.setattr(process_identity, "_read_identity", lambda *_: changed)
     assert child_presence(identity) is Presence.AMBIGUOUS
@@ -121,7 +121,6 @@ def test_readable_replacement_in_the_same_coordinate_is_absent(
     environment = {"PATH": os.environ["PATH"], OWNED_MARKER_ENV: "replacement-marker"}
     child = _child("import time; time.sleep(2)", environment)
     identity = observe_owned_child(child.pid, environment)
-    assert identity is not None
     monkeypatch.setattr(
         process_identity,
         "_read_identity",
@@ -140,7 +139,6 @@ def test_missing_pid_during_a_changed_observer_view_is_ambiguous(
     environment = {"PATH": os.environ["PATH"], OWNED_MARKER_ENV: "missing-view-marker"}
     child = _child("import time; time.sleep(2)", environment)
     identity = observe_owned_child(child.pid, environment)
-    assert identity is not None
     assert child.stdin is not None
     child.stdin.close()
     child.wait(timeout=2)
@@ -161,7 +159,6 @@ def test_restored_endpoints_do_not_hide_an_intermediate_coordinate_drift(
     environment = {"PATH": os.environ["PATH"], OWNED_MARKER_ENV: "intermediate-view-marker"}
     child = _child("import time; time.sleep(2)", environment)
     identity = observe_owned_child(child.pid, environment)
-    assert identity is not None
     monkeypatch.setattr(
         process_identity,
         "_read_identity",
@@ -176,3 +173,128 @@ def test_restored_endpoints_do_not_hide_an_intermediate_coordinate_drift(
     assert child.stdin is not None
     child.stdin.close()
     child.wait(timeout=2)
+
+
+def _identity_proc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[int, dict[str, str]]:
+    pid = 543210
+    path = tmp_path / str(pid)
+    (path / "ns").mkdir(parents=True)
+    (path / "stat").write_text(f"{pid} (fixture child) " + " ".join(["0"] * 19 + ["42"]))
+    (path / "environ").write_bytes(
+        f"{OWNED_MARKER_ENV}=private-marker-value\0PRIVATE_KEY=private-secret-value\0".encode()
+    )
+    (path / "status").write_text(f"Uid:\t{os.getuid()}\t0\t0\t0\n")
+    (path / "ns/pid").symlink_to("pid:[fixture]")
+    (path / "ns/mnt").symlink_to("mnt:[fixture]")
+    (tmp_path / "sys/kernel/random").mkdir(parents=True)
+    (tmp_path / "sys/kernel/random/boot_id").write_text("fixture-boot")
+    monkeypatch.setattr(process_identity, "_PROC", tmp_path)
+    monkeypatch.setattr(process_identity, "_proc_coordinate", lambda: "fixture-proc")
+    return pid, {OWNED_MARKER_ENV: "private-marker-value"}
+
+
+def test_unavailable_identity_preserves_stage_errno_without_environment_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid, environment = _identity_proc(tmp_path, monkeypatch)
+    (tmp_path / str(pid) / "environ").unlink()
+
+    with pytest.raises(process_identity.IdentityObservationError) as raised:
+        observe_owned_child(pid, environment)
+
+    diagnostic = raised.value.diagnostic
+    assert diagnostic.stage is process_identity.IdentityStage.ENVIRONMENT
+    assert diagnostic.reason is process_identity.IdentityFailure.IO
+    assert diagnostic.reading is process_identity.IdentityRead.INITIAL
+    assert diagnostic.error_number == errno.ENOENT
+    serialized = json.dumps(diagnostic.as_dict()) + str(raised.value)
+    assert "private-marker-value" not in serialized
+    assert "private-secret-value" not in serialized
+
+
+def test_malformed_identity_preserves_parse_stage_without_raw_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid, environment = _identity_proc(tmp_path, monkeypatch)
+    (tmp_path / str(pid) / "status").write_text("Uid:\tprivate-secret-value")
+
+    with pytest.raises(process_identity.IdentityObservationError) as raised:
+        observe_owned_child(pid, environment)
+
+    assert raised.value.diagnostic.stage is process_identity.IdentityStage.UID
+    assert raised.value.diagnostic.reason is process_identity.IdentityFailure.MALFORMED
+    assert "private-secret-value" not in str(raised.value)
+
+
+def test_marker_mismatch_preserves_only_the_field_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid, environment = _identity_proc(tmp_path, monkeypatch)
+    environment[OWNED_MARKER_ENV] = "different-private-marker"
+
+    with pytest.raises(process_identity.IdentityObservationError) as raised:
+        observe_owned_child(pid, environment)
+
+    diagnostic = raised.value.diagnostic
+    assert diagnostic.reason is process_identity.IdentityFailure.MISMATCH
+    assert diagnostic.changed_fields == ("marker",)
+    assert "private-marker" not in json.dumps(diagnostic.as_dict()) + str(raised.value)
+
+
+def test_two_read_identity_change_preserves_field_names_without_acceptance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid, environment = _identity_proc(tmp_path, monkeypatch)
+    ticks = iter([42, 42, 43, 43])
+    monkeypatch.setattr(process_identity, "_start_ticks", lambda _: next(ticks))
+
+    with pytest.raises(process_identity.IdentityObservationError) as raised:
+        observe_owned_child(pid, environment)
+
+    diagnostic = raised.value.diagnostic
+    assert diagnostic.stage is process_identity.IdentityStage.RECHECK
+    assert diagnostic.reason is process_identity.IdentityFailure.UNSTABLE
+    assert diagnostic.reading is process_identity.IdentityRead.CONFIRMATION
+    assert diagnostic.changed_fields == ("start_ticks",)
+
+
+def test_unreadable_identity_keeps_presence_ambiguous(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid, environment = _identity_proc(tmp_path, monkeypatch)
+    identity = observe_owned_child(pid, environment)
+    (tmp_path / str(pid) / "environ").unlink()
+
+    assert child_presence(identity) is Presence.AMBIGUOUS
+
+
+@pytest.mark.parametrize("pid", [0, True])
+def test_invalid_identity_input_refuses_before_process_reads(
+    pid: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        process_identity, "_read_identity", lambda *_args, **_kwargs: pytest.fail("No process read")
+    )
+
+    with pytest.raises(process_identity.IdentityObservationError) as raised:
+        observe_owned_child(pid, {OWNED_MARKER_ENV: "private-marker"})
+
+    assert raised.value.diagnostic.stage is process_identity.IdentityStage.INPUT
+    assert raised.value.diagnostic.reason is process_identity.IdentityFailure.INVALID
+
+
+def test_initial_identity_stat_drift_is_not_a_matching_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid, environment = _identity_proc(tmp_path, monkeypatch)
+    ticks = iter([42, 43])
+    monkeypatch.setattr(process_identity, "_start_ticks", lambda _: next(ticks))
+
+    with pytest.raises(process_identity.IdentityObservationError) as raised:
+        observe_owned_child(pid, environment)
+
+    diagnostic = raised.value.diagnostic
+    assert diagnostic.stage is process_identity.IdentityStage.START_AFTER
+    assert diagnostic.reason is process_identity.IdentityFailure.UNSTABLE
+    assert diagnostic.reading is process_identity.IdentityRead.INITIAL
+    assert diagnostic.changed_fields == ("start_ticks",)

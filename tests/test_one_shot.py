@@ -3,15 +3,17 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
-from codex_session_gc.execution import one_shot
+from codex_session_gc.execution import one_shot, process_identity
 from codex_session_gc.execution.launch import LaunchBinding
 from codex_session_gc.execution.transport import ChildCommand
 from codex_session_gc.recovery import (
@@ -179,6 +181,13 @@ def test_dispatch_journal_refusal_never_grants_and_reaps(
     (journal,) = inspect(binding.receipt)
     assert journal.units[0].request is None
     assert journal.launches[0].status is LaunchStatus.CLOSED
+    terminal = journal.launches[0].terminal
+    assert terminal is not None
+    diagnostic = json.loads(terminal.data)
+    assert diagnostic["pre_grant"]["stage"] == "dispatch_intent"
+    assert diagnostic["pre_grant"]["identity"] is None
+    assert diagnostic["pre_grant"]["child_reaped"] is True
+    assert diagnostic["returncode"] is not None
     pid = json.loads(journal.launches[0].registration.incarnation.data)["pid"]
     with pytest.raises(ChildProcessError):
         os.waitpid(pid, os.WNOHANG)
@@ -188,13 +197,30 @@ def test_identity_failure_fences_waiting_launcher(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     binding, command, unit, request, observed = _setup(tmp_path, "confirmed")
-    monkeypatch.setattr(one_shot, "observe_owned_child", lambda *_: None)
+    diagnostic = process_identity.IdentityDiagnostic(
+        process_identity.IdentityStage.ENVIRONMENT,
+        process_identity.IdentityFailure.IO,
+        process_identity.IdentityRead.INITIAL,
+        error_number=errno.EACCES,
+    )
+
+    def unavailable(*_: object) -> process_identity.ChildIdentity:
+        raise process_identity.IdentityObservationError(diagnostic)
+
+    monkeypatch.setattr(one_shot, "observe_owned_child", unavailable)
     with pytest.raises(one_shot.OneShotError):
         one_shot.dispatch_once(binding, command, unit, request, _evidence())
     assert not observed.exists()
     (journal,) = inspect(binding.receipt)
     assert journal.launches[0].status is LaunchStatus.FENCED
     assert journal.units[0].request is None
+    terminal = journal.launches[0].terminal
+    assert terminal is not None
+    value = json.loads(terminal.data)
+    assert value["returncode"] is not None
+    assert value["pre_grant"]["stage"] == "identity"
+    assert value["pre_grant"]["child_reaped"] is True
+    assert value["pre_grant"]["identity"] == diagnostic.as_dict()
 
 
 def test_terminal_journal_failure_keeps_unknown_result(
@@ -226,3 +252,85 @@ def test_request_bound_refuses_before_launch(tmp_path: Path) -> None:
     assert not observed.exists()
     (journal,) = inspect(binding.receipt)
     assert not journal.launches
+
+
+def test_constructor_failure_without_a_handle_retains_cleanup_uncertainty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binding, command, unit, request, observed = _setup(tmp_path, "confirmed")
+
+    def unavailable(*_args: object, **_kwargs: object) -> None:
+        raise OSError(errno.EACCES, "Controlled process creation refusal")
+
+    monkeypatch.setattr(one_shot.subprocess, "Popen", unavailable)
+
+    with pytest.raises(one_shot.OneShotError) as raised:
+        one_shot.dispatch_once(binding, command, unit, request, _evidence())
+
+    assert raised.value.cleanup is one_shot.PreGrantCleanup.UNRESOLVED
+    assert not observed.exists()
+    (stored,) = inspect(binding.receipt)
+    assert stored.units[0].request is None
+    (launch,) = stored.launches
+    assert launch.status is LaunchStatus.FENCED
+    assert launch.terminal is not None
+    evidence = json.loads(launch.terminal.data)
+    assert evidence["pre_grant"]["cleanup"] == "unresolved"
+    assert evidence["pre_grant"]["child_started"] is None
+    assert evidence["pre_grant"]["child_reaped"] is False
+    assert evidence["pre_grant"]["errno"] == errno.EACCES
+
+
+def test_launch_intent_refusal_reports_no_process_cleanup_obligation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binding, command, unit, request, observed = _setup(tmp_path, "confirmed")
+
+    def refuse(*_args: object) -> None:
+        raise TransitionError("Controlled launch intent refusal")
+
+    monkeypatch.setattr(one_shot, "record_launch_intent", refuse)
+
+    with pytest.raises(one_shot.OneShotError) as raised:
+        one_shot.dispatch_once(binding, command, unit, request, _evidence())
+
+    assert raised.value.cleanup is one_shot.PreGrantCleanup.NOT_STARTED
+    assert not observed.exists()
+    assert not inspect(binding.receipt)[0].launches
+
+
+def test_constructor_can_start_a_waiting_child_before_raising_without_a_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binding, command, unit, request, observed = _setup(tmp_path, "confirmed")
+    popen = one_shot.subprocess.Popen
+    children: list[subprocess.Popen[bytes]] = []
+
+    def constructor(*args: object, **kwargs: object) -> None:
+        children.append(popen(*args, **kwargs))
+        raise OSError(errno.EIO, "Controlled constructor error after child creation")
+
+    monkeypatch.setattr(one_shot.subprocess, "Popen", constructor)
+    try:
+        with pytest.raises(one_shot.OneShotError) as raised:
+            one_shot.dispatch_once(binding, command, unit, request, _evidence())
+        assert children
+        assert raised.value.cleanup is one_shot.PreGrantCleanup.UNRESOLVED
+        (stored,) = inspect(binding.receipt)
+        assert stored.units[0].request is None
+        (launch,) = stored.launches
+        assert launch.status is LaunchStatus.FENCED
+        assert launch.registration is None
+        assert launch.terminal is not None
+        evidence = json.loads(launch.terminal.data)
+        assert evidence["pre_grant"]["child_started"] is None
+        assert evidence["pre_grant"]["cleanup"] == "unresolved"
+        assert evidence["returncode"] is None
+    finally:
+        for child in children:
+            try:
+                child.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.communicate(timeout=2)
+    assert not observed.exists()

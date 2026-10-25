@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import StrEnum
 from importlib.resources import files
 from pathlib import Path
@@ -33,6 +33,73 @@ class Presence(StrEnum):
     ALIVE = "alive"
     ABSENT = "absent"
     AMBIGUOUS = "ambiguous"
+
+
+class IdentityStage(StrEnum):
+    """The identity coordinate being observed when qualification failed."""
+
+    INPUT = "input"
+    START_BEFORE = "start_ticks_before"
+    ENVIRONMENT = "environment"
+    UID = "uid"
+    BOOT = "boot_id"
+    PID_NAMESPACE = "pid_namespace"
+    MOUNT_NAMESPACE = "mount_namespace"
+    PROC_MOUNT = "proc_mount"
+    START_AFTER = "start_ticks_after"
+    OWNERSHIP = "ownership"
+    RECHECK = "recheck"
+
+
+class IdentityFailure(StrEnum):
+    """Why the observed identity cannot authorize a grant."""
+
+    INVALID = "invalid"
+    IO = "io"
+    MALFORMED = "malformed"
+    MISMATCH = "mismatch"
+    UNSTABLE = "unstable"
+
+
+class IdentityRead(StrEnum):
+    """The acquisition context of one identity observation."""
+
+    INITIAL = "initial"
+    CONFIRMATION = "confirmation"
+    PRESENCE = "presence"
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityDiagnostic:
+    """Failure coordinates without environment contents or observed secret values."""
+
+    stage: IdentityStage
+    reason: IdentityFailure
+    reading: IdentityRead
+    error_number: int | None = None
+    changed_fields: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        """Encode only failure labels, an OS error number and identity field names."""
+        return {
+            "stage": self.stage.value,
+            "reason": self.reason.value,
+            "reading": self.reading.value,
+            "errno": self.error_number,
+            "changed_fields": list(self.changed_fields),
+        }
+
+
+class IdentityObservationError(Exception):
+    """Refusal to authorize a child from incomplete or changing identity evidence."""
+
+    def __init__(self, diagnostic: IdentityDiagnostic) -> None:
+        self.diagnostic = diagnostic
+        super().__init__(
+            f"Owned identity refused: {diagnostic.reading.value}/{diagnostic.stage.value}; "
+            f"reason={diagnostic.reason.value}; errno={diagnostic.error_number}; "
+            f"fields={','.join(diagnostic.changed_fields)}"
+        )
 
 
 class GatedLaunchError(Exception):
@@ -82,16 +149,30 @@ class ChildIdentity:
         return Payload("application/codex-session-gc.child-identity+json", 1, encoded)
 
 
-def observe_owned_child(pid: int, environment: Mapping[str, str]) -> ChildIdentity | None:
-    """Return a readable exact child identity, or None when it cannot be established."""
+def observe_owned_child(pid: int, environment: Mapping[str, str]) -> ChildIdentity:
+    """Require two matching owned-child readings or raise a value-free diagnostic."""
     marker = environment.get(OWNED_MARKER_ENV)
     if type(pid) is not int or pid < 1 or type(marker) is not str or not marker:
-        return None
-    first = _read_identity(pid, marker)
-    if first is None:
-        return None
-    second = _read_identity(pid, marker)
-    return first if first == second else None
+        raise IdentityObservationError(
+            IdentityDiagnostic(IdentityStage.INPUT, IdentityFailure.INVALID, IdentityRead.INITIAL)
+        )
+    first = _read_identity(pid, marker, reading=IdentityRead.INITIAL)
+    second = _read_identity(pid, marker, reading=IdentityRead.CONFIRMATION)
+    if first != second:
+        changed = tuple(
+            field.name
+            for field in fields(ChildIdentity)
+            if getattr(first, field.name) != getattr(second, field.name)
+        )
+        raise IdentityObservationError(
+            IdentityDiagnostic(
+                IdentityStage.RECHECK,
+                IdentityFailure.UNSTABLE,
+                IdentityRead.CONFIRMATION,
+                changed_fields=changed,
+            )
+        )
+    return first
 
 
 def child_presence(identity: ChildIdentity) -> Presence:  # noqa: C901, PLR0911
@@ -109,8 +190,9 @@ def child_presence(identity: ChildIdentity) -> Presence:  # noqa: C901, PLR0911
         return _absence_after_coordinate_check(identity)
     except OSError:
         return Presence.AMBIGUOUS
-    observed = _read_identity(identity.pid, identity.marker)
-    if observed is None:
+    try:
+        observed = _read_identity(identity.pid, identity.marker)
+    except IdentityObservationError:
         return Presence.AMBIGUOUS
     try:
         after = _observer_coordinate()
@@ -143,31 +225,58 @@ def owned_launcher_command(command: ChildCommand) -> ChildCommand:
     )
 
 
-def _read_identity(pid: int, expected_marker: str) -> ChildIdentity | None:
+def _read_identity(
+    pid: int, expected_marker: str, *, reading: IdentityRead = IdentityRead.PRESENCE
+) -> ChildIdentity:
     path = _PROC / str(pid)
+    stage = IdentityStage.START_BEFORE
     try:
         stat_before = _start_ticks(path / "stat")
+        stage = IdentityStage.ENVIRONMENT
         marker = _environment_marker(path / "environ")
+        stage = IdentityStage.UID
         uid = _uid(path / "status")
+        stage = IdentityStage.BOOT
+        boot = _boot_id()
+        stage = IdentityStage.PID_NAMESPACE
+        pid_namespace = os.fsdecode((path / "ns/pid").readlink())
+        stage = IdentityStage.MOUNT_NAMESPACE
+        mount_namespace = os.fsdecode((path / "ns/mnt").readlink())
+        stage = IdentityStage.PROC_MOUNT
+        proc_mount = _proc_coordinate()
         identity = ChildIdentity(
-            pid,
-            marker,
-            stat_before,
-            _boot_id(),
-            os.fsdecode((path / "ns/pid").readlink()),
-            os.fsdecode((path / "ns/mnt").readlink()),
-            int(uid),
-            _proc_coordinate(),
+            pid, marker, stat_before, boot, pid_namespace, mount_namespace, uid, proc_mount
         )
+        stage = IdentityStage.START_AFTER
         stat_after = _start_ticks(path / "stat")
-    except FileNotFoundError, IndexError, OSError, ValueError:
-        return None
-    if (
-        identity.marker != expected_marker
-        or identity.uid != os.getuid()
-        or stat_before != stat_after
-    ):
-        return None
+    except OSError as error:
+        raise IdentityObservationError(
+            IdentityDiagnostic(stage, IdentityFailure.IO, reading, error_number=error.errno)
+        ) from error
+    except (IndexError, ValueError) as error:
+        raise IdentityObservationError(
+            IdentityDiagnostic(stage, IdentityFailure.MALFORMED, reading)
+        ) from error
+    mismatch = tuple(
+        name
+        for name, matches in (("marker", marker == expected_marker), ("uid", uid == os.getuid()))
+        if not matches
+    )
+    if mismatch:
+        raise IdentityObservationError(
+            IdentityDiagnostic(
+                IdentityStage.OWNERSHIP, IdentityFailure.MISMATCH, reading, changed_fields=mismatch
+            )
+        )
+    if stat_before != stat_after:
+        raise IdentityObservationError(
+            IdentityDiagnostic(
+                IdentityStage.START_AFTER,
+                IdentityFailure.UNSTABLE,
+                reading,
+                changed_fields=("start_ticks",),
+            )
+        )
     return identity
 
 
