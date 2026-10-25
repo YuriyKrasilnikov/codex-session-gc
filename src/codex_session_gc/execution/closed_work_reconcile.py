@@ -1,7 +1,7 @@
 # Copyright (c) 2026
 # ruff: noqa: EM101, TRY003, S608, SLF001
 
-"""Observe only saved selected effects after an uncertain one-shot delivery.
+"""Observe saved selected effects and independently settle owned-launch evidence.
 
 Confirmation describes a bounded, non-atomic final-state observation. It neither
 attributes deletion nor certifies perpetual absence, and never resends a unit.
@@ -25,6 +25,7 @@ from codex_session_gc.domain import GuardianAssociation, ThreadId
 from codex_session_gc.execution import closed_work_request as collector
 from codex_session_gc.execution.closed_work_apply import DispatchLimits
 from codex_session_gc.execution.confirmed_declaration import Declaration, saved_declaration
+from codex_session_gc.execution.operation_status import lifecycle_settled
 from codex_session_gc.execution.parent_relation import (
     GuardianParent,
     parse_parent_relation,
@@ -48,6 +49,7 @@ from codex_session_gc.recovery import (
     record_reconciliation_evidence,
     recover,
 )
+from codex_session_gc.recovery.journal import fence_pending_launches
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -61,6 +63,22 @@ class FinalState(StrEnum):
 
     CONFIRMED = "CONFIRMED_FINAL_STATE"
     UNKNOWN = "UNKNOWN"
+
+
+class LifecycleState(StrEnum):
+    """Current owned-process settlement, independent of selected storage effects."""
+
+    SETTLED = "SETTLED"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass(frozen=True, slots=True)
+class LifecycleReconciliationResult:
+    """Observed launch settlement and whether its exact-generation evidence is durable."""
+
+    state: LifecycleState
+    evidence: Payload
+    recorded: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +101,56 @@ class _Request:
     raw_paths: tuple[Path, ...]
     history_keys: tuple[str, ...]
     original_databases: frozenset[collector.DatabaseKind]
+
+
+def reconcile_lifecycle(
+    receipt: Path,
+    attempt_id: AttemptId,
+    *,
+    limits: collector.CollectionLimits,
+) -> LifecycleReconciliationResult:
+    """Fence pending admission and observe saved owned processes without reading effects.
+
+    Every registered incarnation must be observed absent before a new complete
+    lifecycle resolution is recorded. A fenced launch without an incarnation
+    remains unknown: fencing cannot establish that its process was reaped.
+    No helper starts and no original shutdown or unit result is synthesized.
+    """
+    budget = collector.CollectionBudget(limits, time.monotonic() + limits.deadline_seconds)
+    try:
+        collector._absolute(receipt)
+        _receipt_extent(receipt, budget)
+        attempt = _saved_attempt(receipt, attempt_id)
+        if lifecycle_settled(attempt):
+            return _settled_lifecycle(attempt)
+        fence_pending_launches(receipt, attempt_id, _lifecycle_evidence("admission_fenced"))
+        attempt = _saved_attempt(receipt, attempt_id)
+        _absent_launches(attempt)
+        _receipt_extent(receipt, budget)
+        evidence = _lifecycle_evidence("registered_owned_children_absent")
+        _record_absence(receipt, attempt, evidence)
+        return _settled_lifecycle(_saved_attempt(receipt, attempt_id))
+    except OSError, ValueError, TypeError, sqlite3.Error, RecoveryError:
+        return LifecycleReconciliationResult(
+            LifecycleState.UNKNOWN, _lifecycle_evidence("ownership_unavailable"), recorded=False
+        )
+
+
+def _lifecycle_evidence(observed: str) -> Payload:
+    return Payload(
+        "application/vnd.codex-session-gc.closed-work-owned-absence+json",
+        1,
+        json.dumps({"observed": observed, "atomic": False}, separators=(",", ":")).encode(),
+    )
+
+
+def _settled_lifecycle(attempt: AttemptStatus) -> LifecycleReconciliationResult:
+    if not lifecycle_settled(attempt):
+        raise collector.PreparationRefused("The owned launch ledger is not settled.")
+    evidence = attempt.lifecycle if attempt.launches else attempt.shutdown
+    if evidence is None:
+        raise collector.PreparationRefused("Positive lifecycle evidence is unavailable.")
+    return LifecycleReconciliationResult(LifecycleState.SETTLED, evidence, recorded=True)
 
 
 def reconcile(
@@ -137,7 +205,7 @@ def reconcile(
                 sort_keys=True,
             ).encode(),
         )
-        _record_absence(receipt, attempt_id, absence)
+        _record_absence(receipt, refreshed, absence)
         state = FinalState.CONFIRMED
         detail = "selected_effects_absent"
     except OSError, ValueError, TypeError, sqlite3.Error, RecoveryError:
@@ -369,6 +437,14 @@ def _receipt_extent(receipt: Path, budget: collector.CollectionBudget) -> None:
 def _saved(
     receipt: Path, attempt_id: AttemptId, unit_id: UnitId
 ) -> tuple[AttemptStatus, UnitStatus]:
+    attempt = _saved_attempt(receipt, attempt_id)
+    units = [item for item in attempt.units if item.unit.unit_id == unit_id]
+    if len(units) != 1:
+        raise collector.PreparationRefused("The saved unit is absent or ambiguous.")
+    return attempt, units[0]
+
+
+def _saved_attempt(receipt: Path, attempt_id: AttemptId) -> AttemptStatus:
     try:
         attempts = inspect(receipt)
     except ReceiptRecoveryRequiredError:
@@ -377,10 +453,7 @@ def _saved(
     matches = [item for item in attempts if item.start.attempt_id == attempt_id]
     if len(matches) != 1:
         raise collector.PreparationRefused("The saved attempt is absent or ambiguous.")
-    units = [item for item in matches[0].units if item.unit.unit_id == unit_id]
-    if len(units) != 1:
-        raise collector.PreparationRefused("The saved unit is absent or ambiguous.")
-    return matches[0], units[0]
+    return matches[0]
 
 
 def _absent_launches(attempt: AttemptStatus) -> None:
@@ -424,11 +497,11 @@ def _identity(payload: Payload) -> ChildIdentity:
     )
 
 
-def _record_absence(receipt: Path, attempt_id: AttemptId, evidence: Payload) -> None:
-    attempts = inspect(receipt)
-    attempt = next((item for item in attempts if item.start.attempt_id == attempt_id), None)
-    if attempt is None:
-        raise collector.PreparationRefused("The saved attempt changed.")
+def _record_absence(receipt: Path, observed: AttemptStatus, evidence: Payload) -> None:
+    attempt_id = observed.start.attempt_id
+    attempt = _saved_attempt(receipt, attempt_id)
+    if attempt.launches != observed.launches:
+        raise collector.PreparationRefused("The owned launch ledger changed during observation.")
     _absent_launches(attempt)
     for launch in attempt.launches:
         if launch.status is LaunchStatus.REGISTERED:

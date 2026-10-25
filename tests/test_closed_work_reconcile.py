@@ -830,3 +830,139 @@ def test_selected_board_template_prevents_confirmation_until_absent(
     with monkeypatch.context() as platform:
         confirmed, _ = _observe(tmp_path, setup, platform)
     assert confirmed.state is observer.FinalState.CONFIRMED
+
+
+@pytest.mark.parametrize("terminal", [TerminalKind.CONFIRMED, TerminalKind.REFUSED])
+def test_lifecycle_only_reconciliation_settles_definitive_units_without_effect_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, terminal: TerminalKind
+) -> None:
+    setup = _setup(tmp_path, terminal=terminal)
+    receipt, attempt, _, request, _, identity = setup
+    before_home = _before(tmp_path / "home")
+    monkeypatch.setattr(observer, "_observe", lambda *_: pytest.fail("No selected-effect read"))
+    monkeypatch.setattr(observer, "child_presence", lambda _: Presence.ABSENT)
+
+    result = observer.reconcile_lifecycle(receipt, attempt, limits=_LIMITS)
+
+    assert result.state is observer.LifecycleState.SETTLED
+    assert result.recorded
+    (stored,) = inspect(receipt)
+    assert stored.shutdown is None
+    assert stored.startup_unresolved
+    assert stored.units[0].terminal_kind is terminal
+    assert stored.units[0].request == request
+    assert stored.units[0].resolution is None
+    assert stored.launches[0].registration is not None
+    assert stored.launches[0].registration.incarnation == identity.incarnation()
+    assert stored.launches[0].status is LaunchStatus.OBSERVED_ABSENT
+    assert stored.lifecycle_generation == stored.launch_generation == 1
+    assert stored.lifecycle_kind is TerminalKind.CONFIRMED
+    assert _before(tmp_path / "home") == before_home
+
+    before_receipt = receipt.read_bytes()
+    monkeypatch.setattr(
+        observer, "child_presence", lambda _: pytest.fail("Settled generation must not be reread")
+    )
+    repeated = observer.reconcile_lifecycle(receipt, attempt, limits=_LIMITS)
+    assert repeated.state is observer.LifecycleState.SETTLED
+    assert repeated.recorded
+    assert repeated.evidence == result.evidence
+    assert receipt.read_bytes() == before_receipt
+
+
+@pytest.mark.parametrize("presence", [Presence.ALIVE, Presence.AMBIGUOUS])
+def test_lifecycle_only_reconciliation_preserves_live_or_unreadable_ownership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, presence: Presence
+) -> None:
+    receipt, attempt, _, _, _, _ = _setup(tmp_path, terminal=TerminalKind.CONFIRMED)
+    monkeypatch.setattr(observer, "child_presence", lambda _: presence)
+    before = receipt.read_bytes()
+
+    result = observer.reconcile_lifecycle(receipt, attempt, limits=_LIMITS)
+
+    assert result.state is observer.LifecycleState.UNKNOWN
+    assert not result.recorded
+    assert receipt.read_bytes() == before
+    (stored,) = inspect(receipt)
+    assert stored.lifecycle is None
+    assert stored.launches[0].status is LaunchStatus.REGISTERED
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+def test_lifecycle_only_reconciliation_fences_but_never_reaps_an_unregistered_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, fenced: bool
+) -> None:
+    receipt, attempt, _, request, helper, _ = _setup(tmp_path, terminal=TerminalKind.CONFIRMED)
+    (stored,) = inspect(receipt)
+    first = stored.launches[0].intent
+    record_launch_absence(receipt, attempt, first.launch_id, first.generation, helper.evidence)
+    pending = LaunchIntent(LaunchId(uuid4()), 2, LaunchPurpose.RECONCILE, request)
+    record_launch_intent(receipt, attempt, pending)
+    if fenced:
+        fence_launch(receipt, attempt, pending.launch_id, 2, helper.evidence)
+    monkeypatch.setattr(observer, "child_presence", lambda _: Presence.ABSENT)
+
+    result = observer.reconcile_lifecycle(receipt, attempt, limits=_LIMITS)
+
+    assert result.state is observer.LifecycleState.UNKNOWN
+    assert not result.recorded
+    (stored,) = inspect(receipt)
+    assert stored.launches[-1].status is LaunchStatus.FENCED
+    assert stored.launches[-1].registration is None
+    assert stored.lifecycle is None
+    with pytest.raises(TransitionError):
+        register_launch(
+            receipt,
+            attempt,
+            LaunchRegistration(pending.launch_id, 2, helper.evidence),
+        )
+
+
+def test_lifecycle_only_reconciliation_cannot_settle_a_changed_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipt, attempt, _, request, helper, _ = _setup(tmp_path, terminal=TerminalKind.CONFIRMED)
+    (stored,) = inspect(receipt)
+    first = stored.launches[0].intent
+    replacement = LaunchIntent(
+        LaunchId(uuid4()), first.generation + 1, LaunchPurpose.RECONCILE, request
+    )
+    changed = False
+
+    def presence(_: ChildIdentity) -> Presence:
+        nonlocal changed
+        if not changed:
+            changed = True
+            record_launch_absence(receipt, attempt, first.launch_id, 1, helper.evidence)
+            record_launch_intent(receipt, attempt, replacement)
+        return Presence.ABSENT
+
+    monkeypatch.setattr(observer, "child_presence", presence)
+
+    result = observer.reconcile_lifecycle(receipt, attempt, limits=_LIMITS)
+
+    assert result.state is observer.LifecycleState.UNKNOWN
+    assert not result.recorded
+    (stored,) = inspect(receipt)
+    assert stored.launch_generation == replacement.generation
+    assert stored.lifecycle is None
+    assert stored.launches[-1].status is LaunchStatus.PENDING
+
+
+def test_lifecycle_only_reconciliation_does_not_settle_a_launch_free_start(tmp_path: Path) -> None:
+    receipt = tmp_path / "receipt.sqlite"
+    attempt = AttemptId(uuid4())
+    evidence = Payload("test/evidence", 1, b"declared")
+    create(
+        receipt,
+        StartEnvelope(attempt, evidence, evidence, evidence, evidence),
+        (Unit(UnitId(uuid4()), 0, evidence),),
+    )
+    before = receipt.read_bytes()
+
+    result = observer.reconcile_lifecycle(receipt, attempt, limits=_LIMITS)
+
+    assert result.state is observer.LifecycleState.UNKNOWN
+    assert not result.recorded
+    assert receipt.read_bytes() == before
+    assert inspect(receipt)[0].shutdown is None
