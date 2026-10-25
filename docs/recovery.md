@@ -50,13 +50,21 @@ Confirmed, refused, partial and unknown describe different boundaries. Original
 delivery and observed final state remain distinct. `CONFIRMED_FINAL_STATE` means
 selected effects were observed absent within the declared bound; it does not
 attribute every effect to the original invocation or measure reclaimed space.
+CLI and MCP derive the effective outcome from the same saved evidence. Missing
+ownership settlement keeps it unknown. Later positive lifecycle evidence can
+settle ownership without inventing an original clean-shutdown event. Reviewed
+roots without a journal unit remain skipped; they are not freshly observed. A
+confirmed unit alongside skipped or undispatched work keeps the operation partial.
+
 Unknown/partial effects block dependent mutation until their safety is established;
 independent read-only work may continue. There is no blind replay or whole-store
 rollback.
 
 Completed current-format records can be displayed from saved metadata after the
 qualified helper changes, without decoding/replaying retired requests. Fresh
-observation of unresolved work requires its exact supported profile/wire contract.
+observation of unresolved selected effects requires its exact supported profile/wire
+contract. Saved process ownership can be reconciled independently, including when
+all units already have definitive delivery results.
 Keep the prior qualified consumer and its evidence while unresolved dependencies
 remain. Storage migrated beyond that consumer's schema may leave the outcome
 unresolved; keeping a binary does not promise it can read newly migrated storage.

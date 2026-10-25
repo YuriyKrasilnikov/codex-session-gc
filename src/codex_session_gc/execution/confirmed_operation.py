@@ -16,8 +16,10 @@ from anyio import CancelScope
 
 from codex_session_gc.execution.closed_work_operation import (
     ExecutionRequest,
+    SavedScopeError,
     confirmed_execution_request,
     execute,
+    saved_skipped_roots,
 )
 from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
 from codex_session_gc.execution.confirmed_declaration import (
@@ -26,6 +28,7 @@ from codex_session_gc.execution.confirmed_declaration import (
     create_declaration,
     validate_current_declaration,
 )
+from codex_session_gc.execution.operation_status import project_operation_status
 from codex_session_gc.execution.physical_manifest import decode_targets
 from codex_session_gc.recovery import RecoveryError, inspect
 
@@ -37,6 +40,13 @@ if TYPE_CHECKING:
 
 def _identifier(value: str) -> str:
     return str(UUID(value))
+
+
+def _display_saved_scope(data: bytes) -> object:
+    try:
+        return json.loads(data)
+    except ValueError, TypeError:
+        return None
 
 
 class ConfirmedOperations:
@@ -112,11 +122,10 @@ class ConfirmedOperations:
             raise ValueError(message)
         report.update(
             state="saved",
-            lifecycle_unresolved=stored.lifecycle_unresolved,
             roots=[
                 {
                     "unit_id": str(unit.unit.unit_id.value),
-                    "scope": json.loads(unit.unit.evidence.data),
+                    "scope": _display_saved_scope(unit.unit.evidence.data),
                     "original_native_outcome": unit.terminal_kind.value
                     if unit.terminal_kind
                     else None,
@@ -128,21 +137,22 @@ class ConfirmedOperations:
                 for unit in stored.units
             ],
         )
-        declaration = json.loads(stored.start.evidence.data).get("operation_declaration")
-        skipped = []
-        if isinstance(declaration, dict):
-            declared = {row["scope"]["root"] for row in report["roots"]}
-            skipped = [root for root in declaration["roots"] if root not in declared]
-        report["skipped_roots"] = skipped
-        outcomes = {unit.effective_terminal_kind for unit in stored.units}
-        if not stored.startup_unresolved and not stored.lifecycle_unresolved:
-            values = {outcome.value if outcome else "unknown" for outcome in outcomes}
-            if "unknown" in values:
-                report["outcome"] = "unknown"
-            elif "partial" in values or ("confirmed" in values and (skipped or len(values) > 1)):
-                report["outcome"] = "partial"
-            elif values:
-                report["outcome"] = next(iter(values))
+        try:
+            skipped = saved_skipped_roots(stored)
+        except SavedScopeError as error:
+            report.update(
+                outcome="unknown",
+                detail=str(error),
+                skipped_roots=None,
+                lifecycle_unresolved=project_operation_status(stored).lifecycle_unresolved,
+            )
+            return report
+        projected = project_operation_status(stored, skipped_roots=skipped)
+        report.update(
+            outcome=projected.outcome.value,
+            lifecycle_unresolved=projected.lifecycle_unresolved,
+            skipped_roots=list(skipped),
+        )
         return report
 
     def apply(self, declaration: Declaration) -> dict[str, Any]:
@@ -283,7 +293,8 @@ class ConfirmedOperations:
                 **report,
                 "operation_id": _identifier(operation_id),
                 "dispatch_replayed": False,
-                "outcome": "unknown" if report["outcome"] == "unknown" else whole["outcome"],
+                "outcome": whole["outcome"],
+                "lifecycle_unresolved": whole.get("lifecycle_unresolved"),
                 "skipped_roots": whole.get("skipped_roots", []),
             }
 

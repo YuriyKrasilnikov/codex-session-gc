@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -15,9 +16,12 @@ import pytest
 from codex_session_gc.cli.closed_work_execution import terminal
 from codex_session_gc.cli.main import main
 from codex_session_gc.domain import GraphSnapshot, LastActivity, UtcCutoff
+from codex_session_gc.execution import closed_work_apply as apply_engine
 from codex_session_gc.execution import closed_work_operation as online
+from codex_session_gc.execution import closed_work_reconcile as lifecycle_observer
 from codex_session_gc.execution.closed_work_profile import ContractRefused
 from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
+from codex_session_gc.execution.process_identity import Presence
 from codex_session_gc.recovery import (
     Payload,
     TerminalKind,
@@ -209,10 +213,17 @@ def test_skipped_root_keeps_partial_aggregate_and_reasons(
     (stored,) = inspect(options["journal"])
     assert len(stored.units) == 1
     saved = options["journal"].read_bytes()
-    assert main(["reconcile", "--online", "--receipt", str(options["journal"]), "--json"]) == 0
+    assert main(["reconcile", "--online", "--receipt", str(options["journal"]), "--json"]) == 4
     reconciled = json.loads(capsys.readouterr().out)
     assert reconciled["scope"] == "saved_journal_units"
     assert reconciled["scope"] in terminal(reconciled)
+    assert reconciled["outcome"] == "partial"
+    assert reconciled["skipped_roots"] == [str(_id(3).value)]
+    service = ConfirmedOperations(options["codex_home"], None, tmp_path)
+    saved_path = tmp_path / f"{report['attemptId']}.sqlite"
+    options["journal"].rename(saved_path)
+    assert service.status(report["attemptId"])["outcome"] == reconciled["outcome"]
+    saved_path.rename(options["journal"])
     assert len(reconciled["roots"]) == 1
     assert reconciled["roots"][0]["root"] == str(_id(1).value)
     assert options["journal"].read_bytes() == saved
@@ -439,6 +450,15 @@ def test_partial_receipt_with_unrenderable_unit_stays_unknown_without_replay(
     (after,) = inspect(options["journal"])
     assert after.units[0].request == original_request
     assert after.units[0].terminal_kind is TerminalKind.PARTIAL
+    named = tmp_path / f"{after.start.attempt_id.value}.sqlite"
+    options["journal"].rename(named)
+    service = ConfirmedOperations(options["codex_home"], None, tmp_path)
+    status = service.status(str(after.start.attempt_id.value))
+    assert status["outcome"] == "unknown"
+    assert "unreadable unit scope" in status["detail"]
+    assert status["skipped_roots"] is None
+    assert status["roots"][0]["original_native_outcome"] == "partial"
+    assert status["roots"][0]["unit_id"] == row["unitId"]
     assert observed.read_bytes() == consumed
 
 
@@ -640,3 +660,150 @@ def test_wire4_receipt_terminal_metadata_survives_without_old_request_decoder(
         assert observed["outcome"] == "confirmed"
         assert observed["dispatch_replayed"] is False
     assert json.loads(request.data)["version"] == 4
+
+
+@pytest.mark.parametrize("kind", [TerminalKind.CONFIRMED, TerminalKind.REFUSED])
+def test_all_final_units_reconcile_lifecycle_without_profile_or_effect_observation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    kind: TerminalKind,
+) -> None:
+    receipt, attempt, _, request, _, _ = saved_setup(tmp_path, terminal=kind)
+    named = tmp_path / f"{attempt.value}.sqlite"
+    receipt.rename(named)
+    operations = ConfirmedOperations(tmp_path / "home", None, tmp_path)
+    before = inspect(named)[0]
+    assert before.shutdown is None
+    assert operations.status(str(attempt.value))["outcome"] == "unknown"
+    monkeypatch.setattr(lifecycle_observer, "child_presence", lambda _identity: Presence.ABSENT)
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Final units must not load a profile, observe effects or dispatch")
+
+    monkeypatch.setattr(online, "load_closed_work_contract", forbidden)
+    monkeypatch.setattr(online, "reconcile", forbidden)
+    monkeypatch.setattr(online, "apply_closed_work", forbidden)
+    monkeypatch.setattr(online, "read_closed_work_facts", forbidden)
+    expected_exit = 0 if kind is TerminalKind.CONFIRMED else 3
+    assert main(["reconcile", "--online", "--receipt", str(named), "--json"]) == expected_exit
+    report = json.loads(capsys.readouterr().out)
+    after = inspect(named)[0]
+    assert report["outcome"] == kind.value
+    assert report["lifecycleUnresolved"] is False
+    assert report["roots"][0]["originalNativeOutcome"] == kind.value
+    assert after.start == before.start
+    assert after.shutdown is None
+    assert after.units[0].request == request
+    assert after.units[0].terminal == before.units[0].terminal
+    assert after.lifecycle_generation == after.launch_generation
+    assert operations.status(str(attempt.value))["outcome"] == report["outcome"]
+    stable = named.read_bytes()
+    assert operations.reconcile(str(attempt.value))["outcome"] == report["outcome"]
+    assert named.read_bytes() == stable
+
+
+@pytest.mark.parametrize("failure", [OSError, RuntimeError])
+def test_post_apply_receipt_observation_failure_preserves_native_facts_and_uncertainty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: type[Exception],
+) -> None:
+    argv, options, observed, _ = _case(tmp_path, monkeypatch)
+
+    def unavailable(_path: Path) -> tuple[object, ...]:
+        message = "injected adapter receipt observation failure"
+        raise failure(message)
+
+    monkeypatch.setattr(online, "inspect", unavailable)
+    assert main(argv) == 4
+    report = json.loads(capsys.readouterr().out)
+    assert report["outcome"] == "unknown"
+    assert "receipt observation failure" in report["detail"]
+    assert report["roots"][0]["originalNativeOutcome"] == "confirmed"
+    assert report["roots"][0]["status"] == "confirmed"
+    assert observed.read_text().splitlines() == [str(_id(1).value)]
+    (saved,) = inspect(options["journal"])
+    assert saved.units[0].terminal_kind is TerminalKind.CONFIRMED
+    original = saved.units[0].terminal
+    monkeypatch.setattr(online, "inspect", inspect)
+    assert main(["reconcile", "--online", "--receipt", str(options["journal"]), "--json"]) == 0
+    reconciled = json.loads(capsys.readouterr().out)
+    assert reconciled["outcome"] == "confirmed"
+    assert inspect(options["journal"])[0].units[0].terminal == original
+    assert observed.read_text().splitlines() == [str(_id(1).value)]
+
+
+def test_unclassified_engine_entry_failure_is_unknown_without_a_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv, options, observed, _ = _case(tmp_path, monkeypatch)
+    calls = []
+
+    def failing(*_args: object, **_kwargs: object) -> None:
+        calls.append(True)
+        message = "unclassified engine failure"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(online, "apply_closed_work", failing)
+    assert main(argv) == 4
+    report = json.loads(capsys.readouterr().out)
+    assert report["outcome"] == "unknown"
+    assert report["detail"] == "unclassified engine failure"
+    assert report["roots"][0]["status"] == "unknown"
+    assert report["roots"][0]["originalNativeOutcome"] is None
+    assert calls == [True]
+    assert not options["journal"].exists()
+    assert not observed.exists()
+
+
+@pytest.mark.parametrize("failure", ["missing", "digest"])
+def test_helper_admission_failure_remains_a_known_refusal_without_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    argv, options, observed, _ = _case(tmp_path, monkeypatch)
+    executable = options["helper_executable"]
+    if failure == "missing":
+        executable.unlink()
+    else:
+        executable.write_bytes(b"unqualified helper bytes")
+    assert main(argv) == 3
+    report = json.loads(capsys.readouterr().out)
+    assert report["outcome"] == "refused"
+    assert not options["journal"].exists()
+    assert not observed.exists()
+
+
+def test_mutator_final_close_error_is_not_a_preflight_refusal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv, options, observed, _ = _case(tmp_path, monkeypatch)
+    closed = []
+
+    class _CloseFailure:
+        def __getattr__(self, name: str) -> object:
+            return getattr(os, name)
+
+        def close(self, descriptor: int) -> None:
+            os.close(descriptor)
+            closed.append(descriptor)
+            message = "injected final helper descriptor close failure"
+            raise OSError(message)
+
+    monkeypatch.setattr(apply_engine, "os", _CloseFailure())
+    assert main(argv) == 4
+    report = json.loads(capsys.readouterr().out)
+    assert report["outcome"] == "unknown"
+    assert "final helper descriptor close failure" in report["detail"]
+    assert report["roots"][0]["status"] == "unknown"
+    assert len(closed) == 1
+    assert observed.read_text().splitlines() == [str(_id(1).value)]
+    assert inspect(options["journal"])[0].units[0].terminal_kind is TerminalKind.CONFIRMED

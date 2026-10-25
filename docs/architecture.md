@@ -15,7 +15,8 @@ this page identifies the owners of that behavior in the source tree.
 | Physical declaration | `execution/physical_manifest.py`, `parent_relation.py`, `selection_provenance.py` | Typed manifest and distinct spawn/Guardian relations |
 | Dispatch and results | `execution/closed_work_apply.py`, `closed_work_operation.py`, `one_shot.py` | Exact qualified child, durable intent and unit result |
 | Process ownership | `execution/launch.py`, `owned_launch.py`, `process_identity.py`, `transport.py` | Explicit child command/environment, blocked grant, observed incarnation and reap |
-| Recovery | `recovery/journal.py`, `execution/closed_work_reconcile.py` | Append-only evidence and fresh observation without replay |
+| Recovery | `recovery/journal.py`, `execution/closed_work_reconcile.py` | Append-only evidence; independent owned-process and selected-effect observation without replay |
+| Effective operation state | `execution/operation_status.py` | One pure outcome projection over saved delivery, skipped work and current ownership settlement |
 | Execution progress | `execution/progress.py` | Volatile operation/root events; producer never invokes or waits for the observer |
 
 ## Catalogue resources

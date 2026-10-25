@@ -6,21 +6,29 @@ from __future__ import annotations
 
 import json
 import math
-import sqlite3
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from codex_session_gc.domain import GuardianAssociation, ThreadId, UtcCutoff
-from codex_session_gc.execution.closed_work_apply import DispatchLimits, apply_closed_work
+from codex_session_gc.execution.closed_work_apply import (
+    ApplyPreflightRefusedError,
+    DispatchLimits,
+    apply_closed_work,
+)
 from codex_session_gc.execution.closed_work_facts import read_closed_work_facts
 from codex_session_gc.execution.closed_work_profile import (
     ContractRefused,
     load_closed_work_contract,
     reconciliation_contract,
 )
-from codex_session_gc.execution.closed_work_reconcile import FinalState, reconcile
+from codex_session_gc.execution.closed_work_reconcile import (
+    FinalState,
+    reconcile,
+    reconcile_lifecycle,
+)
 from codex_session_gc.execution.closed_work_request import review_targets
 from codex_session_gc.execution.confirmed_declaration import (
     Declaration,
@@ -29,6 +37,7 @@ from codex_session_gc.execution.confirmed_declaration import (
     saved_declaration,
     validate_current_declaration,
 )
+from codex_session_gc.execution.operation_status import project_operation_status
 from codex_session_gc.execution.physical_manifest import manifest_bytes, validate_reviewed_manifest
 from codex_session_gc.execution.progress import ProgressChannel, checked_channel
 from codex_session_gc.execution.resource_policy import (
@@ -39,9 +48,10 @@ from codex_session_gc.execution.resource_policy import (
 )
 from codex_session_gc.execution.selection_provenance import check_reviewed_associations
 from codex_session_gc.planning.closed_work import select_closed_work
-from codex_session_gc.recovery import AttemptId, RecoveryError, TerminalKind, inspect
+from codex_session_gc.recovery import AttemptId, TerminalKind, inspect
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from codex_session_gc.execution.closed_work_apply import RootResult
@@ -51,7 +61,7 @@ if TYPE_CHECKING:
         QualifiedHelperContract,
     )
     from codex_session_gc.planning.closed_work import ClosedWorkSelection
-    from codex_session_gc.recovery import UnitStatus
+    from codex_session_gc.recovery import AttemptStatus, UnitStatus
 
 
 @dataclass(frozen=True)
@@ -169,22 +179,62 @@ def _selection(selection: ClosedWorkSelection) -> dict[str, Any]:
     }
 
 
-def _aggregate(outcomes: list[TerminalKind | None]) -> TerminalKind:
-    if TerminalKind.UNKNOWN in outcomes:
-        return TerminalKind.UNKNOWN
-    if TerminalKind.PARTIAL in outcomes:
-        return TerminalKind.PARTIAL
-    if TerminalKind.CONFIRMED in outcomes:
-        return (
-            TerminalKind.CONFIRMED
-            if all(x is TerminalKind.CONFIRMED for x in outcomes)
-            else TerminalKind.PARTIAL
-        )
-    return TerminalKind.REFUSED
+class SavedScopeError(ValueError):
+    """Saved metadata cannot establish which reviewed roots acquired journal units."""
+
+
+def saved_skipped_roots(attempt: AttemptStatus) -> tuple[str, ...]:
+    """Keep reviewed roots without journal units distinct from unreadable saved scopes."""
+    declared = set()
+    for unit in attempt.units:
+        root = _display_scope(unit.unit.evidence.data)["root"]
+        if root is None:
+            message = "Saved operation contains an unreadable unit scope."
+            raise SavedScopeError(message)
+        declared.add(root)
+    try:
+        context = json.loads(attempt.start.evidence.data)
+    except (ValueError, TypeError) as error:
+        message = "Saved operation context is unreadable."
+        raise SavedScopeError(message) from error
+    if not isinstance(context, dict):
+        message = "Saved operation context must be an object."
+        raise SavedScopeError(message)
+    declaration = context.get("operation_declaration")
+    if declaration is None:
+        return ()
+    if not isinstance(declaration, dict) or not isinstance(declaration.get("roots"), list):
+        message = "Saved operation reviewed roots are unreadable."
+        raise SavedScopeError(message)
+    roots = declaration["roots"]
+    try:
+        canonical = tuple(str(ThreadId.parse(root).value) for root in roots)
+    except (ValueError, TypeError) as error:
+        message = "Saved operation reviewed roots are invalid."
+        raise SavedScopeError(message) from error
+    if list(canonical) != roots:
+        message = "Saved operation reviewed roots are not canonical."
+        raise SavedScopeError(message)
+    return tuple(root for root in canonical if root not in declared)
 
 
 def _exit(outcome: str) -> int:
     return {"confirmed": 0, "refused": 3, "partial": 4, "unknown": 4}[outcome]
+
+
+@contextmanager
+def _engine_phase(report: dict[str, Any], rows: list[dict[str, Any]]) -> Iterator[None]:
+    """Keep dispatch uncertain unless the mutator proves refusal before launch."""
+    report["outcome"] = "unknown"
+    for row in rows:
+        row["status"] = "unknown"
+    try:
+        yield
+    except ApplyPreflightRefusedError:
+        report["outcome"] = "refused"
+        for row in rows:
+            row["status"] = "not_dispatched"
+        raise
 
 
 def execute(
@@ -200,14 +250,14 @@ def execute(
     }
     try:
         progress = checked_channel(progress)
-        helper = load_closed_work_contract()
         collection, dispatch = _limits(arguments)
         report["limits"] = {"collection": asdict(collection), "dispatch": asdict(dispatch)}
         if arguments.command == "apply":
+            helper = load_closed_work_contract()
             _apply(arguments, helper, (collection, dispatch), report, progress=progress)
         else:
-            _reconcile(arguments, helper, collection, report)
-    except (OSError, ValueError, TypeError, sqlite3.Error, RecoveryError) as error:
+            _reconcile(arguments, collection, report)
+    except Exception as error:  # noqa: BLE001
         report["detail"] = str(error)
     return report, _exit(str(report["outcome"]))
 
@@ -281,34 +331,44 @@ def _apply(
             )
             for selection in eligible
         )
-    result = apply_closed_work(
-        facts,
-        eligible,
-        codex_home=arguments.home,
-        sqlite_home=arguments.home,
-        journal=arguments.receipt,
-        helper_executable=arguments.helper,
-        helper=helper,
-        default_provider=arguments.default_provider or "openai",
-        collection_limits=collection,
-        dispatch_limits=dispatch,
-        attempt_id=attempt_id,
-        declaration=declaration,
-        progress=progress,
-    )
+    eligible_roots = {next(iter(selection.roots)) for selection in eligible}
+    uncertain_rows = [
+        row
+        for selection, row in zip(selections, rows, strict=True)
+        if next(iter(selection.roots)) in eligible_roots
+    ]
+    with _engine_phase(report, uncertain_rows):
+        result = apply_closed_work(
+            facts,
+            eligible,
+            codex_home=arguments.home,
+            sqlite_home=arguments.home,
+            journal=arguments.receipt,
+            helper_executable=arguments.helper,
+            helper=helper,
+            default_provider=arguments.default_provider or "openai",
+            collection_limits=collection,
+            dispatch_limits=dispatch,
+            attempt_id=attempt_id,
+            declaration=declaration,
+            progress=progress,
+        )
     report["attemptId"] = str(result.attempt_id.value)
     report["lifecycleRecorded"] = result.lifecycle_recorded
     report["detail"] = result.detail
     results = {x.root: x for x in result.roots}
-    statuses = []
     for selection, row in zip(selections, rows, strict=True):
         native = results.get(next(iter(selection.roots)))
-        statuses.append(native.outcome if native else None)
         if native is not None:
             _root_result(row, native)
-    report["outcome"] = (
-        TerminalKind.UNKNOWN if result.outcome is TerminalKind.UNKNOWN else _aggregate(statuses)
-    ).value
+    (stored,) = inspect(arguments.receipt)
+    skipped = saved_skipped_roots(stored)
+    projected = project_operation_status(stored, skipped_roots=skipped)
+    report.update(
+        outcome=projected.outcome.value,
+        lifecycleUnresolved=projected.lifecycle_unresolved,
+        skipped_roots=list(skipped),
+    )
 
 
 def _root_result(row: dict[str, Any], native: RootResult) -> None:
@@ -375,7 +435,6 @@ def _saved_unit(unit: UnitStatus) -> dict[str, Any]:
 
 def _reconcile(
     arguments: ExecutionRequest,
-    helper: QualifiedHelperContract,
     collection: CollectionLimits,
     report: dict[str, Any],
 ) -> None:
@@ -384,21 +443,26 @@ def _reconcile(
     _receipt_bound(arguments.receipt, collection.maximum_total_bytes)
     (stored,) = inspect(arguments.receipt)
     report["attemptId"] = str(stored.start.attempt_id.value)
-    report["lifecycleUnresolved"] = stored.lifecycle_unresolved
+    reconcile_lifecycle(arguments.receipt, stored.start.attempt_id, limits=collection)
+    (refreshed,) = inspect(arguments.receipt)
+    if refreshed.start.attempt_id != stored.start.attempt_id:
+        message = "The saved attempt changed during observation."
+        raise ValueError(message)
+    stored = refreshed
     rows = [_saved_unit(unit) for unit in stored.units]
     report["roots"] = rows
-    outcomes: list[TerminalKind | None] = []
-    observed = False
+    helper = None
     for unit, row in zip(stored.units, rows, strict=True):
         effective = unit.effective_terminal_kind
         if unit.unresolved and unit.request is not None:
             try:
+                if helper is None:
+                    helper = load_closed_work_contract()
                 helper = reconciliation_contract(stored.start.profile, helper)
             except ContractRefused as error:
                 row.update(observationSource="unavailable", status=TerminalKind.UNKNOWN.value)
                 row["detail"] = str(error)
                 report["detail"] = str(error)
-                outcomes.append(TerminalKind.UNKNOWN)
                 continue
             result = reconcile(
                 arguments.receipt,
@@ -407,7 +471,6 @@ def _reconcile(
                 helper=helper,
                 limits=collection,
             )
-            observed = True
             row.update(
                 finalObservedState=result.state.value,
                 observationSource="fresh",
@@ -428,20 +491,18 @@ def _reconcile(
             except ValueError, TypeError:
                 effective = TerminalKind.UNKNOWN
                 row["status"] = effective.value
-        outcomes.append(effective)
-    if observed:
-        _receipt_bound(arguments.receipt, collection.maximum_total_bytes)
-        (refreshed,) = inspect(arguments.receipt)
-        if refreshed.start.attempt_id != stored.start.attempt_id:
-            message = "The saved attempt changed during observation."
-            raise ValueError(message)
-        stored = refreshed
-    report["lifecycleUnresolved"] = stored.lifecycle_unresolved
-    report["outcome"] = (
-        TerminalKind.UNKNOWN
-        if stored.lifecycle_unresolved and not any(unit.unresolved for unit in stored.units)
-        else _aggregate(outcomes)
-    ).value
+    _receipt_bound(arguments.receipt, collection.maximum_total_bytes)
+    (refreshed,) = inspect(arguments.receipt)
+    if refreshed.start.attempt_id != stored.start.attempt_id:
+        message = "The saved attempt changed during observation."
+        raise ValueError(message)
+    skipped = saved_skipped_roots(refreshed)
+    projected = project_operation_status(refreshed, skipped_roots=skipped)
+    report.update(
+        outcome=projected.outcome.value,
+        lifecycleUnresolved=projected.lifecycle_unresolved,
+        skipped_roots=list(skipped),
+    )
 
 
 def _fresh_binding(

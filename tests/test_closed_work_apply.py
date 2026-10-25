@@ -17,7 +17,11 @@ from uuid import UUID
 import pytest
 
 from codex_session_gc.execution import closed_work_apply, one_shot, process_identity
-from codex_session_gc.execution.closed_work_apply import DispatchLimits, apply_closed_work
+from codex_session_gc.execution.closed_work_apply import (
+    ApplyPreflightRefusedError,
+    DispatchLimits,
+    apply_closed_work,
+)
 from codex_session_gc.execution.operation_status import project_operation_status
 from codex_session_gc.execution.progress import ProgressChannel, ProgressKind
 from codex_session_gc.planning.closed_work import select_closed_work
@@ -103,8 +107,9 @@ def test_two_roots_are_declared_before_owned_helper_and_dispatched_once(tmp_path
         pid = json.loads(launch.registration.incarnation.data)["pid"]
         with pytest.raises(ChildProcessError):
             os.waitpid(pid, os.WNOHANG)
-    with pytest.raises(ReceiptIdentityError):
+    with pytest.raises(ApplyPreflightRefusedError) as error:
         apply_closed_work(facts, selections, **options)
+    assert isinstance(error.value.__cause__, ReceiptIdentityError)
     assert len(observed.read_text().splitlines()) == 2
 
 

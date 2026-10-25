@@ -124,33 +124,15 @@ def _scope(selection: ClosedWorkSelection) -> dict[str, object]:
     }
 
 
-def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
+def _validate_apply_inputs(
     facts: ClosedWorkFacts,
     selections: tuple[ClosedWorkSelection, ...],
-    *,
-    codex_home: Path,
-    sqlite_home: Path,
-    journal: Path,
-    helper_executable: Path,
-    helper: QualifiedHelperContract,
+    paths: tuple[Path, ...],
     default_provider: str,
-    collection_limits: CollectionLimits,
-    dispatch_limits: DispatchLimits,
-    attempt_id: AttemptId | None = None,
-    declaration: dict[str, object] | None = None,
-    progress: ProgressChannel | None = None,
-) -> ApplyResult:
-    """Declare immutable scopes, then collect and send each root at most once.
-
-    Validation/receipt-creation failures raise before any child launch. A root
-    outcome of None means its request was never dispatched. Existing receipts
-    are never reopened as a new apply attempt. The pinned Linux executable fd
-    binds launched helper bytes to the supplied digest across path replacement.
-    """
-    progress = checked_channel(progress)
+) -> None:
     if type(facts) is not ClosedWorkFacts or type(selections) is not tuple or not selections:
         raise ValueError("Finite facts and a nonempty immutable selection tuple are required.")
-    for path in (codex_home, sqlite_home, journal, helper_executable):
+    for path in paths:
         if not path.is_absolute():
             raise ValueError("All execution paths must be absolute.")
     if not isinstance(default_provider, str) or not default_provider:
@@ -171,43 +153,89 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
         if seen & selection.ownership_scope:
             raise ValueError("Work ownership scopes must be disjoint.")
         seen.update(selection.ownership_scope)
-    descriptor = os.open(helper_executable, os.O_RDONLY | os.O_NOFOLLOW)
+
+
+def _validate_helper_descriptor(descriptor: int, helper: QualifiedHelperContract) -> None:
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode) or not metadata.st_mode & 0o111:
+        raise ValueError("The qualified helper must be a regular executable.")
+    with os.fdopen(os.dup(descriptor), "rb") as stream:
+        if file_digest(stream, "sha256").digest() != helper.binary_sha256:
+            raise ValueError("The executable differs from the qualified helper digest.")
+
+
+class ApplyPreflightRefusedError(ValueError):
+    """Admission failed before any child launch; the original failure remains its cause."""
+
+
+def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
+    facts: ClosedWorkFacts,
+    selections: tuple[ClosedWorkSelection, ...],
+    *,
+    codex_home: Path,
+    sqlite_home: Path,
+    journal: Path,
+    helper_executable: Path,
+    helper: QualifiedHelperContract,
+    default_provider: str,
+    collection_limits: CollectionLimits,
+    dispatch_limits: DispatchLimits,
+    attempt_id: AttemptId | None = None,
+    declaration: dict[str, object] | None = None,
+    progress: ProgressChannel | None = None,
+) -> ApplyResult:
+    """Declare immutable scopes, then collect and send each root at most once.
+
+    Validation/receipt-creation failures raise ApplyPreflightRefusedError before any child
+    launch, retaining the original failure as their cause. A root
+    outcome of None means its request was never dispatched. Existing receipts
+    are never reopened as a new apply attempt. The pinned Linux executable fd
+    binds launched helper bytes to the supplied digest across path replacement.
+    """
+    descriptor: int | None = None
     try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode) or not metadata.st_mode & 0o111:
-            raise ValueError("The qualified helper must be a regular executable.")
-        with os.fdopen(os.dup(descriptor), "rb") as stream:
-            if file_digest(stream, "sha256").digest() != helper.binary_sha256:
-                raise ValueError("The executable differs from the qualified helper digest.")
-        attempt = attempt_id or AttemptId(uuid4())
-        if progress is not None:
-            progress.publish(ProgressEvent(ProgressKind.OPERATION, attempt))
-        units = tuple(UnitId(uuid4()) for _ in selections)
-        scopes = [_scope(s) for s in selections]
-        context = _payload(
-            {
-                "codex_home": str(codex_home),
-                "sqlite_home": str(sqlite_home),
-                "journal": str(journal),
-                "helper_path": str(helper_executable),
-                "helper_sha256": helper.binary_sha256.hex(),
-                "source_identity": helper.source_identity,
-                "provider": default_provider,
-                "cutoff": facts.cutoff.timestamp.isoformat(),
-                "collection_limits": asdict(collection_limits),
-                "dispatch_limits": asdict(dispatch_limits),
-                "scopes": scopes,
-                **({"operation_declaration": declaration} if declaration is not None else {}),
-            }
-        )
-        create(
-            journal,
-            StartEnvelope(attempt, helper.evidence, context, _payload(scopes), context),
-            tuple(
-                Unit(unit, index, _payload(scope))
-                for index, (unit, scope) in enumerate(zip(units, scopes, strict=True))
-            ),
-        )
+        try:
+            progress = checked_channel(progress)
+            _validate_apply_inputs(
+                facts,
+                selections,
+                (codex_home, sqlite_home, journal, helper_executable),
+                default_provider,
+            )
+            descriptor = os.open(helper_executable, os.O_RDONLY | os.O_NOFOLLOW)
+            _validate_helper_descriptor(descriptor, helper)
+            attempt = attempt_id or AttemptId(uuid4())
+            if progress is not None:
+                progress.publish(ProgressEvent(ProgressKind.OPERATION, attempt))
+            units = tuple(UnitId(uuid4()) for _ in selections)
+            scopes = [_scope(s) for s in selections]
+            context = _payload(
+                {
+                    "codex_home": str(codex_home),
+                    "sqlite_home": str(sqlite_home),
+                    "journal": str(journal),
+                    "helper_path": str(helper_executable),
+                    "helper_sha256": helper.binary_sha256.hex(),
+                    "source_identity": helper.source_identity,
+                    "provider": default_provider,
+                    "cutoff": facts.cutoff.timestamp.isoformat(),
+                    "collection_limits": asdict(collection_limits),
+                    "dispatch_limits": asdict(dispatch_limits),
+                    "scopes": scopes,
+                    **({"operation_declaration": declaration} if declaration is not None else {}),
+                }
+            )
+            create(
+                journal,
+                StartEnvelope(attempt, helper.evidence, context, _payload(scopes), context),
+                tuple(
+                    Unit(unit, index, _payload(scope))
+                    for index, (unit, scope) in enumerate(zip(units, scopes, strict=True))
+                ),
+            )
+        except Exception as error:
+            message = str(error)
+            raise ApplyPreflightRefusedError(message) from error
         results = [
             RootResult(next(iter(s.roots)), u, None, None, "Not attempted.")
             for s, u in zip(selections, units, strict=True)
@@ -295,4 +323,5 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
             outcome, detail = TerminalKind.UNKNOWN, f"Lifecycle journal failed: {error}"
         return ApplyResult(attempt, outcome, tuple(results), lifecycle, detail)
     finally:
-        os.close(descriptor)
+        if descriptor is not None:
+            os.close(descriptor)

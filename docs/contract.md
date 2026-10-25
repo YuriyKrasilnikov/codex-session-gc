@@ -112,8 +112,10 @@ receipt; losing its observer does not cancel or repeat execution.
 Confirmed, refused, partial and unknown remain distinct. A confirmed unit followed
 by a skipped/refused unit can produce a partial aggregate. No eligible selected
 history means no helper dispatch or receipt creation. Reconciliation observes
-saved dispatched units only; it never repeats deletion or continues undispatched
-work. See [recovery](recovery.md).
+saved launch ownership and dispatched-unit effects; it never repeats deletion or
+continues undispatched work. CLI and MCP share one effective outcome projection.
+Ownership can be reconciled after all unit results are definitive, without changing
+original delivery or shutdown evidence. See [recovery](recovery.md).
 
 Limits are cooperative: the defaults are 256 GiB and six hours per collection or
 dispatch; requests are at most 16 MiB, decoded first-line headers at most 1 MiB
