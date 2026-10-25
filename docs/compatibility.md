@@ -13,7 +13,7 @@ Codex executable or establish a complete live Core/app-server lifecycle guarante
 
 ## Current release
 
-Release 0.3.0 uses wire 6 and exact state/companion schemas. Its native source is
+Release 0.4.0 uses wire 6 and exact state/companion schemas. Its native source is
 pinned above with the official 0.164 board SQL changes backported: board templates
 and nullable channel descriptions are included in the qualified schema. The
 qualified cleanup host is Linux x86_64 on Ubuntu 26.04 LTS with glibc 2.43 and
