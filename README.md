@@ -10,12 +10,12 @@ not a fixed retention policy.
 ## Download and install
 
 Get the matched Linux bundle from
-[release v0.2.0](https://github.com/YuriyKrasilnikov/codex-session-gc/releases/tag/v0.2.0).
+[release v0.3.0](https://github.com/YuriyKrasilnikov/codex-session-gc/releases/tag/v0.3.0).
 It contains the Python wheel, qualified native helper, hash-locked requirements,
 license notices and `manifest.json`. The generic Python wheel alone does not
 contain the helper needed for deletion.
 
-| Component | Release 0.2.0 boundary |
+| Component | Release 0.3.0 boundary |
 | --- | --- |
 | Qualified host | Linux x86_64, Ubuntu 26.04 LTS, glibc 2.43 |
 | Python | Requires 3.14 or newer; tested with 3.14.7 |
@@ -35,12 +35,12 @@ not download Python. Run them in a new download directory:
 set -eu
 mkdir codex-session-gc-download
 cd codex-session-gc-download
-curl --fail --location --remote-name https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.2.0/codex-session-gc-0.2.0-linux-x86_64.tar.gz
-curl --fail --location --remote-name https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.2.0/SHA256SUMS
+curl --fail --location --remote-name https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.3.0/codex-session-gc-0.3.0-linux-x86_64.tar.gz
+curl --fail --location --remote-name https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.3.0/SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf codex-session-gc-0.2.0-linux-x86_64.tar.gz
-cd codex-session-gc-0.2.0-linux-x86_64
-gc_install_dir="$HOME/.local/share/codex-session-gc/0.2.0/venv"
+tar -xzf codex-session-gc-0.3.0-linux-x86_64.tar.gz
+cd codex-session-gc-0.3.0-linux-x86_64
+gc_install_dir="$HOME/.local/share/codex-session-gc/0.3.0/venv"
 test ! -e "$gc_install_dir"
 uv venv --no-project --no-python-downloads --python python3.14 "$gc_install_dir"
 uv pip install --python "$gc_install_dir/bin/python" --require-hashes --only-binary :all: -r install-requirements.txt
@@ -291,7 +291,7 @@ The stdio server exposes `query_catalogue`, `session_details`, `prepare_cleanup`
 `apply_cleanup`, `cleanup_status` and `reconcile_cleanup`. Register it with absolute paths:
 
 ```console
-codex mcp add codex-sessions -- "$HOME/.local/share/codex-session-gc/0.2.0/venv/bin/python" -m codex_session_gc mcp --home "$HOME/.codex" --helper "$PWD/codex-session-gc-native" --receipt-dir "$HOME/.local/state/codex-session-gc/receipts"
+codex mcp add codex-sessions -- "$HOME/.local/share/codex-session-gc/0.3.0/venv/bin/python" -m codex_session_gc mcp --home "$HOME/.codex" --helper "$PWD/codex-session-gc-native" --receipt-dir "$HOME/.local/state/codex-session-gc/receipts"
 ```
 
 For observation only, add `--read-only` to the server arguments. This mode exposes

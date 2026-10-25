@@ -302,11 +302,11 @@ commands below assume the already-qualified release helper has been retained at
 ```sh
 set -eu
 uv sync --locked --group build --no-install-project --no-build --no-python-downloads
-test ! -e build/release-0.2.0
-mkdir -p build/release-0.2.0
-uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.2.0
-uv build --wheel build/release-0.2.0/codex_session_gc-0.2.0.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.2.0
-.venv/bin/python tools/build_release.py --wheel build/release-0.2.0/codex_session_gc-0.2.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.2.0/codex-session-gc-0.2.0-linux-x86_64
+test ! -e build/release-0.3.0
+mkdir -p build/release-0.3.0
+uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.3.0
+uv build --wheel build/release-0.3.0/codex_session_gc-0.3.0.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.3.0
+.venv/bin/python tools/build_release.py --wheel build/release-0.3.0/codex_session_gc-0.3.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.3.0/codex-session-gc-0.3.0-linux-x86_64
 ```
 
 The build group pins the existing Hatchling backend in `pyproject.toml`; its
@@ -325,9 +325,9 @@ an existing output directory. Inspect the sdist/wheel contents, the wheel RECORD
 and all bundle manifest hashes before creating downloadable assets:
 
 ```sh
-tar -C build/release-0.2.0 -czf build/release-0.2.0/codex-session-gc-0.2.0-linux-x86_64.tar.gz codex-session-gc-0.2.0-linux-x86_64
-cd build/release-0.2.0
-sha256sum codex-session-gc-0.2.0-linux-x86_64.tar.gz codex_session_gc-0.2.0-py3-none-any.whl codex_session_gc-0.2.0.tar.gz > SHA256SUMS
+tar -C build/release-0.3.0 -czf build/release-0.3.0/codex-session-gc-0.3.0-linux-x86_64.tar.gz codex-session-gc-0.3.0-linux-x86_64
+cd build/release-0.3.0
+sha256sum codex-session-gc-0.3.0-linux-x86_64.tar.gz codex_session_gc-0.3.0-py3-none-any.whl codex_session_gc-0.3.0.tar.gz > SHA256SUMS
 ```
 
 Ship those three assets and `SHA256SUMS` together with the same version/tag.
