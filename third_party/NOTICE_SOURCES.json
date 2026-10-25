@@ -1,5 +1,6 @@
 {
-  "distribution": "codex-session-gc 0.2.0",
+  "distribution": "codex-session-gc native helper",
+  "first_distribution": "codex-session-gc 0.2.0",
   "scope": "Conservative production normal/build inputs for x86_64-unknown-linux-gnu; not an exact dead-stripped ELF inventory or legal-clearance determination.",
   "helper_sha256": "6ca072bf606733acd180031a34a55c9c6581c4b749dd8374a7a12c81d0d4efa5",
   "cargo_lock_sha256": "f9eb8b64d4efd5b007a66a4ae3ae504ee851938ec24af3c4c1824dd344499f10",
