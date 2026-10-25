@@ -28,8 +28,11 @@ before recursion or parent descriptor closure; the pool joins before return.
 Detached metadata supports filtering, grouping and paging without holding SQL open.
 Unknown membership retains known lower bounds rather than inventing exact totals.
 `CatalogueQuery` owns the conjunctive source, archive and literal-directory
-predicates. Textual and MCP consume the same matching IDs from `CatalogueIndex`,
-retaining complete group context and totals. Filters do not reread storage; an
+predicates and explicit work/history ordering. `CatalogueIndex` returns one
+`CatalogueResult` with contextual groups and the authoritative ordered
+`matching_histories`. MCP pages that sequence; Textual uses it directly for flat
+history rows and retains expandable work context in Works mode. Neither adapter
+rebuilds global order from grouped pages. Contextual totals remain complete. Filters do not reread storage; an
 explicit catalogue refresh replaces their detached snapshot.
 
 ## Confirmation and execution

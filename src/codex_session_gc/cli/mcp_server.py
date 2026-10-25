@@ -12,7 +12,7 @@ import json
 import os
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
@@ -25,9 +25,6 @@ from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
 from codex_session_gc.execution.selection_provenance import reviewed_associations
 from codex_session_gc.inventory.catalogue import SessionEntry, read_session_catalogue
 from codex_session_gc.inventory.query import CatalogueIndex, CatalogueQuery, CatalogueScope
-
-if TYPE_CHECKING:
-    from codex_session_gc.inventory.query import CatalogueGroup
 
 _PAGE = 100
 _TEXT = 500
@@ -123,7 +120,9 @@ class CatalogueService:
         min_bytes: int | None = None,
         max_bytes: int | None = None,
         scope: CatalogueScope = CatalogueScope.ALL,
-        sort: Literal["total", "own", "agents", "activity"] = "total",
+        order_target: Literal["work", "history"] = "work",
+        sort: Literal["total", "own", "agents", "stored_bytes", "activity"] = "total",
+        direction: Literal["asc", "desc"] = "desc",
         roots: list[str] | None = None,
         cwd: str | None = None,
         archive_state: ArchiveState | None = None,
@@ -140,18 +139,20 @@ class CatalogueService:
             min_bytes=min_bytes,
             max_bytes=max_bytes,
             scope=scope,
+            order_target=order_target,
             sort=sort,
+            direction=direction,
             roots=tuple(ThreadId.parse(value) for value in roots or []),
             cwd=cwd,
             archive_state=archive_state,
         )
         identity, index = await self._snapshot(snapshot_id, refresh=refresh)
-        groups = index.query(query)
-        matches: list[tuple[CatalogueGroup, SessionEntry]] = []
-        for group in groups:
-            matching = set(group.matching_ids)
-            matches.extend((group, entry) for entry in group.entries if entry.id in matching)
+        result = index.query(query)
+        groups = result.groups
+        matches = result.matching_histories
         page = matches[offset : offset + limit]
+        by_history = {identifier: group for group in groups for identifier in group.matching_ids}
+        page_groups = {by_history[entry.id].root.id: by_history[entry.id] for entry in page}
         summaries = {
             str(group.root.id.value): {
                 "root": _entry(group.root),
@@ -172,7 +173,7 @@ class CatalogueService:
                 "member_count": len(group.entries),
                 "matching_count": len(group.matching_ids),
             }
-            for group, _ in page
+            for group in page_groups.values()
         }
         return {
             "snapshot_id": identity,
@@ -180,7 +181,12 @@ class CatalogueService:
             "total_groups": len(groups),
             "offset": offset,
             "next_offset": offset + len(page) if offset + len(page) < len(matches) else None,
-            "histories": [_entry(entry) for _, entry in page],
+            "histories": [_entry(entry) for entry in page],
+            "order": {
+                "target": query.order_target,
+                "field": query.sort,
+                "direction": query.direction,
+            },
             "groups": summaries,
             "source_changed": index.catalogue.source_changed,
             "physical_complete": index.catalogue.physical_complete,
@@ -201,7 +207,7 @@ class CatalogueService:
             raise ValueError("Unknown catalogue history.")
         group = next(
             group
-            for group in index.query(CatalogueQuery())
+            for group in index.query(CatalogueQuery()).groups
             if identifier in {entry.id for entry in group.entries}
         )
         return {

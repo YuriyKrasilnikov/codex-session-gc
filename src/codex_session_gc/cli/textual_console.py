@@ -48,6 +48,8 @@ from codex_session_gc.inventory.query import (
 if TYPE_CHECKING:
     import argparse
 
+    from codex_session_gc.inventory.catalogue import SessionEntry
+
 
 def _size(value: int, unknown: int = 0) -> str:
     if not value and unknown:
@@ -131,6 +133,8 @@ class SessionApp(App[tuple[str, int]]):
         self.index: CatalogueIndex | None = None
         self.catalogue: SessionCatalogue | None = None
         self.groups: tuple[CatalogueGroup, ...] = ()
+        self.matching_histories: tuple[SessionEntry, ...] = ()
+        self.order_target = "work"
         self.selected: dict[ThreadId, ThreadId] = {}
         self.expanded: set[ThreadId] = set()
         self.row_map: dict[str, tuple[CatalogueGroup, ThreadId | None]] = {}
@@ -198,16 +202,29 @@ class SessionApp(App[tuple[str, int]]):
             )
             yield Select(
                 [
-                    ("Largest total", "total"),
-                    ("Largest own", "own"),
-                    ("Largest agents", "agents"),
-                    ("Latest activity", "activity"),
+                    ("Work total bytes", "total"),
+                    ("Work own bytes", "own"),
+                    ("Work agent bytes", "agents"),
+                    ("Activity", "activity"),
                 ],
                 value="total",
                 allow_blank=False,
                 id="sort",
             )
             yield Select([("All works", "all")], value="all", allow_blank=False, id="work")
+        with Horizontal(classes="filters"):
+            yield Select(
+                [("Works", "work"), ("Histories", "history")],
+                value="work",
+                allow_blank=False,
+                id="order-target",
+            )
+            yield Select(
+                [("Descending", "desc"), ("Ascending", "asc")],
+                value="desc",
+                allow_blank=False,
+                id="direction",
+            )
         yield DataTable(id="sessions", cursor_type="row")
         with VerticalScroll(id="details-panel"):
             yield Static(
@@ -297,7 +314,7 @@ class SessionApp(App[tuple[str, int]]):
             if not self._catalogue_is_live():
                 return
             self.catalogue, self.index = catalogue, CatalogueIndex(catalogue)
-            all_groups = self.index.query(CatalogueQuery())
+            all_groups = self.index.query(CatalogueQuery()).groups
             self.work_roots = {str(group.root.id.value): group.root.id for group in all_groups}
             options = [("All works", "all")]
             options.extend(
@@ -338,8 +355,27 @@ class SessionApp(App[tuple[str, int]]):
         if event.input.id != "confirm":
             self._filter()
 
-    def on_select_changed(self, _event: Select.Changed) -> None:
-        """Apply categorical filters to detached metadata."""
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Apply valid visible ordering fields and categorical filters to detached metadata."""
+        if event.select.id == "order-target":
+            target = self.query_one("#order-target", Select).value
+            options = (
+                [("History stored bytes", "stored_bytes"), ("Activity", "activity")]
+                if target == "history"
+                else [
+                    ("Work total bytes", "total"),
+                    ("Work own bytes", "own"),
+                    ("Work agent bytes", "agents"),
+                    ("Activity", "activity"),
+                ]
+            )
+            field = self.query_one("#sort", Select)
+            previous = field.value
+            with self.prevent(Select.Changed):
+                field.set_options(options)
+                field.value = (
+                    previous if previous in {value for _, value in options} else options[0][1]
+                )
         self._filter()
 
     def _filter(self) -> None:
@@ -360,12 +396,16 @@ class SessionApp(App[tuple[str, int]]):
                 min_bytes=_bound(self.query_one("#minimum", Input).value),
                 max_bytes=_bound(self.query_one("#maximum", Input).value),
                 scope=cast("Any", self.query_one("#scope", Select).value),
+                order_target=cast("Any", self.query_one("#order-target", Select).value),
                 sort=cast("Any", self.query_one("#sort", Select).value),
+                direction=cast("Any", self.query_one("#direction", Select).value),
                 roots=roots,
                 cwd=directory,
                 archive_state=archive,
             )
-            self.groups = self.index.query(query)
+            result = self.index.query(query)
+            self.groups, self.matching_histories = result.groups, result.matching_histories
+            self.order_target = query.order_target
             self.valid_filters = True
             self._render_rows()
         except ValueError as error:
@@ -377,7 +417,13 @@ class SessionApp(App[tuple[str, int]]):
         cursor = table.cursor_row
         table.clear()
         self.row_map.clear()
-        for group in self.groups:
+        if self.order_target == "history":
+            by_history = {
+                identifier: group for group in self.groups for identifier in group.matching_ids
+            }
+            for entry in self.matching_histories:
+                self._history_row(table, by_history[entry.id], entry, flat=True)
+        for group in self.groups if self.order_target == "work" else ():
             key = "g:" + str(group.root.id.value)
             self.row_map[key] = group, None
             picked = sum(identifier in self.selected for identifier in group.matching_ids)
@@ -400,27 +446,41 @@ class SessionApp(App[tuple[str, int]]):
             if group.root.id not in self.expanded:
                 continue
             for entry in group.entries:
-                key = "h:" + str(entry.id.value)
-                self.row_map[key] = group, entry.id
-                matches = entry.id in group.matching_ids
-                caption = (
-                    f"  {'✓' if entry.id in self.selected else '○'} "
-                    f"{entry.title[:120] or 'Untitled'} [{entry.source.value}]"
-                )
-                table.add_row(
-                    Text(clean(caption), style="" if matches else "dim"),
-                    _size(entry.known_stored_bytes, int(entry.stored_bytes is None)),
-                    "—",
-                    "—",
-                    "match" if matches else "context only",
-                    str(entry.last_activity or "unknown"),
-                    key=key,
-                )
+                self._history_row(table, group, entry)
         if table.row_count:
             table.move_cursor(row=min(cursor, table.row_count - 1))
         self._notice(
             f"{len(self.groups):,} work groups; {len(self.selected):,} exact histories selected "
-            "(selection persists across filters). Enter expands; Space toggles matches."
+            "(selection persists across filters). "
+            + ("Enter expands; " if self.order_target == "work" else "Globally ranked histories; ")
+            + "Space toggles matches."
+        )
+
+    def _history_row(
+        self,
+        table: DataTable[Any],
+        group: CatalogueGroup,
+        entry: SessionEntry,
+        *,
+        flat: bool = False,
+    ) -> None:
+        key = "h:" + str(entry.id.value)
+        self.row_map[key] = group, entry.id
+        matches = entry.id in group.matching_ids
+        caption = (
+            f"  {'✓' if entry.id in self.selected else '○'} "
+            f"{entry.title[:120] or 'Untitled'} [{entry.source.value}]"
+        )
+        if flat:
+            caption += f" — {group.root.title[:60] or 'Untitled work'} ({group.root.id.value})"
+        table.add_row(
+            Text(clean(caption), style="" if matches else "dim"),
+            _size(entry.known_stored_bytes, int(entry.stored_bytes is None)),
+            "—",
+            "—",
+            "match" if matches else "context only",
+            str(entry.last_activity or "unknown"),
+            key=key,
         )
 
     def _current(self) -> tuple[CatalogueGroup, ThreadId | None] | None:
@@ -446,6 +506,7 @@ class SessionApp(App[tuple[str, int]]):
             group, identifier = current
             entry = next((item for item in group.entries if item.id == identifier), group.root)
             lines = [
+                f"Work: {group.root.title[:120]} ({group.root.id.value})",
                 "Work own: " + _exact_size(group.own_known_stored_bytes, group.own_incomplete),
                 "Work agents: "
                 + _exact_size(group.agent_known_stored_bytes, group.agent_incomplete),

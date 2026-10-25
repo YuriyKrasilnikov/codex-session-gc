@@ -15,7 +15,6 @@ import asyncio
 import builtins
 import hashlib
 import io
-import itertools
 import json
 import os
 import resource
@@ -527,9 +526,10 @@ def worker(root: Path, expected_identity: str) -> dict[str, Any]:
         capture_wall, capture_cpu = time.perf_counter(), time.process_time()
         index = CatalogueIndex(catalogue)
         index_wall = time.perf_counter()
-        groups = index.query(CatalogueQuery())
+        result = index.query(CatalogueQuery())
+        groups = result.groups
         complete_wall = time.perf_counter()
-        first = tuple(itertools.islice((entry for group in groups for entry in group.entries), 50))
+        first = result.matching_histories[:50]
         first_wall = time.perf_counter()
         capture_calls = dict(calls)
         calls.clear()
@@ -540,8 +540,13 @@ def worker(root: Path, expected_identity: str) -> dict[str, Any]:
         filter_after_rchar, _ = _rchar()
         _verify(root, oracle, catalogue, groups)
         assert first
-        assert filtered
-        _verify(root, oracle, catalogue, filtered)
+        assert len(result.matching_histories) == len(catalogue.entries)
+        assert {str(entry.id.value) for entry in result.matching_histories} == {
+            row["id"] for row in oracle["rows"]
+        }
+        assert filtered.groups
+        assert len(filtered.matching_histories) == len(catalogue.entries)
+        _verify(root, oracle, catalogue, filtered.groups)
         assert not filter_calls
         assert filter_after_rchar - filter_before_rchar - filter_meter == 0
         assert capture_calls.get("history_content_open", 0) == 0
@@ -655,8 +660,9 @@ def ui_worker(root: Path, expected_identity: str) -> dict[str, Any]:  # noqa: PL
             filtered = app.index.query(CatalogueQuery(text="synthetic", min_bytes=0, sort="own"))
             query_calls = dict(calls)
             after, _ = _rchar()
-            assert filtered
-            _verify(root, oracle, app.catalogue, filtered)
+            assert filtered.groups
+            assert len(filtered.matching_histories) == len(app.catalogue.entries)
+            _verify(root, oracle, app.catalogue, filtered.groups)
             assert not query_calls
             assert after - before - meter_bytes == 0
             observed["detached_query_storage_api_calls"] = query_calls

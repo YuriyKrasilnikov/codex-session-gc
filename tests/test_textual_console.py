@@ -601,15 +601,10 @@ def test_title_and_three_sizes_visible_together(
             text = " ".join(
                 "".join(node.itertext()) for node in document.iter() if node.tag.endswith("}text")
             ).replace("\u00a0", " ")
-            for visible in (
-                "DistinctTitle",
-                "Own bytes",
-                "Agent bytes",
-                "Total bytes",
-                "9.00 TiB",
-                "3.00 TiB",
-                "12.00 TiB",
-            ):
+            headers = [
+                str(column.label) for column in browser.query_one(DataTable).ordered_columns[:4]
+            ]
+            for visible in (*headers, "DistinctTitle", "9.00 TiB", "3.00 TiB", "12.00 TiB"):
                 assert visible in text
             browser.query_one(DataTable).focus()
             await pilot.press("down", "up")
@@ -822,3 +817,118 @@ def test_catalogue_load_teardown_joins_actual_metadata_borrowers(
         assert not (tmp_path / "unused-receipts").exists()
 
     asyncio.run(asyncio.wait_for(scenario(), 30))
+
+
+def test_global_history_order_matches_mcp_pages_and_preserves_exact_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The largest agent can belong to the smaller work; context never becomes selection."""
+    root, agent = catalogue().entries
+    root = replace(
+        root,
+        title="Large work",
+        stored_bytes=1000,
+        known_stored_bytes=1000,
+        physical_rollouts=(_stored_rollout(ROOT, 1000),),
+    )
+    agent = replace(
+        agent,
+        title="Smaller agent",
+        stored_bytes=100,
+        known_stored_bytes=100,
+        physical_rollouts=(_stored_rollout(AGENT, 100),),
+    )
+    small = replace(
+        root,
+        id=_C,
+        root_id=_C,
+        title="Small work",
+        children=(_E,),
+        stored_bytes=1,
+        known_stored_bytes=1,
+        physical_rollouts=(_stored_rollout(_C, 1),),
+    )
+    largest = replace(
+        agent,
+        id=_E,
+        root_id=_C,
+        parent_id=_C,
+        title="Largest agent",
+        stored_bytes=500,
+        known_stored_bytes=500,
+        physical_rollouts=(_stored_rollout(_E, 500),),
+        last_activity=datetime(2025, 1, 1, tzinfo=UTC),
+    )
+    observed = SessionCatalogue((root, agent, small, largest), (), source_changed=False)
+    monkeypatch.setattr(ui, "read_session_catalogue", lambda _home: observed)
+    monkeypatch.setattr(mcp_server, "read_session_catalogue", lambda _home: observed)
+    reviewed = []
+
+    async def preview(intent: Intent, **_kwargs: object) -> dict[str, Any]:
+        reviewed.append(intent)
+        return report(intent)
+
+    monkeypatch.setattr(ui, "async_preview", preview)
+
+    async def scenario() -> None:
+        service = mcp_server.CatalogueService(tmp_path)
+        first = await service.query_catalogue(
+            scope="agents", order_target="history", sort="stored_bytes", direction="desc", limit=1
+        )
+        second = await service.query_catalogue(
+            snapshot_id=first["snapshot_id"],
+            scope="agents",
+            order_target="history",
+            sort="stored_bytes",
+            direction="desc",
+            offset=1,
+            limit=1,
+        )
+        expected, work_totals = [_E, AGENT], (501, 1100)
+        assert [row["id"] for page in (first, second) for row in page["histories"]] == [
+            str(value.value) for value in expected
+        ]
+        assert first["order"] == {"target": "history", "field": "stored_bytes", "direction": "desc"}
+        assert (
+            first["groups"][str(_C.value)]["total_stored_bytes"],
+            second["groups"][str(ROOT.value)]["total_stored_bytes"],
+        ) == work_totals
+        oldest = await service.query_catalogue(
+            snapshot_id=first["snapshot_id"],
+            scope="agents",
+            roots=[str(_C.value)],
+            order_target="history",
+            sort="activity",
+            direction="asc",
+        )
+        assert [row["id"] for row in oldest["histories"]] == [str(_E.value)]
+        for target, field in (("work", "stored_bytes"), ("history", "total")):
+            with pytest.raises(ValueError, match=r"(?i)(order|sort)"):
+                await service.query_catalogue(order_target=target, sort=field)
+        browser = ui.SessionApp(
+            tmp_path, CUTOFF, Path("/qualified-helper"), tmp_path.parent / "receipts"
+        )
+        async with browser.run_test(size=(120, 40)) as pilot:
+            while not browser.query_one(DataTable).row_count:
+                await pilot.pause(0.01)
+            browser.query_one("#scope", Select).value = CatalogueScope.AGENTS
+            browser.query_one("#order-target", Select).value = "history"
+            await pilot.pause()
+            assert browser.query_one("#sort", Select).value == "stored_bytes"
+            assert [identifier for _group, identifier in browser.row_map.values()] == expected
+            table = browser.query_one(DataTable)
+            table.move_cursor(row=0)
+            table.focus()
+            await pilot.press("space")
+            assert browser.selected == {_E: _C}
+            browser.query_one("#direction", Select).value = "asc"
+            await pilot.pause()
+            assert [identifier for _group, identifier in browser.row_map.values()] == [AGENT, _E]
+            assert browser.selected == {_E: _C}
+            await pilot.click("#preview")
+            while not browser.query_one("#confirm", Input).display:
+                await pilot.pause(0.01)
+            assert reviewed[0].selected == (_E,)
+            assert reviewed[0].roots == (_C,)
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=45))

@@ -47,7 +47,7 @@ def test_mixed_compressed_revert_display_uses_distinct_owned_stored_bytes(tmp_pa
     assert rows[_A].stored_bytes == rows[_A].known_stored_bytes == own
     assert rows[_A].reported_history_mode is HistoryMode.PAGINATED
     assert {item.representation.value for item in rows[_A].physical_rollouts} == {"plain", "zstd"}
-    group = CatalogueIndex(catalogue).query(CatalogueQuery(roots=(ThreadId.parse(_A),)))[0]
+    group = CatalogueIndex(catalogue).query(CatalogueQuery(roots=(ThreadId.parse(_A),))).groups[0]
     assert group.total_stored_bytes == own + rows[_B].known_stored_bytes
     assert group.total_known_stored_bytes == group.total_stored_bytes
     assert rows[_C].id not in {entry.id for entry in group.entries}
@@ -68,11 +68,11 @@ def test_incomplete_namespace_preserves_known_amount_and_proven_minimum(tmp_path
     assert all(entry.stored_bytes is None for entry in observed.entries)
     assert all(entry.known_stored_bytes == len(b"not history JSON") for entry in observed.entries)
     index = CatalogueIndex(observed)
-    assert index.query(CatalogueQuery(min_bytes=len(b"not history JSON")))
-    assert not index.query(CatalogueQuery(min_bytes=len(b"not history JSON") + 1))
-    assert not index.query(CatalogueQuery(max_bytes=10**9))
-    assert not index.query(CatalogueQuery(min_bytes=0, max_bytes=10**9))
-    assert index.query(CatalogueQuery())
+    assert index.query(CatalogueQuery(min_bytes=len(b"not history JSON"))).groups
+    assert not index.query(CatalogueQuery(min_bytes=len(b"not history JSON") + 1)).groups
+    assert not index.query(CatalogueQuery(max_bytes=10**9)).groups
+    assert not index.query(CatalogueQuery(min_bytes=0, max_bytes=10**9)).groups
+    assert index.query(CatalogueQuery()).groups
 
 
 def test_large_known_incomplete_work_sorts_above_small_exact_work(tmp_path: Path) -> None:
@@ -84,7 +84,7 @@ def test_large_known_incomplete_work_sorts_above_small_exact_work(tmp_path: Path
             "UPDATE threads SET rollout_path=? WHERE id=?",
             (str(tmp_path / "sessions" / "missing"), _C),
         )
-    groups = CatalogueIndex(read_session_catalogue(tmp_path)).query(CatalogueQuery())
+    groups = CatalogueIndex(read_session_catalogue(tmp_path)).query(CatalogueQuery()).groups
     assert str(groups[0].root.id.value) == _C
     assert groups[0].total_stored_bytes is None
     assert groups[0].total_known_stored_bytes == 100_000
@@ -107,7 +107,7 @@ def test_descriptor_alias_is_unattributed_without_losing_other_known_objects(
     assert rows[_C].stored_bytes is None
     assert rows[_C].known_stored_bytes == len(b"not history JSON")
     assert "ambiguous_physical_identity" in catalogue.diagnostics
-    groups = CatalogueIndex(catalogue).query(CatalogueQuery())
+    groups = CatalogueIndex(catalogue).query(CatalogueQuery()).groups
     assert sum(group.total_known_stored_bytes for group in groups) == len(
         b"unambiguous bytes"
     ) + 2 * len(b"not history JSON")

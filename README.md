@@ -110,14 +110,18 @@ See [compatibility](docs/compatibility.md) for the supported boundary.
 
 ## Browse and select
 
-The browser opens with the largest work groups first. Each group shows its own
+The browser opens with the largest work groups first. Works mode keeps expandable
+context; Histories mode ranks matching histories across all works in a flat list.
+Choose the ordering field and ascending or descending direction. Reordering keeps
+selected IDs unchanged and never selects contextual parents. Each group shows its own
 stored bytes, agent bytes and total across distinct physical histories, including
 plain and Zstandard representations and pre/post-revert rollouts. Known observed
 bytes are kept separately from an exact total: an incomplete observation shows
 `≥known` and an unknown total. Sorting ranks the known observed amount; it does
 not claim to order unknown actual totals. Equal known amounts put exact totals
-before incomplete totals, then use the stable session ID. These are stored lengths, not promised
-recovered disk space. Shared providers and conditional reclaim remain unknown
+before incomplete totals, then use the stable session ID. Wholly unknown amounts
+stay last in both directions; exact zero is a value. Activity ordering also keeps
+missing dates last. These are stored lengths, not promised recovered disk space. Shared providers and conditional reclaim remain unknown
 until the complete cleanup preview. MAIN, ordinary agent, Guardian and
 unknown source labels come from stored source metadata; a missing parent does
 not make a history MAIN.
@@ -313,7 +317,15 @@ Query and details share a cached catalogue identity; explicit refresh replaces i
 `archive_state` values `archived`, `not_archived` or `unknown`. Its `scope` values
 `ordinary_agents` and `guardians` narrow the existing combined `agents` scope.
 These predicates combine with text, date, size and work filters on detached
-metadata. Contextual parents remain in group summaries and are not matching
+metadata. `order_target=work` accepts `sort` values `total`, `own`, `agents` or
+`activity`; `order_target=history` accepts `stored_bytes` or `activity`.
+`direction` is `asc` or `desc`. The default is work/total/desc; invalid combinations
+are refused. For the largest matching agents across works, use
+`scope=agents, order_target=history, sort=stored_bytes, direction=desc`.
+For the oldest matching histories in one work, combine its `roots` filter with
+history/activity/asc. The response echoes `order` with `target`, `field` and
+`direction`. Filtering and ordering cover the full matching history sequence before
+pagination; `total_matches`, offsets and limits count histories in either mode. Contextual parents remain in group summaries and are not matching
 histories unless their own facts match. Changing filters does not reread storage.
 Preparation reads fresh scoped facts and returns a conditional report without a
 journal or deletion. Pages contain at most 100 histories; preparation accepts at

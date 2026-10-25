@@ -151,6 +151,29 @@ def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> N
             queried = _data(await session.call_tool("query_catalogue", {"limit": 1}))
             assert len(queried["histories"]) == 1
             snapshot = queried["snapshot_id"]
+            ordered = _data(
+                await session.call_tool(
+                    "query_catalogue",
+                    {
+                        "snapshot_id": snapshot,
+                        "scope": "agents",
+                        "order_target": "history",
+                        "sort": "stored_bytes",
+                        "direction": "asc",
+                        "limit": 1,
+                    },
+                )
+            )
+            assert [row["id"] for row in ordered["histories"]] == [CHILD]
+            assert ordered["order"] == {
+                "target": "history",
+                "field": "stored_bytes",
+                "direction": "asc",
+            }
+            invalid_order = await session.call_tool(
+                "query_catalogue", {"order_target": "history", "sort": "total"}
+            )
+            assert invalid_order.is_error
             prepared = _data(
                 await session.call_tool(
                     "prepare_cleanup",

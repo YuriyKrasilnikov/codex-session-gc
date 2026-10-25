@@ -45,6 +45,14 @@ and its byte totals remain visible when only a child matches. A contextual paren
 does not become selected automatically. Filters reuse detached metadata and keep
 unknown totals distinct from known lower bounds.
 
+Ordering targets either work groups or individual matching histories. Work metrics
+use complete contextual groups, including histories excluded by filters. History
+ordering is global across works. Both directions order known byte bounds or known
+activity dates before unknown values; exact zero remains a value. Equal numeric
+values prefer complete observations, then ascending UUID. Adapters consume the
+same complete ordered history sequence before pagination. Reordering preserves
+selected IDs and cannot add context to the selection.
+
 Preview is read-only and non-executable. Apply observes fresh facts rather than
 executing a saved preview. Textual and MCP confirmation bind the home identity,
 exact qualified profile, operation UUID, cutoff, roots, selected IDs, physical

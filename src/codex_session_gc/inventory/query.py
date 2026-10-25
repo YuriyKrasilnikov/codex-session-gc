@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
@@ -13,8 +14,6 @@ from codex_session_gc.domain import ArchiveState
 from codex_session_gc.inventory.catalogue import SessionSource
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from codex_session_gc.domain import ThreadId
     from codex_session_gc.inventory.catalogue import SessionCatalogue, SessionEntry, StoredRollout
 
@@ -38,10 +37,12 @@ class CatalogueQuery:
     min_bytes: int | None = None
     max_bytes: int | None = None
     scope: CatalogueScope | str = CatalogueScope.ALL
-    sort: Literal["total", "own", "agents", "activity"] = "total"
+    sort: Literal["total", "own", "agents", "stored_bytes", "activity"] = "total"
     roots: tuple[ThreadId, ...] = ()
     cwd: str | None = None
     archive_state: ArchiveState | str | None = None
+    order_target: Literal["work", "history"] = "work"
+    direction: Literal["asc", "desc"] = "desc"
 
     def __post_init__(self) -> None:
         """Reject ambiguous instants and invalid bounds rather than widening queries."""
@@ -52,13 +53,17 @@ class CatalogueQuery:
             raise ValueError("The exact stored cwd must be text.")
         if self.before is not None and self.before.utcoffset() is None:
             raise ValueError("The activity cutoff requires a timezone.")
-        if self.sort not in {
-            "total",
-            "own",
-            "agents",
-            "activity",
-        }:
-            raise ValueError("Unknown catalogue query option.")
+        if self.order_target not in ("work", "history"):
+            raise ValueError("Unknown catalogue order target.")
+        fields = (
+            ("total", "own", "agents", "activity")
+            if self.order_target == "work"
+            else ("stored_bytes", "activity")
+        )
+        if self.sort not in fields:
+            raise ValueError("The sort field does not belong to this catalogue order target.")
+        if self.direction not in ("asc", "desc"):
+            raise ValueError("Unknown catalogue order direction.")
         if any(
             value is not None and (type(value) is not int or value < 0)
             for value in (self.min_bytes, self.max_bytes)
@@ -93,6 +98,72 @@ class CatalogueGroup:
     total_stored_bytes: int | None = None
     shared_retained_bytes: int | None = None
     conditional_reclaim_bytes: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogueResult:
+    """Contextual groups and the complete authoritative order of matching histories."""
+
+    groups: tuple[CatalogueGroup, ...]
+    matching_histories: tuple[SessionEntry, ...]
+
+
+def _order(
+    value: int | None,
+    *,
+    incomplete: bool,
+    identifier: ThreadId,
+    direction: Literal["asc", "desc"],
+) -> tuple[bool, int, bool, str]:
+    """Keep unknowns last and ties stable, reversing only the known metric."""
+    metric = 0 if value is None else value
+    return (
+        value is None,
+        -metric if direction == "desc" else metric,
+        incomplete,
+        str(identifier.value),
+    )
+
+
+def _activity(value: datetime | None) -> int | None:
+    """Retain exact microseconds instead of rounding distant instants through floats."""
+    if value is None:
+        return None
+    elapsed = value - datetime(1970, 1, 1, tzinfo=UTC)
+    return (elapsed.days * 86400 + elapsed.seconds) * 1_000_000 + elapsed.microseconds
+
+
+def _group_order(
+    group: CatalogueGroup,
+    field: str,
+    direction: Literal["asc", "desc"],
+) -> tuple[bool, int, bool, str]:
+    if field == "activity":
+        value = _activity(group.last_activity)
+        incomplete = group.activity_incomplete
+    else:
+        known, exact = {
+            "total": (group.total_known_stored_bytes, group.total_stored_bytes),
+            "own": (group.own_known_stored_bytes, group.own_stored_bytes),
+            "agents": (group.agent_known_stored_bytes, group.agent_stored_bytes),
+        }[field]
+        incomplete = exact is None
+        value = None if incomplete and known == 0 else known
+    return _order(value, incomplete=incomplete, identifier=group.root.id, direction=direction)
+
+
+def _history_order(
+    entry: SessionEntry,
+    field: str,
+    direction: Literal["asc", "desc"],
+) -> tuple[bool, int, bool, str]:
+    if field == "activity":
+        value = _activity(entry.last_activity)
+        incomplete = entry.last_activity is None
+    else:
+        incomplete = entry.stored_bytes is None
+        value = None if incomplete and entry.known_stored_bytes == 0 else entry.known_stored_bytes
+    return _order(value, incomplete=incomplete, identifier=entry.id, direction=direction)
 
 
 def _source_matches(source: SessionSource, scope: CatalogueScope | str) -> bool:
@@ -183,11 +254,12 @@ class CatalogueIndex:
             for root, entries in grouped.items()
         )
 
-    def query(self, query: CatalogueQuery) -> tuple[CatalogueGroup, ...]:
+    def query(self, query: CatalogueQuery) -> CatalogueResult:
         """Return complete group context alongside stable exact matching histories."""
         result = []
+        roots = frozenset(query.roots)
         for root, entries in self._groups:
-            if query.roots and root.id not in query.roots:
+            if roots and root.id not in roots:
                 continue
             matches = tuple(entry.id for entry in entries if _matches(entry, query))
             if not matches:
@@ -220,25 +292,15 @@ class CatalogueIndex:
                 )
             )
 
-        def order(group: CatalogueGroup) -> tuple[float, bool, str]:
-            if query.sort == "activity":
-                value = (
-                    group.last_activity.timestamp()
-                    if group.last_activity is not None
-                    else float("-inf")
-                )
-            else:
-                value = {
-                    "total": group.total_known_stored_bytes,
-                    "own": group.own_known_stored_bytes,
-                    "agents": group.agent_known_stored_bytes,
-                }[query.sort]
-            incomplete = {
-                "total": group.total_stored_bytes is None,
-                "own": group.own_stored_bytes is None,
-                "agents": group.agent_stored_bytes is None,
-                "activity": False,
-            }[query.sort]
-            return -value, incomplete, str(group.root.id.value)
-
-        return tuple(sorted(result, key=order))
+        group_field = query.sort if query.order_target == "work" else "total"
+        group_direction = query.direction if query.order_target == "work" else "desc"
+        groups = tuple(
+            sorted(result, key=lambda group: _group_order(group, group_field, group_direction))
+        )
+        histories: list[SessionEntry] = []
+        for group in groups:
+            matching_ids = frozenset(group.matching_ids)
+            histories.extend(entry for entry in group.entries if entry.id in matching_ids)
+        if query.order_target == "history":
+            histories.sort(key=lambda entry: _history_order(entry, query.sort, query.direction))
+        return CatalogueResult(groups, tuple(histories))
