@@ -20,6 +20,7 @@ import pytest
 from textual.widgets import DataTable, Input, Select, Static
 
 from codex_session_gc.cli import textual_console as ui
+from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.domain import ArchiveState, ThreadId, UtcCutoff
 from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
 from codex_session_gc.execution.confirmed_declaration import ReviewedSelection, create_declaration
@@ -305,15 +306,21 @@ def test_cli_mcp_binds_explicit_home(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     seen = []
 
-    def run(home: Path, helper: Path | None, receipts: Path | None) -> int:
+    def run(
+        home: Path, helper: Path | None, receipts: Path | None, *, capability: McpCapability
+    ) -> int:
         assert helper is None
         assert receipts is None
-        seen.append(home)
+        seen.append((home, capability))
         return 0
 
     monkeypatch.setattr(mcp_server, "run", run)
     assert main(["mcp", "--home", str(tmp_path)]) == 0
-    assert seen == [tmp_path.resolve()]
+    assert main(["mcp", "--home", str(tmp_path), "--read-only"]) == 0
+    assert seen == [
+        (tmp_path.resolve(), McpCapability.CLEANUP),
+        (tmp_path.resolve(), McpCapability.READ_ONLY),
+    ]
     with pytest.raises(SystemExit):
         main(["mcp"])
 

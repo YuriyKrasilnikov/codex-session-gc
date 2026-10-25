@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
@@ -28,6 +29,7 @@ from codex_session_gc.cli.console_tasks import (
     confirmed_intent,
     preview,
 )
+from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.cli.mcp_server import CatalogueService
 from codex_session_gc.domain import GuardianAssociation, LastActivity, ThreadId, UtcCutoff
 from codex_session_gc.execution import closed_work_operation, confirmed_operation
@@ -45,7 +47,7 @@ from codex_session_gc.planning.closed_work import select_closed_work
 from codex_session_gc.recovery import AttemptId, inspect
 from tests.current_storage_fixture import _A, _B, _LIMITS, _id
 from tests.current_storage_fixture import _catalogue_home as _home
-from tests.mcp_native_fixture import ROOT, make_home
+from tests.mcp_native_fixture import CHILD, ROOT, logical_rows, make_home
 from tests.test_closed_work_apply import _setup
 from tests.test_closed_work_reconcile import _delete_selected
 
@@ -148,6 +150,140 @@ def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> N
             assert bad.is_error
 
     asyncio.run(asyncio.wait_for(check(), timeout=45))
+
+
+@pytest.mark.parametrize(
+    "entrypoint", [("codex_session_gc", "mcp"), ("codex_session_gc.cli.mcp_server",)]
+)
+def test_read_only_sdk_exposes_observation_without_cleanup_operation_or_receipt(
+    tmp_path: Path, entrypoint: tuple[str, ...]
+) -> None:
+    home, receipts = tmp_path / "home", tmp_path / "receipts"
+    make_home(home)
+    before = logical_rows(home)
+
+    async def check() -> None:
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                "-m",
+                *entrypoint,
+                "--home",
+                str(home),
+                "--receipt-dir",
+                str(receipts),
+                "--read-only",
+            ],
+            env=dict(os.environ),
+        )
+        async with stdio_client(parameters) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            assert {tool.name for tool in tools.tools} == {
+                "query_catalogue",
+                "session_details",
+                "prepare_cleanup",
+                "cleanup_status",
+            }
+            catalogue = _data(await session.call_tool("query_catalogue", {}))
+            snapshot = catalogue["snapshot_id"]
+            details = _data(
+                await session.call_tool(
+                    "session_details", {"snapshot_id": snapshot, "thread_id": ROOT}
+                )
+            )
+            assert details["session"]["id"] == ROOT
+            prepared = _data(
+                await session.call_tool(
+                    "prepare_cleanup",
+                    {"snapshot_id": snapshot, "thread_ids": [CHILD], "cutoff": "2030-01-01"},
+                )
+            )
+            assert not prepared["can_apply_via_mcp"]
+            assert "declaration" not in prepared
+            assert "declaration" not in prepared["report"]
+            assert "operation_id" not in prepared
+            assert "operation_id" not in prepared["report"]
+            assert prepared["report"]["selected"] == [CHILD]
+            assert prepared["report"]["deletions"] == [CHILD]
+            operation = str(UUID(int=1))
+            status = _data(await session.call_tool("cleanup_status", {"operation_id": operation}))
+            assert status["state"] == "receipt_absent"
+            for name, arguments in (
+                ("apply_cleanup", {"declaration": {}}),
+                ("reconcile_cleanup", {"operation_id": operation}),
+            ):
+                assert (await session.call_tool(name, arguments)).is_error
+        assert logical_rows(home) == before
+        assert not receipts.exists()
+
+    asyncio.run(asyncio.wait_for(check(), timeout=60))
+
+
+def test_read_only_prepare_allocates_no_operation_and_direct_calls_refuse_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home, receipts = tmp_path / "home", tmp_path / "receipts"
+    make_home(home)
+
+    async def check() -> None:
+        service = CatalogueService(home, receipts=receipts, capability=McpCapability.READ_ONLY)
+        listed = await service.query_catalogue()
+        monkeypatch.setattr(
+            confirmed_operation, "uuid4", lambda: pytest.fail("Allocated an operation")
+        )
+        monkeypatch.setattr(console_tasks, "uuid4", lambda: pytest.fail("Allocated an operation"))
+        prepared = await service.prepare_cleanup(listed["snapshot_id"], [CHILD], "2030-01-01")
+        assert not prepared["can_apply_via_mcp"]
+        assert "declaration" not in prepared
+        assert prepared["report"]["deletions"] == [CHILD]
+        with pytest.raises(PermissionError, match="Read-only"):
+            await service.apply_cleanup(Declaration.model_construct())
+        with pytest.raises(PermissionError, match="Read-only"):
+            await service.reconcile_cleanup(str(UUID(int=1)))
+        assert not receipts.exists()
+
+    asyncio.run(asyncio.wait_for(check(), timeout=45))
+
+
+def test_read_only_status_reads_existing_cleanup_without_appending_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts, _, options, _ = _setup(tmp_path)
+    monkeypatch.setattr(confirmed_operation, "load_closed_work_contract", lambda: options["helper"])
+    monkeypatch.setattr(
+        closed_work_operation, "load_closed_work_contract", lambda: options["helper"]
+    )
+    monkeypatch.setattr(closed_work_operation, "read_closed_work_facts", lambda *_a, **_k: facts)
+    receipts = tmp_path / "receipts"
+    operations = confirmed_operation.ConfirmedOperations(
+        options["codex_home"], options["helper_executable"], receipts
+    )
+    root, child = (str(_id(number).value) for number in (1, 2))
+    declaration = operations.prepare(
+        (root,),
+        (root, child),
+        facts.cutoff.timestamp.isoformat(),
+        _manifest(facts, (root,), (root, child), options["codex_home"]),
+    )
+    assert operations.apply(declaration)["outcome"] == "confirmed"
+    receipt = receipts / f"{declaration.operation_id}.sqlite"
+    before = hashlib.sha256(receipt.read_bytes()).digest()
+
+    async def check() -> None:
+        service = CatalogueService(
+            options["codex_home"], receipts=receipts, capability=McpCapability.READ_ONLY
+        )
+        status = await service.cleanup_status(declaration.operation_id)
+        assert status["outcome"] == "confirmed"
+        assert status["operation_id"] == declaration.operation_id
+        with pytest.raises(PermissionError, match="Read-only"):
+            await service.apply_cleanup(declaration)
+        with pytest.raises(PermissionError, match="Read-only"):
+            await service.reconcile_cleanup(declaration.operation_id)
+
+    asyncio.run(asyncio.wait_for(check(), timeout=30))
+    assert hashlib.sha256(receipt.read_bytes()).digest() == before
 
 
 def test_actual_adapter_cancellation_reaps_owned_worker_and_removes_copies(tmp_path: Path) -> None:

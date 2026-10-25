@@ -17,6 +17,7 @@ from codex_session_gc import diagnostics
 from codex_session_gc.cli import closed_work_execution
 from codex_session_gc.cli.console_display import preview_lines
 from codex_session_gc.cli.console_tasks import preview_selection
+from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.domain import ThreadId, UtcCutoff
 from codex_session_gc.execution.resource_policy import READ_BYTES, TIMEOUT_SECONDS
 
@@ -78,6 +79,14 @@ def _parser() -> argparse.ArgumentParser:
     mcp.add_argument("--home", type=Path, required=True)
     mcp.add_argument("--helper", type=Path)
     mcp.add_argument("--receipt-dir", type=Path)
+    mcp.add_argument(
+        "--read-only",
+        action="store_const",
+        const=McpCapability.READ_ONLY,
+        default=McpCapability.CLEANUP,
+        dest="capability",
+        help="Expose browsing, preview and saved status without cleanup or receipt updates",
+    )
     plan = commands.add_parser("plan", help="Preview selected closed work without deletion")
     _selection_arguments(plan)
     apply = commands.add_parser("apply", help="Delete an explicit selection once")
@@ -149,7 +158,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         home = arguments.home.expanduser().resolve()
         if not home.is_dir():
             _parser().error("--home must name an existing directory")
-        return mcp_server.run(home, arguments.helper, arguments.receipt_dir)
+        return mcp_server.run(
+            home, arguments.helper, arguments.receipt_dir, capability=arguments.capability
+        )
     if arguments.command == "plan":
         report, status = _preview(arguments)
         output = json.dumps(report, sort_keys=True) if arguments.json else _print_preview(report)

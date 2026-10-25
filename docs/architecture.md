@@ -38,6 +38,10 @@ exact selection to one operation UUID. The reviewed declaration travels unchange
 through confirmation into the shared execution mapping. Fresh execution checks
 those identities and the reviewed physical/Guardian context before a receipt or
 native dispatch.
+MCP startup selects an explicit observation-only or cleanup capability. The same
+capability governs tool registration and apply/reconciliation service entry points.
+Observation-only preparation uses the plain preview path without allocating an
+operation or creating receipt evidence; saved status remains readable.
 
 The native command is launched through the packaged `owned_launch.py` gate. It
 requires an exact grant within five seconds before replacing its own process.

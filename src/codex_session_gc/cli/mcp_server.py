@@ -19,6 +19,7 @@ from mcp.types import ToolAnnotations
 
 from codex_session_gc.cli.console_display import discover_helper
 from codex_session_gc.cli.console_tasks import Intent, async_preview, parse_cutoff
+from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.domain import ThreadId
 from codex_session_gc.execution.confirmed_declaration import Declaration
 from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
@@ -80,10 +81,16 @@ class CatalogueService:
     """One fixed-home observation cache; explicit refresh replaces its identity."""
 
     def __init__(
-        self, home: Path, helper: Path | None = None, receipts: Path | None = None
+        self,
+        home: Path,
+        helper: Path | None = None,
+        receipts: Path | None = None,
+        *,
+        capability: McpCapability = McpCapability.CLEANUP,
     ) -> None:
         """Bind all tools to the startup home, never client-supplied paths."""
         self.home = home.resolve()
+        self.capability = McpCapability(capability)
         state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
         self.operations = ConfirmedOperations(
             self.home, helper, receipts or state / "codex-session-gc/receipts"
@@ -230,24 +237,25 @@ class CatalogueService:
             raise ValueError(
                 "Full preview exceeds the bounded transport response; use the terminal UI."
             )
-        declaration = await asyncio.to_thread(
-            self.operations.prepare,
-            tuple(str(root.value) for root in sorted(roots)),
-            tuple(report["deletions"]),
-            intent.cutoff.timestamp.isoformat(),
-            report["physical_manifest"],
-            reviewed_associations(report["guardian_associations"]),
-        )
         prepared = {
             "snapshot_id": identity,
-            "declaration": declaration.model_dump(mode="json"),
             "preview_sha256": hashlib.sha256(encoded).hexdigest(),
             "report": report,
             "conditional": True,
-            "can_apply_via_mcp": True,
+            "can_apply_via_mcp": self.capability is McpCapability.CLEANUP,
             "source_changed": index.catalogue.source_changed,
             "physical_complete": index.catalogue.physical_complete,
         }
+        if self.capability is McpCapability.CLEANUP:
+            declaration = await asyncio.to_thread(
+                self.operations.prepare,
+                tuple(str(root.value) for root in sorted(roots)),
+                tuple(report["deletions"]),
+                intent.cutoff.timestamp.isoformat(),
+                report["physical_manifest"],
+                reviewed_associations(report["guardian_associations"]),
+            )
+            prepared["declaration"] = declaration.model_dump(mode="json")
         if len(json.dumps(prepared, ensure_ascii=False).encode()) > _REPORT_BYTES:
             raise ValueError(
                 "Complete preparation exceeds the response bound; reduce the selection."
@@ -256,6 +264,7 @@ class CatalogueService:
 
     async def apply_cleanup(self, declaration: Declaration) -> dict[str, Any]:
         """Explicitly apply the exact reviewed declaration once; digest is no consent proof."""
+        self._require_cleanup()
         return await self.operations.apply_owned(Declaration.model_validate(declaration))
 
     async def cleanup_status(self, operation_id: str) -> dict[str, Any]:
@@ -264,18 +273,32 @@ class CatalogueService:
 
     async def reconcile_cleanup(self, operation_id: str) -> dict[str, Any]:
         """Observe saved intents and write reconciliation evidence; never dispatch delete."""
+        self._require_cleanup()
         return await asyncio.to_thread(self.operations.reconcile, operation_id)
+
+    def _require_cleanup(self) -> None:
+        if self.capability is McpCapability.READ_ONLY:
+            raise PermissionError(
+                "Read-only MCP cannot apply cleanup or append reconciliation evidence."
+            )
 
 
 def create_server(
-    home: Path, helper: Path | None = None, receipts: Path | None = None
+    home: Path,
+    helper: Path | None = None,
+    receipts: Path | None = None,
+    *,
+    capability: McpCapability = McpCapability.CLEANUP,
 ) -> MCPServer[Any]:
     """Expose browsing and the shared confirmed operation over official SDK stdio."""
-    service = CatalogueService(home, helper, receipts)
+    service = CatalogueService(home, helper, receipts, capability=capability)
     server = MCPServer(
         "codex-session-gc",
         instructions=(
-            "Review prepare_cleanup report and declaration before explicitly calling "
+            "Read-only mode exposes catalogue, details, conditional preview and saved status. "
+            "Preparation creates no cleanup operation. Apply and reconciliation are unavailable."
+            if service.capability is McpCapability.READ_ONLY
+            else "Review prepare_cleanup report and declaration before explicitly calling "
             "apply_cleanup. A digest binds the payload and does not prove human consent. "
             "After unknown or response loss, use cleanup_status/reconcile_cleanup; "
             "never create a replacement operation to retry deletion."
@@ -287,26 +310,36 @@ def create_server(
     for tool in (service.query_catalogue, service.session_details, service.prepare_cleanup):
         server.tool(annotations=annotations)(tool)
     server.tool(annotations=annotations)(service.cleanup_status)
-    server.tool(
-        annotations=ToolAnnotations(
-            read_only_hint=False,
-            destructive_hint=True,
-            open_world_hint=False,
-        )
-    )(service.apply_cleanup)
-    server.tool(
-        annotations=ToolAnnotations(
-            read_only_hint=False,
-            destructive_hint=False,
-            open_world_hint=False,
-        )
-    )(service.reconcile_cleanup)
+    if service.capability is McpCapability.CLEANUP:
+        server.tool(
+            annotations=ToolAnnotations(
+                read_only_hint=False,
+                destructive_hint=True,
+                open_world_hint=False,
+            )
+        )(service.apply_cleanup)
+        server.tool(
+            annotations=ToolAnnotations(
+                read_only_hint=False,
+                destructive_hint=False,
+                open_world_hint=False,
+            )
+        )(service.reconcile_cleanup)
     return server
 
 
-def run(home: Path, helper: Path | None = None, receipts: Path | None = None) -> int:
+def run(
+    home: Path,
+    helper: Path | None = None,
+    receipts: Path | None = None,
+    *,
+    capability: McpCapability = McpCapability.CLEANUP,
+) -> int:
     """Serve MCP on stdio; stdout is reserved for protocol messages."""
-    create_server(home, helper or discover_helper(), receipts).run("stdio")
+    capability = McpCapability(capability)
+    if capability is McpCapability.CLEANUP and helper is None:
+        helper = discover_helper()
+    create_server(home, helper, receipts, capability=capability).run("stdio")
     return 0
 
 
@@ -315,5 +348,16 @@ if __name__ == "__main__":
     parser.add_argument("--home", required=True, type=Path)
     parser.add_argument("--helper", type=Path)
     parser.add_argument("--receipt-dir", type=Path)
+    parser.add_argument(
+        "--read-only",
+        action="store_const",
+        const=McpCapability.READ_ONLY,
+        default=McpCapability.CLEANUP,
+        dest="capability",
+    )
     arguments = parser.parse_args()
-    raise SystemExit(run(arguments.home, arguments.helper, arguments.receipt_dir))
+    raise SystemExit(
+        run(
+            arguments.home, arguments.helper, arguments.receipt_dir, capability=arguments.capability
+        )
+    )

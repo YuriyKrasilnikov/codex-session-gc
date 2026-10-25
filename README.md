@@ -284,6 +284,15 @@ The stdio server exposes `query_catalogue`, `session_details`, `prepare_cleanup`
 codex mcp add codex-sessions -- "$HOME/.local/share/codex-session-gc/0.2.0/venv/bin/python" -m codex_session_gc mcp --home "$HOME/.codex" --helper "$PWD/codex-session-gc-native" --receipt-dir "$HOME/.local/state/codex-session-gc/receipts"
 ```
 
+For observation only, add `--read-only` to the server arguments. This mode exposes
+`query_catalogue`, `session_details`, `prepare_cleanup` and `cleanup_status`.
+Preparation returns a conditional report with `can_apply_via_mcp=false` and creates
+no cleanup operation UUID, declaration or receipt. It needs no helper. Apply and
+reconciliation tools are unavailable because both can write application data or
+receipt evidence. Default mode retains the confirmed apply and reconciliation
+tools. Read-only describes application data and receipt evidence; SQLite read
+coordination may still use locks or sidecars.
+
 Run registration from the unpacked bundle directory. Replace `--home` when Codex
 uses a different storage directory. Registration edits the client configuration;
 starting the server itself does not.

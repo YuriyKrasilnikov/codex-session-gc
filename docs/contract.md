@@ -53,6 +53,14 @@ receipt records the admitted execution scope: only the exact eligible candidates
 enter its selected and requested execution sets. Reconciliation observes that
 saved scope without repeating deletion.
 
+MCP `--read-only` exposes browsing, conditional preparation and saved status.
+Preparation allocates no cleanup UUID, declaration or receipt and returns
+`can_apply_via_mcp=false`. Apply and reconciliation are refused, including direct
+service calls; reconciliation can append receipt evidence. Default MCP mode keeps
+both tools available. This capability prevents application data and evidence
+mutations; it does not exclude SQLite's read coordination through locks or
+sidecars.
+
 ## Native execution
 
 Only the separately qualified native helper mutates session storage. It must
