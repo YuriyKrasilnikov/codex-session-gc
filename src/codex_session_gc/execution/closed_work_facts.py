@@ -175,7 +175,10 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
         SpawnEdge(ThreadId.parse(p), ThreadId.parse(c), SpawnEdgeStatus(status))
         for p, c, status in edges
     )
-    requested = _requested_scope(roots, spawn_edges, records) if selected is None else selected
+    ownership_scope = _requested_scope(roots, spawn_edges, records)
+    # The planner reports foreign requested IDs. Observe provenance only for
+    # members of this work, whose scoped SQL records can supply that provenance.
+    requested = ownership_scope if selected is None else selected & ownership_scope
     inventory, current_headers = observe_inventory(home, current_rows, frozenset(requested), budget)
     observations = []
     associations = []

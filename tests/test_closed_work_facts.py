@@ -121,6 +121,39 @@ def test_empty_selected_header_refuses_preview(tmp_path: Path) -> None:
         preview_selection(tmp_path, _CUTOFF, _ROOTS, None)
 
 
+@pytest.mark.parametrize("selected", [frozenset({_id(3)}), frozenset({_id(2), _id(3)})])
+def test_existing_foreign_selection_is_rejected_by_real_reader_and_planner(
+    tmp_path: Path, selected: frozenset[ThreadId]
+) -> None:
+    _fixture(tmp_path)
+    home = tmp_path / "home"
+    before = _source(home)
+    roots = frozenset({_id(1)})
+    facts = read_closed_work_facts(home, _CUTOFF, roots, selected, collection_limits())
+    selection = select_closed_work(
+        facts.snapshot,
+        _CUTOFF,
+        roots,
+        selected_threads=selected,
+        physical_inventory=facts.physical_inventory,
+    )
+    assert selection.errors == ("selected_thread_outside_closed_work",)
+    assert selection.conditional_candidates == frozenset()
+    assert _id(3) not in {item.thread_id for item in facts.rollouts}
+    assert _source(home) == before
+
+
+def test_existing_foreign_selection_has_structured_preview_refusal(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    home = tmp_path / "home"
+    before = _source(home)
+    result = preview_selection(home, _CUTOFF, frozenset({_id(1)}), frozenset({_id(3)}))
+    assert result["errors"] == ["selected_thread_outside_closed_work"]
+    assert result["deletions"] == []
+    assert not result["executable"]
+    assert _source(home) == before
+
+
 def _guardian_case(home: Path) -> Path:
     observation, _, _ = _fixture(home)
     path = next(item.path for item in observation.rollouts if item.thread_id == _id(3))
