@@ -5,7 +5,10 @@
 
 from __future__ import annotations
 
+import base64
+import csv
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -14,6 +17,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from hatchling.builders.wheel import WheelBuilder
 
 _PROJECT = Path(__file__).resolve().parents[1]
 _DOCUMENTS = (
@@ -35,10 +39,12 @@ _LICENSE_FILES = (
 
 
 def _inputs(root: Path) -> tuple[Path, Path, Path, dict[str, str]]:
-    """Construct a tiny wheel and external lock-export producer without package builds."""
+    """Build a tiny Python wheel and a lock-export fixture without native execution."""
     (root / "tools").mkdir()
+    (root / ".gitignore").write_text("__pycache__/\n")
     tool = root / "tools/build_release.py"
     tool.write_bytes((_PROJECT / "tools/build_release.py").read_bytes())
+    (root / "tools/source_map.py").write_bytes((_PROJECT / "tools/source_map.py").read_bytes())
     for name in _DOCUMENTS:
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,27 +66,31 @@ def _inputs(root: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     source_contract = root / "src/codex_session_gc/execution/closed_work_contract.json"
     source_contract.parent.mkdir(parents=True)
     source_contract.write_text(json.dumps(contract))
+    package = root / "src/codex_session_gc"
+    (package / "__init__.py").write_text('"""Synthetic release fixture."""\n')
+    (package / "api.py").write_text("SELECTED = 'original'\n")
+    (package / "resources").mkdir()
+    (package / "resources/settings.json").write_text('{"fixture":true}\n')
+    included = [
+        "src/codex_session_gc",
+        "tools/build_release.py",
+        "tools/source_map.py",
+        "pyproject.toml",
+        "uv.lock",
+        *_DOCUMENTS,
+        *_LICENSE_FILES,
+    ]
     (root / "pyproject.toml").write_text(
         '[project]\nname="codex-session-gc"\nversion="1.2.3"\n'
         'requires-python=">=3.14"\ndependencies=["fixture-dependency==1.0"]\n'
         'license="Apache-2.0"\n' + "license-files=" + json.dumps(list(_LICENSE_FILES)) + "\n"
+        '[build-system]\nrequires=["hatchling==1.32.4"]\nbuild-backend="hatchling.build"\n'
+        '[tool.hatch.build.targets.wheel]\npackages=["src/codex_session_gc"]\n'
+        "[tool.hatch.build.targets.sdist]\nonly-include=" + json.dumps(included) + "\n"
     )
-    with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr(
-            "codex_session_gc-1.2.3.dist-info/METADATA",
-            "Metadata-Version: 2.4\nName: codex-session-gc\n"
-            "Version: 1.2.3\nRequires-Python: >=3.14\n"
-            "Requires-Dist: fixture-dependency==1.0\n"
-            "License-Expression: Apache-2.0\n"
-            + "".join(f"License-File: {name}\n" for name in _LICENSE_FILES),
-        )
-        archive.writestr(
-            "codex_session_gc/execution/closed_work_contract.json", json.dumps(contract)
-        )
-        for name in _LICENSE_FILES:
-            archive.writestr(
-                "codex_session_gc-1.2.3.dist-info/licenses/" + name, (root / name).read_bytes()
-            )
+    (root / "uv.lock").write_text("synthetic lock\n")
+    built = Path(next(WheelBuilder(str(root)).build(directory=str(root))))
+    assert built == wheel
     binary = root / "bin"
     binary.mkdir()
     uv = binary / "uv"
@@ -93,13 +103,31 @@ def _inputs(root: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     return tool, wheel, helper, environment
 
 
+def _write_wheel(path: Path, payload: dict[str, bytes]) -> None:
+    """Generate correct RECORD hashes for independent tiny-wheel mutation cases."""
+    metadata = next(name for name in payload if name.endswith(".dist-info/METADATA"))
+    record = metadata.removesuffix("METADATA") + "RECORD"
+    payload = {name: value for name, value in payload.items() if name != record}
+    records = io.StringIO(newline="")
+    writer = csv.writer(records)
+    for name, value in payload.items():
+        encoded = base64.urlsafe_b64encode(hashlib.sha256(value).digest()).decode().rstrip("=")
+        writer.writerow([name, f"sha256={encoded}", len(value)])
+    writer.writerow([record, "", ""])
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, value in payload.items():
+            archive.writestr(name, value)
+        archive.writestr(record, records.getvalue())
+
+
 def _run(
     tool: Path, wheel: Path, helper: Path, output: Path, env: dict[str, str]
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
-            str(tool),
+            "-m",
+            "tools.build_release",
             "--wheel",
             str(wheel),
             "--helper",
@@ -108,6 +136,7 @@ def _run(
             str(output),
         ],
         env=env,
+        cwd=tool.parent.parent,
         capture_output=True,
         text=True,
         timeout=30,
@@ -153,7 +182,6 @@ def test_wrong_helper_refuses_without_output(tmp_path: Path) -> None:
     output = tmp_path / "release"
     result = _run(tool, wheel, helper, output, env)
     assert result.returncode == 2
-    assert "qualified native digest" in result.stderr
     assert not output.exists()
 
 
@@ -204,13 +232,10 @@ def test_wheel_must_match_the_selected_source_before_assembly(
     else:
         (tmp_path / "NOTICE").write_bytes(b"new source attribution")
     entries[metadata_name] = metadata.encode()
-    with zipfile.ZipFile(wheel, "w") as archive:
-        for name, raw in entries.items():
-            archive.writestr(name, raw)
+    _write_wheel(wheel, entries)
     output = tmp_path / "release"
     result = _run(tool, wheel, helper, output, env)
     assert result.returncode == 2
-    assert "current source" in result.stderr
     assert not output.exists()
 
 

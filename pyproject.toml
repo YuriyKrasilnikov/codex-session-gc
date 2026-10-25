@@ -67,6 +67,7 @@ only-include = [
     "native/patches",
     "native/tests",
     "tools/build_release.py",
+    "tools/source_map.py",
     "pyproject.toml",
     "uv.lock",
 ]

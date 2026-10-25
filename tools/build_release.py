@@ -1,6 +1,6 @@
 # Copyright (c) 2026
 # ruff: noqa: EM101, TRY003, PLR2004, S607
-"""Assemble an exact wheel/helper bundle without building or qualifying artifacts."""
+"""Assemble a source-matched wheel/helper bundle without building or executing the helper."""
 
 from __future__ import annotations
 
@@ -16,10 +16,11 @@ import zipfile
 from email.parser import BytesParser
 from pathlib import Path
 
-from packaging.licenses import canonicalize_license_expression
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
+
+from tools import source_map
 
 DOCUMENTS = (
     "README.md",
@@ -88,31 +89,10 @@ def license_payload(root: Path) -> dict[str, bytes]:
     return payload
 
 
-def validate_wheel_notices(wheel: Path, root: Path) -> None:
-    """Require installed wheel notices and SPDX metadata to match the selected source."""
-    project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
-    expected = license_payload(root)
-    with zipfile.ZipFile(wheel) as archive:
-        metadata_path = next(
-            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
-        )
-        metadata = BytesParser().parsebytes(archive.read(metadata_path))
-        if canonicalize_license_expression(
-            metadata.get("License-Expression", "")
-        ) != canonicalize_license_expression(project["license"]):
-            raise ValueError("Wheel license expression differs from the current source project.")
-        if set(metadata.get_all("License-File", [])) != set(expected):
-            raise ValueError("Wheel license files differ from the current source project.")
-        prefix = metadata_path.removesuffix("METADATA") + "licenses/"
-        for name, raw in expected.items():
-            if archive.read(prefix + name) != raw:
-                raise ValueError("Wheel notice bytes differ from the current source project.")
-
-
 def current_artifacts(
     wheel: Path,
     root: Path,
-) -> tuple[str, str, frozenset[Requirement], bytes, dict[str, object]]:
+) -> tuple[str, str, frozenset[Requirement], bytes, dict[str, object], source_map.SourceMap]:
     """Bind supplied artifacts to the selected source before exporting its dependencies."""
     identity = wheel_identity(wheel)
     version, python_requirement, dependencies, raw_contract, _ = identity
@@ -125,8 +105,8 @@ def current_artifacts(
         raise ValueError("Wheel dependencies differ from the current source project.")
     if raw_contract != (root / "src" / CONTRACT).read_bytes():
         raise ValueError("Wheel raw profile differs from the current source contract.")
-    validate_wheel_notices(wheel, root)
-    return identity
+    mapped = source_map.verify_wheel(wheel, root)
+    return (*identity, mapped)
 
 
 def runtime_lock(root: Path) -> bytes:
@@ -168,12 +148,17 @@ def runtime_lock(root: Path) -> bytes:
     return raw
 
 
+def install_requirements(wheel_name: str, wheel_digest: str) -> bytes:
+    """Bind the local wheel requirement to its exact qualified artifact bytes."""
+    return (f"-r requirements-runtime.txt\n./{wheel_name} --hash=sha256:{wheel_digest}\n").encode()
+
+
 def assemble(wheel: Path, helper: Path, output: Path, root: Path) -> None:
     """Publish one absent output directory only after checking every payload identity."""
     if output.exists():
         raise ValueError("Output already exists; refusing to replace a release.")
-    version, python_requirement, dependencies, raw_contract, contract = current_artifacts(
-        wheel, root
+    version, python_requirement, dependencies, raw_contract, contract, selected_source = (
+        current_artifacts(wheel, root)
     )
     declared = contract.get("binary_sha256")
     if (
@@ -196,9 +181,7 @@ def assemble(wheel: Path, helper: Path, output: Path, root: Path) -> None:
     payload = {name: (root / name).read_bytes() for name in DOCUMENTS}
     payload.update(license_payload(root))
     payload["requirements-runtime.txt"] = runtime
-    payload["install-requirements.txt"] = (
-        f"-r requirements-runtime.txt\n./{wheel.name} --hash=sha256:{wheel_digest}\n"
-    ).encode()
+    payload["install-requirements.txt"] = install_requirements(wheel.name, wheel_digest)
     if wheel.name in payload or wheel.name in {"manifest.json", "codex-session-gc-native"}:
         raise ValueError("Wheel filename conflicts with the bundle payload.")
     with tempfile.TemporaryDirectory(prefix=".gc-release-", dir=output.parent) as temporary:
@@ -218,14 +201,21 @@ def assemble(wheel: Path, helper: Path, output: Path, root: Path) -> None:
             or digest(staging / "codex-session-gc-native") != helper_digest
         ):
             raise ValueError("An input artifact changed during bundle assembly.")
-        copied_version, copied_python, copied_dependencies, copied_contract, _ = current_artifacts(
-            staging / wheel.name, root
+        copied_version, copied_python, copied_dependencies, copied_contract, _, copied_source = (
+            current_artifacts(staging / wheel.name, root)
         )
-        if (copied_version, copied_python, copied_dependencies, copied_contract) != (
+        if (
+            copied_version,
+            copied_python,
+            copied_dependencies,
+            copied_contract,
+            copied_source.digest,
+        ) != (
             version,
             python_requirement,
             dependencies,
             raw_contract,
+            selected_source.digest,
         ):
             raise ValueError("The copied wheel differs from the inspected contract or metadata.")
         manifest = {
@@ -235,6 +225,7 @@ def assemble(wheel: Path, helper: Path, output: Path, root: Path) -> None:
             "native_source_identity": contract["source_identity"],
             "wire_version": contract["wire_version"],
             "wheel_contract_sha256": hashlib.sha256(raw_contract).hexdigest(),
+            "wheel_source_map_sha256": selected_source.digest,
             "source_provenance": provenance,
             "payload": {
                 str(path.relative_to(staging)): {
@@ -254,7 +245,7 @@ def assemble(wheel: Path, helper: Path, output: Path, root: Path) -> None:
 
 
 def main() -> None:
-    """Accept already built artifacts; qualification remains a separate prerequisite."""
+    """Require source-matched Python files and an independently qualified native helper."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheel", required=True, type=Path)
     parser.add_argument("--helper", required=True, type=Path)

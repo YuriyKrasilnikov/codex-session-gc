@@ -37,6 +37,7 @@ jobs:
           test "$VERSION_ID" = 26.04
           command -v git
           command -v curl
+          command -v node
           git --version
           curl --version
           uname -a
@@ -71,7 +72,7 @@ jobs:
           uv python install --no-config "$PYTHON_VERSION"
           gc_ci_python="$(uv python find --no-config "$PYTHON_VERSION")"
           echo "GC_CI_PYTHON=$gc_ci_python" >> "$GITHUB_ENV"
-          uv sync --locked --no-config --no-install-project --no-build --no-python-downloads --python "$gc_ci_python"
+          uv sync --locked --no-config --group build --no-install-project --no-build --no-python-downloads --python "$gc_ci_python"
           "$UV_PROJECT_ENVIRONMENT/bin/python" -c 'import codex_session_gc, os; from pathlib import Path; source = Path(codex_session_gc.__file__).resolve(); expected = Path(os.environ["GITHUB_WORKSPACE"]) / "src"; print(source); assert source.is_relative_to(expected.resolve())'
       - name: Record actual runtime and source identities
         run: |

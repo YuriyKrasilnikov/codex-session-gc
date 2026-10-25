@@ -37,6 +37,7 @@ jobs:
           test "$VERSION_ID" = 26.04
           command -v git
           command -v curl
+          command -v node
           git --version
           curl --version
           uname -a
@@ -104,7 +105,7 @@ jobs:
           echo "GC_CI_VERSION=$gc_ci_version" >> "$GITHUB_ENV"
           uv build --sdist --no-config --no-python-downloads --no-build-isolation --python "$UV_PROJECT_ENVIRONMENT/bin/python" --out-dir "$GC_CI_ROOT/release"
           uv build --wheel "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version.tar.gz" --no-config --no-python-downloads --no-build-isolation --python "$UV_PROJECT_ENVIRONMENT/bin/python" --out-dir "$GC_CI_ROOT/release"
-          "$UV_PROJECT_ENVIRONMENT/bin/python" tools/build_release.py --wheel "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version-py3-none-any.whl" --helper "$GC_CI_ROOT/helper" --output "$GC_CI_ROOT/release/codex-session-gc-$gc_ci_version-linux-x86_64"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.build_release --wheel "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version-py3-none-any.whl" --helper "$GC_CI_ROOT/helper" --output "$GC_CI_ROOT/release/codex-session-gc-$gc_ci_version-linux-x86_64"
           "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_release --sdist "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version.tar.gz" --wheel "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version-py3-none-any.whl" --bundle "$GC_CI_ROOT/release/codex-session-gc-$gc_ci_version-linux-x86_64" --helper "$GC_CI_ROOT/helper" > "$GC_CI_ROOT/structure.json"
       - name: Install the actual bundle outside the checkout
         run: |
@@ -118,6 +119,11 @@ jobs:
           cp -R "$GITHUB_WORKSPACE/tests" "$GC_CI_ROOT/installed-tests/tests"
           cp "$GITHUB_WORKSPACE/tools/ci_pytest.py" "$GC_CI_ROOT/installed-tests/ci_pytest.py"
           cp "$GITHUB_WORKSPACE/pyproject.toml" "$GC_CI_ROOT/installed-tests/pyproject.toml"
+      - name: Verify installed project files against the selected source and wheel
+        run: |
+          set -eu
+          gc_ci_site="$("$GC_CI_ROOT/installed-venv/bin/python" -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_release --root "$GITHUB_WORKSPACE" --sdist "$GC_CI_ROOT/release/codex_session_gc-$GC_CI_VERSION.tar.gz" --wheel "$GC_CI_ROOT/release/codex_session_gc-$GC_CI_VERSION-py3-none-any.whl" --bundle "$GC_CI_ROOT/release/codex-session-gc-$GC_CI_VERSION-linux-x86_64" --helper "$GC_CI_ROOT/helper" --installed-site-packages "$gc_ci_site" > "$GC_CI_ROOT/installed-structure.json"
       - name: Evaluate installed doctor, CLI, Textual and MCP
         env:
           GC_MCP_NATIVE_HELPER: ${{ env.GC_CI_ROOT }}/release/codex-session-gc-${{ env.GC_CI_VERSION }}-linux-x86_64/codex-session-gc-native
@@ -157,6 +163,7 @@ jobs:
             ${{ env.GC_CI_ROOT }}/native-source.json
             ${{ env.GC_CI_ROOT }}/native-reuse.json
             ${{ env.GC_CI_ROOT }}/structure.json
+            ${{ env.GC_CI_ROOT }}/installed-structure.json
             ${{ env.GC_CI_ROOT }}/native.xml
             ${{ env.GC_CI_ROOT }}/installed.xml
           if-no-files-found: warn

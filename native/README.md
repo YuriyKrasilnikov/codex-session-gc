@@ -306,7 +306,7 @@ test ! -e build/release-0.3.0
 mkdir -p build/release-0.3.0
 uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.3.0
 uv build --wheel build/release-0.3.0/codex_session_gc-0.3.0.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.3.0
-.venv/bin/python tools/build_release.py --wheel build/release-0.3.0/codex_session_gc-0.3.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.3.0/codex-session-gc-0.3.0-linux-x86_64
+.venv/bin/python -m tools.build_release --wheel build/release-0.3.0/codex_session_gc-0.3.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.3.0/codex-session-gc-0.3.0-linux-x86_64
 ```
 
 The build group pins the existing Hatchling backend in `pyproject.toml`; its
