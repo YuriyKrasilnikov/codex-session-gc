@@ -12,6 +12,7 @@ from codex_session_gc.cli.console_tasks import preview_selection
 from codex_session_gc.domain import (
     ArchiveState,
     GuardianAssociation,
+    RolloutMetadata,
     ThreadId,
     ThreadOrigin,
     UtcCutoff,
@@ -152,6 +153,68 @@ def test_existing_foreign_selection_has_structured_preview_refusal(tmp_path: Pat
     assert result["deletions"] == []
     assert not result["executable"]
     assert _source(home) == before
+
+
+def _independent_work(parent: Path, count: int) -> tuple[Path, frozenset[ThreadId]]:
+    """Create independent known owners for end-to-end metadata growth witnesses."""
+    parent.mkdir()
+    _fixture(parent)
+    home = parent / "home"
+    owners = frozenset(_id(number) for number in range(10, count + 10))
+    with sqlite3.connect(home / "state_5.sqlite") as connection:
+        for owner in owners:
+            path = home / "sessions" / f"rollout-2026-06-01T00-00-00-{owner.value}.jsonl"
+            path.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {
+                            "id": str(owner.value),
+                            "source": "cli",
+                            "history_mode": "legacy",
+                            "model_provider": "openai",
+                        },
+                    }
+                )
+                + "\n"
+            )
+            connection.execute(
+                "INSERT INTO threads "
+                "(id,rollout_path,source,agent_role,model_provider,"
+                "updated_at_ms,archived,history_mode) "
+                "SELECT ?,?,'cli',agent_role,model_provider,updated_at_ms,archived,history_mode "
+                "FROM threads WHERE id=?",
+                (str(owner.value), str(path), str(_id(1).value)),
+            )
+    return home, owners
+
+
+def test_many_selected_owners_do_not_rescan_all_physical_objects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Count actual metadata accesses while preserving the full real-reader result."""
+    original = RolloutMetadata.__getattribute__
+    accesses = 0
+
+    def counted(item: RolloutMetadata, name: str) -> object:
+        nonlocal accesses
+        accesses += name == "ownership"
+        return original(item, name)
+
+    measurements = []
+    for count in (100, 200):
+        home, owners = _independent_work(tmp_path / str(count), count)
+        before = _source(home)
+        expected = read_closed_work_facts(home, _CUTOFF, owners, owners, collection_limits())
+        with monkeypatch.context() as patch:
+            patch.setattr(RolloutMetadata, "__getattribute__", counted)
+            accesses = 0
+            observed = read_closed_work_facts(home, _CUTOFF, owners, owners, collection_limits())
+        measurements.append(accesses)
+        assert observed == expected
+        assert {item.thread_id for item in observed.rollouts} == owners
+        assert _source(home) == before
+    assert measurements[1] < measurements[0] * 3
 
 
 def _guardian_case(home: Path) -> Path:

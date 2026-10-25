@@ -24,6 +24,7 @@ from codex_session_gc.domain import (
     GraphSnapshot,
     GuardianAssociation,
     LastActivity,
+    RolloutMetadata,
     RolloutRecord,
     SpawnEdge,
     SpawnEdgeStatus,
@@ -183,7 +184,14 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
     observations = []
     associations = []
     pointers = {pointer.ownership.thread_id: pointer for pointer in inventory.current_pointers}
-    physicals = {item.ownership.rollout_id: item for item in inventory.rollouts}
+    physicals = {}
+    owned: dict[ThreadId, list[RolloutMetadata]] = {}
+    for item in inventory.rollouts:
+        physicals[item.ownership.rollout_id] = item
+        owned.setdefault(item.ownership.thread_id, []).append(item)
+    incoming: dict[ThreadId, list[ThreadId]] = {}
+    for edge in spawn_edges:
+        incoming.setdefault(edge.child_thread_id, []).append(edge.parent_thread_id)
     for identifier in sorted(requested):
         pointer = pointers.get(identifier)
         if pointer is None:
@@ -200,13 +208,11 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
         if association is not None:
             associations.append(association)
         if parent is None and guardian_parent is None:
-            incoming = [
-                edge.parent_thread_id for edge in spawn_edges if edge.child_thread_id == identifier
-            ]
-            if len(incoming) == 1:
-                parent = incoming[0]
-        for item in inventory.rollouts:
-            if item.ownership.thread_id != identifier or item.physical is None:
+            parents = incoming.get(identifier, [])
+            if len(parents) == 1:
+                parent = parents[0]
+        for item in owned.get(identifier, []):
+            if item.physical is None:
                 continue
             physical = item.physical
             observations.append(

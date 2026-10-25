@@ -365,10 +365,11 @@ class SelectedPhysicalManifest:
                 condition=item.history_mode is not HistoryMode.UNKNOWN,
                 message="Selected history mode is unknown.",
             )
+        selected_owners = frozenset(self.selected_threads)
         pointers = {
             pointer.ownership.thread_id: pointer
             for pointer in self.inventory.current_pointers
-            if pointer.ownership.thread_id in self.selected_threads
+            if pointer.ownership.thread_id in selected_owners
         }
         _require(
             condition=set(pointers) == set(self.selected_threads),
@@ -383,8 +384,7 @@ class SelectedPhysicalManifest:
     @property
     def physical_rollouts(self) -> tuple[RolloutMetadata, ...]:
         """Derive all selected-owner representations without following provider references."""
+        selected_owners = frozenset(self.selected_threads)
         return tuple(
-            item
-            for item in self.inventory.rollouts
-            if item.ownership.thread_id in self.selected_threads
+            item for item in self.inventory.rollouts if item.ownership.thread_id in selected_owners
         )

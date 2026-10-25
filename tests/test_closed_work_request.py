@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from contextlib import contextmanager
 from dataclasses import replace
 from hashlib import sha256
@@ -18,6 +19,7 @@ import pytest
 
 from codex_session_gc.domain import (
     ArchiveState,
+    RolloutMetadata,
 )
 from codex_session_gc.execution import closed_work_request as adapter
 from codex_session_gc.execution.closed_work_facts import read_closed_work_facts
@@ -26,6 +28,7 @@ from codex_session_gc.execution.closed_work_request import (
     PreparationRefused,
 )
 from codex_session_gc.execution.parent_relation import parse_parent_relation
+from codex_session_gc.inventory.observation import RolloutObservation
 from codex_session_gc.planning.closed_work import select_closed_work
 from tests.current_storage_fixture import (
     _CUTOFF,
@@ -38,6 +41,7 @@ from tests.current_storage_fixture import (
     _prepare,
     _refresh_physical,
 )
+from tests.test_closed_work_facts import _independent_work
 
 # Deliberately synthetic schemas: these tests qualify collection semantics, not
 # native production schemas, helper artifacts or closure.
@@ -73,6 +77,110 @@ def test_v6_exact_scope_targets_rows_and_immutable_bytes(tmp_path: Path) -> None
     assert bounds[DatabaseKind.QUEUE]["queue_bookkeeping"] is True
     assert bounds[DatabaseKind.QUEUE]["rows"]["sqlite_sequence"] == [1]
     assert _before(tmp_path / "home") == before
+
+
+def test_target_observation_lookup_grows_linearly_and_preserves_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = RolloutObservation.__getattribute__
+    accesses = 0
+
+    def counted(item: RolloutObservation, name: str) -> object:
+        nonlocal accesses
+        accesses += name == "thread_id"
+        return original(item, name)
+
+    measurements = []
+    for count in (100, 200):
+        home, owners = _independent_work(tmp_path / str(count), count)
+        facts = read_closed_work_facts(home, _CUTOFF, owners, owners, _LIMITS)
+        selection = select_closed_work(
+            facts.snapshot, _CUTOFF, owners, physical_inventory=facts.physical_inventory
+        )
+        before = _before(home)
+        expected = adapter.review_targets(facts, selection, home, _LIMITS)
+        with monkeypatch.context() as patch:
+            patch.setattr(RolloutObservation, "__getattribute__", counted)
+            accesses = 0
+            observed = adapter.review_targets(facts, selection, home, _LIMITS)
+        measurements.append(accesses)
+        assert observed == expected
+        assert {target.thread_id for target in observed} == {str(owner.value) for owner in owners}
+        assert _before(home) == before
+    assert measurements[1] < measurements[0] * 3
+
+
+def test_target_index_keeps_first_matching_observation(tmp_path: Path) -> None:
+    facts, selection, _ = _fixture(tmp_path)
+    home = tmp_path / "home"
+    expected = adapter.review_targets(facts, selection, home, _LIMITS)
+    first = facts.rollouts[0]
+    duplicate = replace(first, metadata_spawn_parent=_id(3), metadata_origin="subagent")
+    repeated = replace(facts, rollouts=(*facts.rollouts, duplicate))
+    assert adapter.review_targets(repeated, selection, home, _LIMITS) == expected
+
+
+def test_missing_current_observation_refuses_before_request(tmp_path: Path) -> None:
+    facts, selection, _ = _fixture(tmp_path)
+    incomplete = replace(
+        facts, rollouts=tuple(item for item in facts.rollouts if item.thread_id != _id(2))
+    )
+    with pytest.raises(PreparationRefused, match="current rollout observation is missing"):
+        adapter.review_targets(incomplete, selection, tmp_path / "home", _LIMITS)
+
+
+def test_guardian_guards_index_observed_objects_without_extending_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = RolloutMetadata.__getattribute__
+    accesses = 0
+
+    def counted(item: RolloutMetadata, name: str) -> object:
+        nonlocal accesses
+        accesses += name == "ownership"
+        return original(item, name)
+
+    measurements = []
+    for count in (100, 200):
+        home, owners = _independent_work(tmp_path / str(count), count)
+        expected_identities = {}
+        guardian_source = {"subagent": {"other": "guardian"}}
+        with sqlite3.connect(home / DatabaseKind.STATE) as connection:
+            for owner in owners:
+                path = home / "sessions" / f"rollout-2026-06-01T00-00-00-{owner.value}.jsonl"
+                metadata = json.loads(path.read_text())
+                metadata["payload"].update(
+                    source=guardian_source, parent_thread_id=str(_id(1).value)
+                )
+                path.write_text(json.dumps(metadata) + "\n")
+                connection.execute(
+                    "UPDATE threads SET source=? WHERE id=?",
+                    (json.dumps(guardian_source), str(owner.value)),
+                )
+                stat = path.stat()
+                expected_identities[path] = (
+                    stat.st_dev,
+                    stat.st_ino,
+                    stat.st_size,
+                    stat.st_mtime_ns,
+                    stat.st_ctime_ns,
+                )
+        facts = read_closed_work_facts(home, _CUTOFF, frozenset({_id(1)}), None, _LIMITS)
+        before = _before(home)
+        budget = adapter.CollectionBudget(_LIMITS, time.monotonic() + _LIMITS.deadline_seconds)
+        with adapter._read_transaction(home / DatabaseKind.STATE, budget) as connection:
+            connection.row_factory = sqlite3.Row
+            with monkeypatch.context() as patch:
+                patch.setattr(RolloutMetadata, "__getattribute__", counted)
+                accesses = 0
+                guards, identities = adapter._guardian_guards(
+                    connection, (str(_id(1).value),), home, budget, facts.physical_inventory
+                )
+        measurements.append(accesses)
+        assert identities == expected_identities
+        assert guards == {str(home / f"thread-writer-locks/{owner.value}.lock") for owner in owners}
+        assert _before(home) == before
+    assert measurements[1] < measurements[0] * 3
 
 
 def test_child_subset_preserves_board_and_other_scope_members(tmp_path: Path) -> None:

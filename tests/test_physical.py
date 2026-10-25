@@ -70,6 +70,42 @@ def _check(*, condition: bool) -> None:
         pytest.fail("Physical value contract did not hold.")
 
 
+def test_manifest_membership_grows_linearly_without_selecting_other_owners(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Count equality and hash work across selected and retained physical owners."""
+    original_hash, original_equal = ThreadId.__hash__, ThreadId.__eq__
+    work = 0
+
+    def counted_hash(value: ThreadId) -> int:
+        nonlocal work
+        work += 1
+        return original_hash(value)
+
+    def counted_equal(value: ThreadId, other: object) -> bool:
+        nonlocal work
+        work += 1
+        return original_equal(value, other)
+
+    measurements = []
+    for count in (100, 200):
+        items = tuple(_metadata(number, number) for number in range(1, 2 * count + 1))
+        inventory = PhysicalInventory(
+            items, tuple(_pointer(item) for item in items), InventoryCompleteness.COMPLETE
+        )
+        owners = tuple(item.ownership.thread_id for item in items[:count])
+        with monkeypatch.context() as patch:
+            patch.setattr(ThreadId, "__hash__", counted_hash)
+            patch.setattr(ThreadId, "__eq__", counted_equal)
+            work = 0
+            manifest = SelectedPhysicalManifest(owners, inventory)
+            observed = manifest.physical_rollouts
+        measurements.append(work)
+        _check(condition=observed == items[:count])
+        _check(condition=manifest.inventory == inventory)
+    _check(condition=measurements[1] < measurements[0] * 3)
+
+
 class TestPhysicalValues:
     """Pure value contracts do not access files or activate an execution profile."""
 

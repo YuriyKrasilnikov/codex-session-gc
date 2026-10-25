@@ -328,6 +328,7 @@ def prepare_request(  # noqa: C901, PLR0912, PLR0915
         raise PreparationRefused("Selection is stale, refused or empty.")
     root = next(iter(selection.roots))
     selected = tuple(str(item.value) for item in sorted(selection.conditional_candidates))
+    selected_ids = frozenset(selected)
     budget = CollectionBudget(limits, time.monotonic() + limits.deadline_seconds)
     paths = {item.kind: sqlite_home / item.kind.value for item in helper.databases}
     namespace = {kind: _sample(path) for kind, path in paths.items()}
@@ -355,7 +356,7 @@ def prepare_request(  # noqa: C901, PLR0912, PLR0915
                                 | {
                                     str(item.ownership.rollout_id.value)
                                     for item in observation.physical_inventory.rollouts
-                                    if str(item.ownership.thread_id.value) in selected
+                                    if str(item.ownership.thread_id.value) in selected_ids
                                 }
                             )
                         )
@@ -525,6 +526,11 @@ def prepare_targets(  # noqa: C901
     observed_activity = {
         record.id: record.last_activity.timestamp for record in observation.snapshot.threads
     }
+    observed_rollouts: dict[tuple[ThreadId | None, RolloutId | None], RolloutObservation] = {}
+    for observed_rollout in observation.rollouts:
+        observed_rollouts.setdefault(
+            (observed_rollout.thread_id, observed_rollout.rollout_id), observed_rollout
+        )
     epoch = datetime(1970, 1, 1, tzinfo=UTC)
     for owner in manifest.selected_threads:
         pointer = pointers[owner]
@@ -560,11 +566,9 @@ def prepare_targets(  # noqa: C901
             or metadata.get("history_mode", "legacy") != row["history_mode"]
         ):
             raise PreparationRefused("Current physical provenance disagrees with SQL.")
-        current_observation = next(
-            item
-            for item in observation.rollouts
-            if item.thread_id == owner and item.rollout_id == pointer.ownership.rollout_id
-        )
+        current_observation = observed_rollouts.get((owner, pointer.ownership.rollout_id))
+        if current_observation is None:
+            raise PreparationRefused("The selected current rollout observation is missing.")
         target = {
             "thread_id": str(owner.value),
             "current_rollout_path": str(pointer.path),
@@ -591,12 +595,12 @@ def prepare_targets(  # noqa: C901
     retained = {
         str(pointer.ownership.thread_id.value)
         for pointer in observation.physical_inventory.current_pointers
-        if pointer.ownership.thread_id not in manifest.selected_threads
+        if pointer.ownership.thread_id not in grouped
     }
     retained.update(
         str(item.ownership.rollout_id.value)
         for item in observation.physical_inventory.rollouts
-        if item.ownership.thread_id not in manifest.selected_threads
+        if item.ownership.thread_id not in grouped
     )
     if selected & retained:
         raise PreparationRefused("A selected history-cache key overlaps retained ownership.")
@@ -673,6 +677,9 @@ def _guardian_guards(
     guards: set[str] = set()
     identities: dict[Path, tuple[int, int, int, int, int]] = {}
     guardian_source = {"subagent": {"other": "guardian"}}
+    selected_ids = frozenset(selected)
+    pointers = {pointer.ownership.thread_id: pointer for pointer in inventory.current_pointers}
+    physicals = {item.ownership: item for item in inventory.rollouts}
     candidates = connection.execute(
         "SELECT id,rollout_path,source,model_provider,agent_role,archived,history_mode "
         "FROM threads WHERE CASE WHEN json_valid(source) "
@@ -684,22 +691,8 @@ def _guardian_guards(
         if type(row["archived"]) is not int or row["archived"] not in (0, 1):
             raise PreparationRefused("Guardian archive metadata is unavailable.")
         raw_path = Path(row["rollout_path"])
-        pointer = next(
-            (
-                pointer
-                for pointer in inventory.current_pointers
-                if pointer.ownership.thread_id == identifier
-            ),
-            None,
-        )
-        current = next(
-            (
-                item
-                for item in inventory.rollouts
-                if pointer is not None and item.ownership == pointer.ownership
-            ),
-            None,
-        )
+        pointer = pointers.get(identifier)
+        current = physicals.get(pointer.ownership) if pointer is not None else None
         if pointer is None or current is None or current.physical is None:
             raise PreparationRefused("Retained Guardian current physical identity is unresolved.")
         path = current.physical.path
@@ -708,10 +701,10 @@ def _guardian_guards(
         ):
             raise PreparationRefused("Retained Guardian current pointer changed.")
         header = observe_header(
-            path, budget, enforce_extent_limit=str(identifier.value) in selected
+            path, budget, enforce_extent_limit=str(identifier.value) in selected_ids
         )
         metadata = header.metadata
-        if metadata.get("parent_thread_id") not in selected:
+        if metadata.get("parent_thread_id") not in selected_ids:
             continue
         if (
             row["history_mode"] not in {"legacy", "paginated"}
