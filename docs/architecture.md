@@ -16,6 +16,7 @@ this page identifies the owners of that behavior in the source tree.
 | Dispatch and results | `execution/closed_work_apply.py`, `closed_work_operation.py`, `one_shot.py` | Exact qualified child, durable intent and unit result |
 | Process ownership | `execution/launch.py`, `owned_launch.py`, `process_identity.py`, `transport.py` | Explicit child command/environment, blocked grant, observed incarnation and reap |
 | Recovery | `recovery/journal.py`, `execution/closed_work_reconcile.py` | Append-only evidence and fresh observation without replay |
+| Execution progress | `execution/progress.py` | Volatile operation/root events; producer never invokes or waits for the observer |
 
 ## Catalogue resources
 
@@ -46,6 +47,15 @@ MCP startup selects an explicit observation-only or cleanup capability. The same
 capability governs tool registration and apply/reconciliation service entry points.
 Observation-only preparation uses the plain preview path without allocating an
 operation or creating receipt evidence; saved status remains readable.
+
+Execution accepts only the concrete local progress channel before effects. The
+native request, profile and receipt formats carry no progress observer. Python
+publishes one operation event and at most two events per processed root at existing
+composition boundaries. Textual drains the volatile FIFO, retains returned root
+IDs/outcomes in its scrollable display and calculates elapsed time locally.
+There is no SQL/receipt polling, native percentage or new dispatch route. Observer
+lifetime is independent of the owned backend; the existing result and join remain
+authoritative if observation stops.
 
 The native command is launched through the packaged `owned_launch.py` gate. It
 requires an exact grant within five seconds before replacing its own process.

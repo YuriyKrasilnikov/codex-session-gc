@@ -20,9 +20,12 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 from mcp_types.version import LATEST_HANDSHAKE_VERSION
+from textual.widgets import DataTable, Input, Static
 
-from codex_session_gc.recovery import LaunchStatus, inspect
-from tests.mcp_native_fixture import CHILD, logical_rows, make_home
+from codex_session_gc.cli.console_tasks import parse_cutoff
+from codex_session_gc.cli.textual_console import SessionApp
+from codex_session_gc.recovery import LaunchStatus, TerminalKind, inspect
+from tests.mcp_native_fixture import CHILD, ROOT, logical_rows, make_home
 from tests.test_mcp_native import (
     _SQL_READER,
     assert_selected_effects,
@@ -69,11 +72,14 @@ async def reader(home: Path) -> AsyncIterator[asyncio.subprocess.Process]:
         assert process.returncode == 0
 
 
-async def interrupted_launch(receipts: Path, declaration: dict[str, Any], target: Path) -> int:
+async def interrupted_launch(
+    receipts: Path, declaration: dict[str, Any], target: Path, *, receipt: Path | None = None
+) -> int:
     with anyio.fail_after(30):
         while target.exists():
             await anyio.sleep(0.005)
-    (stored,) = inspect(receipts / f"{declaration['operation_id']}.sqlite")
+    path = receipt if receipt is not None else receipts / f"{declaration['operation_id']}.sqlite"
+    (stored,) = inspect(path)
     assert len(stored.launches) == 1
     registration = stored.launches[0].registration
     assert registration is not None
@@ -172,6 +178,69 @@ def test_sdk_cancelled_destructive_request_joins_original_native_launch(
             await assert_restarted_observation(home, native_helper, receipts, declaration, before)
 
     anyio.run(check)
+
+
+def test_terminal_progress_observer_loss_and_task_cancel_join_original_native(
+    tmp_path: Path, native_helper: Path
+) -> None:
+    """An observed native launch retains its owned result when progress observation stops."""
+    home, receipts = tmp_path / "home", tmp_path / "receipts"
+    paths = make_home(home)
+    before = logical_rows(home)
+
+    async def check() -> None:
+        browser = SessionApp(home, parse_cutoff("2030-01-01"), native_helper, receipts)
+        async with browser.run_test(size=(120, 40)) as pilot:
+            while not browser.query_one(DataTable).row_count:
+                await pilot.pause(0.01)
+            browser.query_one("#search", Input).value = CHILD
+            await pilot.pause()
+            await pilot.click("#select")
+            await pilot.click("#preview")
+            while not browser.query_one("#confirm", Input).display:
+                await pilot.pause(0.01)
+            assert browser.reviewed is not None
+            declaration = browser.reviewed.confirmation().model_dump(mode="json")
+            async with reader(home) as blocker:
+                browser.query_one("#confirm", Input).value = "DELETE"
+                await pilot.click("#execute")
+                assert browser.receipt is not None
+                child_pid = await interrupted_launch(
+                    receipts, declaration, paths[CHILD], receipt=browser.receipt
+                )
+                assert browser.dispatch_task is not None
+                assert browser.dispatch_task.cancel()
+                text = str(browser.query_one("#progress", Static).render())
+                assert declaration["operation_id"] in text
+                assert browser.progress is not None
+                events = browser.progress.drain()
+                observed_roots = [
+                    *(event.root for event in events),
+                    browser.progress_current,
+                    browser.progress_last.root if browser.progress_last is not None else None,
+                ]
+                assert ROOT in {str(root.value) for root in observed_roots if root is not None}
+                browser.progress = None
+                assert not browser.dispatch_task.done()
+                assert browser.dispatching
+                await release_reader(blocker)
+                await browser.dispatch_task
+        assert browser.completed_result is not None
+        assert browser.completed_result[1] in {0, 4}, browser.completed_result
+        assert not Path(f"/proc/{child_pid}").exists()
+        assert browser.receipt is not None
+        (saved,) = inspect(browser.receipt)
+        assert str(saved.start.attempt_id.value) == declaration["operation_id"]
+        assert len(saved.launches) == len(saved.units) == 1
+        assert saved.launches[0].status is LaunchStatus.CLOSED
+        assert not saved.lifecycle_unresolved
+        native_outcome = saved.units[0].terminal_kind
+        assert native_outcome in {TerminalKind.CONFIRMED, TerminalKind.UNKNOWN}
+        assert_selected_effects(
+            before, logical_rows(home), selected_deleted=native_outcome is TerminalKind.CONFIRMED
+        )
+
+    asyncio.run(asyncio.wait_for(check(), timeout=90))
 
 
 async def raw_request(

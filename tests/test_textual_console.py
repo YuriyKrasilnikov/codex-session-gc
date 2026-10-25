@@ -13,8 +13,9 @@ import time
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from textual.widgets import DataTable, Input, Select, Static
@@ -26,8 +27,10 @@ from codex_session_gc.domain import ArchiveState, ThreadId, UtcCutoff
 from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
 from codex_session_gc.execution.confirmed_declaration import ReviewedSelection, create_declaration
 from codex_session_gc.execution.physical_manifest import decode_targets
+from codex_session_gc.execution.progress import ProgressChannel, ProgressEvent, ProgressKind
 from codex_session_gc.inventory.catalogue import SessionCatalogue, SessionEntry, SessionSource
 from codex_session_gc.inventory.query import CatalogueScope
+from codex_session_gc.recovery import AttemptId
 from tests.current_storage_fixture import _catalogue_home as catalogue_home
 from tests.current_storage_fixture import _review_manifest, _stored_rollout
 from tests.test_catalogue_query import _A, _B, _C, _CWD, _E, _mixed_index
@@ -263,6 +266,9 @@ def test_preview_cancel_waits_for_owned_cleanup(
 def test_dispatch_cannot_quit_or_dispatch_twice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
     async def scenario() -> None:
         browser = app(tmp_path, monkeypatch)
         entered, release = asyncio.Event(), asyncio.Event()
@@ -272,7 +278,13 @@ def test_dispatch_cannot_quit_or_dispatch_twice(
             assert mode is ui.PreviewMode.CONFIRM
             return report(intent)
 
-        def execute(intent: Intent, _helper: Path, _receipt: Path) -> tuple[dict[str, Any], int]:
+        def execute(
+            intent: Intent, _helper: Path, _receipt: Path, *, progress: ProgressChannel | None
+        ) -> tuple[dict[str, Any], int]:
+            assert progress is not None
+            operation = AttemptId(UUID(intent.confirmation().operation_id))
+            progress.publish(ProgressEvent(ProgressKind.OPERATION, operation))
+            progress.publish(ProgressEvent(ProgressKind.ROOT_STARTED, operation, intent.roots[0]))
             calls.append(intent)
             loop.call_soon_threadsafe(entered.set)
 
@@ -291,6 +303,15 @@ def test_dispatch_cannot_quit_or_dispatch_twice(
             browser.query_one("#confirm", Input).value = "DELETE"
             await pilot.click("#execute")
             await entered.wait()
+            clock[0] = 2.5
+            await pilot.pause(0.2)
+            text = str(browser.query_one("#progress", Static).render())
+            assert browser.reviewed is not None
+            assert browser.reviewed.confirmation().operation_id in text
+            assert "Waiting 2.5s" in text
+            assert str(ROOT.value) in text
+            assert browser.progress_current == ROOT
+            assert not browser.progress_results
             await pilot.click("#execute")
             await pilot.press("ctrl+q")
             assert browser.dispatching
@@ -494,7 +515,10 @@ def test_forced_teardown_joins_dispatched_backend(
             assert mode is ui.PreviewMode.CONFIRM
             return report(intent)
 
-        def execute(_intent: Intent, _helper: Path, _receipt: Path) -> tuple[dict[str, Any], int]:
+        def execute(
+            _intent: Intent, _helper: Path, _receipt: Path, *, progress: ProgressChannel | None
+        ) -> tuple[dict[str, Any], int]:
+            assert progress is not None
             loop.call_soon_threadsafe(entered.set)
             while not release.is_set():
                 time.sleep(0.01)
@@ -608,7 +632,8 @@ def test_dispatch_requires_literal_confirmation(
             assert mode is ui.PreviewMode.CONFIRM
             return report(intent)
 
-        def execute(*_args: object) -> tuple[dict[str, Any], int]:
+        def execute(*_args: object, progress: ProgressChannel | None) -> tuple[dict[str, Any], int]:
+            assert progress is not None
             calls.append(True)
             return {"outcome": "REFUSED", "roots": []}, 3
 

@@ -150,6 +150,12 @@ the interface joins the owned execution and preserves its result and receipt.
 For partial or unknown results, keep the receipt and reconcile; do not repeat the
 original delete command merely because its reply was lost.
 
+During execution, the terminal browser shows the operation UUID, elapsed waiting time,
+the current root when known and returned root outcomes. Returned outcomes may
+include refusal, partial or unknown results; they do not promise reclaimed space.
+Native silence remains waiting. Progress is transient, so keep the receipt for
+recovery even if the display closes.
+
 `ui --cutoff` sets the visible initial UTC boundary. `--receipt-dir` chooses the
 durable receipt directory, which must be outside the selected Codex home. Its
 default is the user's state directory. The UI requires an interactive terminal.
@@ -336,3 +342,12 @@ UUID is refused. Missing or unreadable receipts mean unknown, including when an
 older call may still be preparing. Do not create a replacement operation to retry
 an unknown deletion. Transport cancellation waits for owned backend cleanup;
 receipts retain explicit unresolved lifecycle state when cleanup is unproven.
+
+## Metadata and AI clients
+
+Tools return metadata such as session titles, stored working directories, IDs,
+timestamps, sizes, source/parent relationships and diagnostics. MCP sends these
+results to its client; an AI client may include them in requests to its configured
+model provider. Read-only mode limits mutations and does not redact metadata.
+Do not publish raw cleanup receipts or conversation transcripts in public issues
+or releases. Share only the minimal redacted diagnostic information needed.

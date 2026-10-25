@@ -6,16 +6,25 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
+from typing import TYPE_CHECKING
+from uuid import UUID
 
 import pytest
 
+from codex_session_gc.execution import closed_work_apply
 from codex_session_gc.execution.closed_work_apply import DispatchLimits, apply_closed_work
+from codex_session_gc.execution.progress import ProgressChannel, ProgressKind
 from codex_session_gc.planning.closed_work import select_closed_work
-from codex_session_gc.recovery import ReceiptIdentityError, TerminalKind, inspect
+from codex_session_gc.recovery import AttemptId, ReceiptIdentityError, TerminalKind, inspect
 from tests.current_storage_fixture import _LIMITS, _fixture, _id
+
+if TYPE_CHECKING:
+    from codex_session_gc.execution.one_shot import OneShotResult
 
 _FAKE = """
 import sys,json,hashlib,os
@@ -94,7 +103,8 @@ def test_two_roots_are_declared_before_owned_helper_and_dispatched_once(tmp_path
 @pytest.mark.parametrize("mode", ["partial", "unknown", "malformed"])
 def test_uncertain_root_halts_without_replay(tmp_path: Path, mode: str) -> None:
     facts, selections, options, observed = _setup(tmp_path, mode)
-    result = apply_closed_work(facts, selections, **options)
+    progress = ProgressChannel()
+    result = apply_closed_work(facts, selections, **options, progress=progress)
     expected = TerminalKind.PARTIAL if mode == "partial" else TerminalKind.UNKNOWN
     assert result.outcome is expected
     assert result.roots[0].outcome is expected
@@ -105,6 +115,92 @@ def test_uncertain_root_halts_without_replay(tmp_path: Path, mode: str) -> None:
     assert stored.unresolved_unit is stored.units[0]
     assert stored.units[1].request is None
     assert len(stored.launches) == 1
+    events = progress.drain()
+    returned = [event for event in events if event.kind is ProgressKind.ROOT_RESULT]
+    assert [(event.root, event.outcome) for event in returned] == [(_id(1), expected)]
+    assert {event.operation_id for event in events} == {result.attempt_id}
+
+
+def test_progress_reports_actual_roots_and_uuid_without_additional_execution(
+    tmp_path: Path,
+) -> None:
+    facts, selections, options, observed = _setup(tmp_path)
+    progress = ProgressChannel()
+    attempt = AttemptId(UUID(int=71))
+    result = apply_closed_work(facts, selections, **options, attempt_id=attempt, progress=progress)
+    events = progress.drain()
+    assert [event.kind for event in events] == [
+        ProgressKind.OPERATION,
+        ProgressKind.ROOT_STARTED,
+        ProgressKind.ROOT_RESULT,
+        ProgressKind.ROOT_STARTED,
+        ProgressKind.ROOT_RESULT,
+    ]
+    assert {event.operation_id for event in events} == {attempt}
+    returned = [event for event in events if event.kind is ProgressKind.ROOT_RESULT]
+    assert [(event.root, event.outcome) for event in returned] == [
+        (root.root, root.outcome) for root in result.roots
+    ]
+    assert observed.read_text().splitlines() == [str(_id(1).value), str(_id(3).value)]
+    (stored,) = inspect(options["journal"])
+    assert stored.start.attempt_id == attempt
+    assert len(stored.units) == len(stored.launches) == 2
+    assert progress.drain() == ()
+
+
+def test_waiting_execution_outlives_a_failing_and_discarded_observer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts, selections, options, observed = _setup(tmp_path)
+    progress = ProgressChannel()
+    ready, release = threading.Event(), threading.Event()
+    original = closed_work_apply.dispatch_once
+
+    def gated(*args: object, **kwargs: object) -> OneShotResult:
+        ready.set()
+        assert release.wait(10)
+        return original(*args, **kwargs)
+
+    def observe(channel: ProgressChannel) -> None:
+        events = channel.drain()
+        assert events[-1].kind is ProgressKind.ROOT_STARTED
+        assert events[-1].root == _id(1)
+        message = "Observer stopped"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(closed_work_apply, "dispatch_once", gated)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        future = workers.submit(apply_closed_work, facts, selections, **options, progress=progress)
+        try:
+            assert ready.wait(10)
+            assert not future.done()
+            observer = workers.submit(observe, progress)
+            with pytest.raises(RuntimeError):
+                observer.result(timeout=10)
+            assert not future.done()
+            del observer
+            del progress
+        finally:
+            release.set()
+        result = future.result(timeout=30)
+    assert result.outcome is TerminalKind.CONFIRMED
+    assert observed.read_text().splitlines() == [str(_id(1).value), str(_id(3).value)]
+    (stored,) = inspect(options["journal"])
+    assert len(stored.units) == len(stored.launches) == 2
+    assert not stored.lifecycle_unresolved
+
+
+def test_arbitrary_progress_callback_is_refused_before_receipt_or_dispatch(tmp_path: Path) -> None:
+    facts, selections, options, observed = _setup(tmp_path)
+
+    class Observer:
+        def publish(self, _event: object) -> None:
+            pytest.fail("Observer callback entered mutation")
+
+    with pytest.raises(ValueError, match="concrete local observation channel"):
+        apply_closed_work(facts, selections, **options, progress=Observer())
+    assert not options["journal"].exists()
+    assert not observed.exists()
 
 
 def test_native_refusal_is_reported_and_next_independent_root_runs(tmp_path: Path) -> None:

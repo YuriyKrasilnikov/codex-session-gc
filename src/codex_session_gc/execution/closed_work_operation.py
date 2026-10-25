@@ -30,6 +30,7 @@ from codex_session_gc.execution.confirmed_declaration import (
     validate_current_declaration,
 )
 from codex_session_gc.execution.physical_manifest import manifest_bytes, validate_reviewed_manifest
+from codex_session_gc.execution.progress import ProgressChannel, checked_channel
 from codex_session_gc.execution.resource_policy import (
     READ_BYTES,
     TIMEOUT_SECONDS,
@@ -186,7 +187,9 @@ def _exit(outcome: str) -> int:
     return {"confirmed": 0, "refused": 3, "partial": 4, "unknown": 4}[outcome]
 
 
-def execute(arguments: ExecutionRequest) -> tuple[dict[str, Any], int]:
+def execute(
+    arguments: ExecutionRequest, *, progress: ProgressChannel | None = None
+) -> tuple[dict[str, Any], int]:
     """Fail closed on missing bundled qualification before reading inventory."""
     report: dict[str, Any] = {
         "kind": f"online_closed_work_{arguments.command}",
@@ -196,11 +199,12 @@ def execute(arguments: ExecutionRequest) -> tuple[dict[str, Any], int]:
         "roots": [],
     }
     try:
+        progress = checked_channel(progress)
         helper = load_closed_work_contract()
         collection, dispatch = _limits(arguments)
         report["limits"] = {"collection": asdict(collection), "dispatch": asdict(dispatch)}
         if arguments.command == "apply":
-            _apply(arguments, helper, collection, dispatch, report)
+            _apply(arguments, helper, (collection, dispatch), report, progress=progress)
         else:
             _reconcile(arguments, helper, collection, report)
     except (OSError, ValueError, TypeError, sqlite3.Error, RecoveryError) as error:
@@ -211,10 +215,12 @@ def execute(arguments: ExecutionRequest) -> tuple[dict[str, Any], int]:
 def _apply(
     arguments: ExecutionRequest,
     helper: QualifiedHelperContract,
-    collection: CollectionLimits,
-    dispatch: DispatchLimits,
+    limits: tuple[CollectionLimits, DispatchLimits],
     report: dict[str, Any],
+    *,
+    progress: ProgressChannel | None = None,
 ) -> None:
+    collection, dispatch = limits
     if arguments.home is None or arguments.cutoff is None or arguments.helper is None:
         message = "Apply requires a home, cutoff and qualified helper."
         raise ValueError(message)
@@ -288,6 +294,7 @@ def _apply(
         dispatch_limits=dispatch,
         attempt_id=attempt_id,
         declaration=declaration,
+        progress=progress,
     )
     report["attemptId"] = str(result.attempt_id.value)
     report["lifecycleRecorded"] = result.lifecycle_recorded

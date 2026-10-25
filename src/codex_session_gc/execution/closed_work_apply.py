@@ -28,6 +28,12 @@ from codex_session_gc.execution.closed_work_request import (
 )
 from codex_session_gc.execution.launch import LaunchBinding
 from codex_session_gc.execution.one_shot import OneShotError, OneShotResult, dispatch_once
+from codex_session_gc.execution.progress import (
+    ProgressChannel,
+    ProgressEvent,
+    ProgressKind,
+    checked_channel,
+)
 from codex_session_gc.execution.selection_provenance import association_bindings
 from codex_session_gc.execution.transport import ChildCommand
 from codex_session_gc.planning.closed_work import ClosedWorkSelection, select_closed_work
@@ -127,6 +133,7 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
     dispatch_limits: DispatchLimits,
     attempt_id: AttemptId | None = None,
     declaration: dict[str, object] | None = None,
+    progress: ProgressChannel | None = None,
 ) -> ApplyResult:
     """Declare immutable scopes, then collect and send each root at most once.
 
@@ -135,6 +142,7 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
     are never reopened as a new apply attempt. The pinned Linux executable fd
     binds launched helper bytes to the supplied digest across path replacement.
     """
+    progress = checked_channel(progress)
     if type(facts) is not ClosedWorkFacts or type(selections) is not tuple or not selections:
         raise ValueError("Finite facts and a nonempty immutable selection tuple are required.")
     for path in (codex_home, sqlite_home, journal, helper_executable):
@@ -167,6 +175,8 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
             if file_digest(stream, "sha256").digest() != helper.binary_sha256:
                 raise ValueError("The executable differs from the qualified helper digest.")
         attempt = attempt_id or AttemptId(uuid4())
+        if progress is not None:
+            progress.publish(ProgressEvent(ProgressKind.OPERATION, attempt))
         units = tuple(UnitId(uuid4()) for _ in selections)
         scopes = [_scope(s) for s in selections]
         context = _payload(
@@ -199,6 +209,10 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
         ]
         outcome = TerminalKind.CONFIRMED
         for index, (selection, unit) in enumerate(zip(selections, units, strict=True)):
+            if progress is not None:
+                progress.publish(
+                    ProgressEvent(ProgressKind.ROOT_STARTED, attempt, results[index].root)
+                )
             try:
                 request = prepare_request(
                     facts,
@@ -223,10 +237,20 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
             except (ValueError, OSError, OneShotError) as error:
                 results[index] = RootResult(results[index].root, unit, None, None, str(error))
                 outcome = TerminalKind.REFUSED
+                if progress is not None:
+                    progress.publish(
+                        ProgressEvent(ProgressKind.ROOT_RESULT, attempt, results[index].root)
+                    )
                 break
             results[index] = RootResult(
                 results[index].root, unit, result.status, result, result.detail
             )
+            if progress is not None:
+                progress.publish(
+                    ProgressEvent(
+                        ProgressKind.ROOT_RESULT, attempt, results[index].root, result.status
+                    )
+                )
             if result.status in {TerminalKind.UNKNOWN, TerminalKind.PARTIAL}:
                 outcome = result.status
                 break

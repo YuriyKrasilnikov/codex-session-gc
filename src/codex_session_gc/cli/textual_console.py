@@ -9,6 +9,7 @@ import asyncio
 import os
 import signal
 import sys
+import time
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Button, DataTable, Footer, Input, Select, Static
+from textual.widgets import Button, DataTable, Footer, Input, RichLog, Select, Static
 
 from codex_session_gc.cli.console_display import (
     clean,
@@ -35,6 +36,7 @@ from codex_session_gc.cli.console_tasks import (
     parse_cutoff,
 )
 from codex_session_gc.domain import ArchiveState, ThreadId, UtcCutoff
+from codex_session_gc.execution.progress import ProgressChannel, ProgressEvent, ProgressKind
 from codex_session_gc.inventory.catalogue import SessionCatalogue, read_session_catalogue
 from codex_session_gc.inventory.query import (
     CatalogueGroup,
@@ -104,6 +106,8 @@ class SessionApp(App[tuple[str, int]]):
     CSS = """
     Screen { layout: vertical; }
     #heading, #notice { height: 2; }
+    #progress { height: 3; display: none; }
+    #root-results { height: 4; display: none; }
     .filters { height: 3; }
     .filters Input { width: 1fr; }
     .filters Select { width: 1fr; }
@@ -142,6 +146,12 @@ class SessionApp(App[tuple[str, int]]):
         self.review_open = False
         self.completed_result: tuple[str, int] | None = None
         self.valid_filters = True
+        self.progress: ProgressChannel | None = None
+        self.progress_started = 0.0
+        self.progress_operation = ""
+        self.progress_current: ThreadId | None = None
+        self.progress_results = 0
+        self.progress_last: ProgressEvent | None = None
 
     def compose(self) -> ComposeResult:
         """Compose filters, context rows and explicit execution controls."""
@@ -210,6 +220,8 @@ class SessionApp(App[tuple[str, int]]):
             id="notice",
             markup=False,
         )
+        yield Static("", id="progress", markup=False)
+        yield RichLog(id="root-results", markup=False, highlight=False, wrap=True)
         with VerticalScroll(id="review"):
             yield Static("", id="review-text", markup=False)
         yield Input(placeholder="Type literal DELETE after reviewing exact selection", id="confirm")
@@ -233,6 +245,7 @@ class SessionApp(App[tuple[str, int]]):
         table.add_column("Activity UTC")
         self.load_task = asyncio.create_task(self._load())
         self.set_interval(0.1, self._check_interrupt)
+        self.set_interval(0.1, self._show_progress)
 
     async def _check_interrupt(self) -> None:
         if self.interrupt_requested and not self.dispatching:
@@ -241,6 +254,36 @@ class SessionApp(App[tuple[str, int]]):
 
     def _notice(self, text: str) -> None:
         self.query_one("#notice", Static).update(clean(text))
+
+    def _show_progress(self) -> None:
+        """Render known boundaries and local elapsed time while awaiting the result."""
+        if not self.is_running or not self.dispatching or self.progress is None:
+            return
+        for event in self.progress.drain():
+            self.progress_operation = str(event.operation_id.value)
+            if event.kind is ProgressKind.ROOT_STARTED:
+                self.progress_current = event.root
+            elif event.kind is ProgressKind.ROOT_RESULT:
+                self.progress_current = None
+                self.progress_results += 1
+                self.progress_last = event
+                if event.root is not None:
+                    outcome = event.outcome.value if event.outcome is not None else "not_dispatched"
+                    returned_roots = self.query_one("#root-results", RichLog)
+                    returned_roots.display = True
+                    returned_roots.write(f"{event.root.value}: {outcome}")
+        elapsed = max(0.0, time.monotonic() - self.progress_started)
+        current = str(self.progress_current.value) if self.progress_current else "none observed"
+        last = self.progress_last
+        returned = "none observed"
+        if last is not None and last.root is not None:
+            outcome = last.outcome.value if last.outcome is not None else "not_dispatched"
+            returned = f"{last.root.value}: {outcome}"
+        self.query_one("#progress", Static).update(
+            f"Operation {self.progress_operation}\n"
+            f"Waiting {elapsed:.1f}s; current root: {current}\n"
+            f"Root results {self.progress_results}; last: {returned}"
+        )
 
     def _catalogue_is_live(self) -> bool:
         return not self.catalogue_teardown and self.is_running
@@ -591,12 +634,23 @@ class SessionApp(App[tuple[str, int]]):
                     "No qualified helper found. Supply --helper with the supported binary."
                 )
                 return
+            operation_id = intent.confirmation().operation_id
             self.receipt = receipt_path(self.receipts, self.home)
+            self.progress = ProgressChannel()
+            self.progress_started = time.monotonic()
+            self.progress_operation = operation_id
+            self.progress_current, self.progress_last, self.progress_results = None, None, 0
+            self.query_one("#progress").display = True
+            self.query_one("#root-results", RichLog).clear()
+            self.query_one("#root-results").display = False
+            self._show_progress()
             self._notice(
                 "Executing once. Do not close: awaiting native outcome and durable receipt…"
             )
             backend = asyncio.create_task(
-                asyncio.to_thread(apply_intent, intent, self.helper, self.receipt)
+                asyncio.to_thread(
+                    apply_intent, intent, self.helper, self.receipt, progress=self.progress
+                )
             )
             while True:
                 try:
@@ -606,6 +660,7 @@ class SessionApp(App[tuple[str, int]]):
                     # Confirmation transferred ownership to the durable backend.
                     # Teardown must join it, not turn cancellation into a retry.
                     continue
+            self._show_progress()
             self.completed_result = (result_text(report), status)
             self.exit(self.completed_result)
         except Exception as error:  # noqa: BLE001
@@ -618,6 +673,7 @@ class SessionApp(App[tuple[str, int]]):
             self.exit(self.completed_result)
         finally:
             self.dispatching = False
+            self.progress = None
 
     async def on_unmount(self) -> None:
         """Join owned work even if framework teardown bypasses ordinary quit actions."""

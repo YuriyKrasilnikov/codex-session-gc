@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from codex_session_gc.domain import GuardianAssociation, ThreadId, UtcCutoff
@@ -38,6 +38,9 @@ from codex_session_gc.execution.selection_provenance import (
     check_reviewed_associations,
     reviewed_associations,
 )
+
+if TYPE_CHECKING:
+    from codex_session_gc.execution.progress import ProgressChannel
 
 
 class PreviewMode(StrEnum):
@@ -89,6 +92,12 @@ class Intent:
             "roots": [str(x.value) for x in sorted(self.roots)],
             "selected": [str(x.value) for x in sorted(self.selected)],
         }
+
+    def confirmation(self) -> Declaration:
+        """Require the exact binding before execution or operation-identity display."""
+        if self.declaration is None:
+            raise ValueError("Apply requires the reviewed confirmation binding.")
+        return self.declaration
 
 
 def parse_cutoff(text: str) -> UtcCutoff:
@@ -258,17 +267,18 @@ def confirmed_intent(original: Intent, report: dict[str, Any]) -> Intent:
     )
 
 
-def apply_intent(intent: Intent, helper: Path, receipt: Path) -> tuple[dict[str, Any], int]:
+def apply_intent(
+    intent: Intent, helper: Path, receipt: Path, *, progress: ProgressChannel | None = None
+) -> tuple[dict[str, Any], int]:
     """Reuse the existing execution lifecycle with an explicit immutable subset."""
-    if intent.declaration is None:
-        raise ValueError("Apply requires the reviewed confirmation binding.")
     return execute(
         confirmed_execution_request(
-            intent.declaration,
+            intent.confirmation(),
             receipt=receipt,
             home=intent.home,
             helper=helper,
-        )
+        ),
+        progress=progress,
     )
 
 

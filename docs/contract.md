@@ -98,6 +98,13 @@ produces an unknown outcome rather than a rollback claim.
 
 ## Results and limits
 
+Terminal-browser progress reports the operation UUID, local monotonic elapsed time and
+root boundaries actually observed by Python. A returned root outcome can be
+confirmed, refused, partial, unknown or not dispatched. It is not a percentage,
+reclaimed-byte measurement or whole-operation success certificate. Native silence
+remains waiting. Progress is volatile and cannot replace the final report or
+receipt; losing its observer does not cancel or repeat execution.
+
 Confirmed, refused, partial and unknown remain distinct. A confirmed unit followed
 by a skipped/refused unit can produce a partial aggregate. No eligible selected
 history means no helper dispatch or receipt creation. Reconciliation observes

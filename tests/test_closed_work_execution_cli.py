@@ -232,6 +232,30 @@ def test_no_selected_eligible_threads_creates_no_receipt_or_helper(
     assert not observed.exists()
 
 
+def test_invalid_progress_port_refuses_before_profile_inventory_or_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, options, observed, facts = _case(tmp_path, monkeypatch)
+
+    def forbidden() -> None:
+        pytest.fail("Invalid progress entered application observation")
+
+    monkeypatch.setattr(online, "load_closed_work_contract", forbidden)
+    request = online.ExecutionRequest(
+        command="apply",
+        receipt=options["journal"],
+        home=options["codex_home"],
+        cutoff=facts.cutoff,
+        closed_work=(_id(1),),
+        helper=options["helper_executable"],
+    )
+    result, status = online.execute(request, progress=object())
+    assert status == 3
+    assert result["outcome"] == "refused"
+    assert not options["journal"].exists()
+    assert not observed.exists()
+
+
 @pytest.mark.parametrize(
     "change",
     [
