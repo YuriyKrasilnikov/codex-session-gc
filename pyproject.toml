@@ -29,7 +29,7 @@ Documentation = "https://github.com/YuriyKrasilnikov/codex-session-gc#readme"
 codex-session-gc = "codex_session_gc.cli.main:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
@@ -72,6 +72,9 @@ only-include = [
 ]
 
 [dependency-groups]
+build = [
+    "hatchling==1.32.4",
+]
 lint = [
     "mypy>=1.20.0",
     "ruff>=0.15.0",

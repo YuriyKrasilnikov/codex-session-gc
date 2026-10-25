@@ -111,6 +111,29 @@ for the matching candidate; fixture-feature executables never enter the release.
 Use an explicit disposable `--basetemp` for pytest. Schema/digest admission and
 native ownership/effect validation remain enforced execution boundaries.
 
+## Package construction and CI acceptance
+
+The Python build backend is pinned in `pyproject.toml`; the `build` dependency
+group and `uv.lock` fix its environment. Prepare it with
+`uv sync --locked --group build --no-install-project --no-build --no-python-downloads`,
+then build the sdist and build the wheel from that sdist using
+`uv build --no-build-isolation`. The complete commands are in
+[native/README.md](../native/README.md#build-a-matched-python-release).
+Build dependencies are excluded from the bundle's runtime requirements.
+
+The release structure checker (`python -m tools.ci_release` from a checkout)
+checks wheel RECORD entries, source metadata, the raw profile, declared legal
+files and every assembled bundle payload hash. These checks do not execute the
+helper or qualify installed interfaces. CI tools are checkout tools, not part of
+the supported installed application or source-distribution test interface.
+
+Native reuse is admitted only when the checkout's complete declared native input
+set, raw profile and downloaded qualified release artifact match their pinned
+identities. A changed native input or profile refuses reuse; it requires separate
+candidate qualification rather than a newly calculated digest being accepted
+automatically. Package structure, native execution and installed interface checks
+remain separate acceptance boundaries.
+
 ## Profile identity and receipt consumers
 
 The saved qualified profile is the entire Payload, including the raw contract JSON

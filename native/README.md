@@ -301,21 +301,23 @@ commands below assume the already-qualified release helper has been retained at
 
 ```sh
 set -eu
-uv sync --locked
+uv sync --locked --group build --no-install-project --no-build --no-python-downloads
 test ! -e build/release-0.2.0
 mkdir -p build/release-0.2.0
-uv build --sdist --no-config --no-python-downloads --python .venv/bin/python --out-dir build/release-0.2.0
-uv build --wheel build/release-0.2.0/codex_session_gc-0.2.0.tar.gz --no-config --no-python-downloads --python .venv/bin/python --out-dir build/release-0.2.0
+uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.2.0
+uv build --wheel build/release-0.2.0/codex_session_gc-0.2.0.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.2.0
 .venv/bin/python tools/build_release.py --wheel build/release-0.2.0/codex_session_gc-0.2.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.2.0/codex-session-gc-0.2.0-linux-x86_64
 ```
 
-`uv build` installs the declared build backend into an isolated build environment.
-A fresh build may need network access for that backend; add `--offline` only when
-its dependencies are already cached. The bundle assembler always exports runtime
-requirements from the existing lock offline; `uv sync --locked` prepares its
-Python tooling/dependency cache. Record the backend version from the wheel's
-`WHEEL` metadata; source reconstruction does not promise identical binary bytes
-on a different machine.
+The build group pins the existing Hatchling backend in `pyproject.toml`; its
+transitive dependencies are fixed in `uv.lock`. Synchronizing without installing
+the project prepares that environment before either package build.
+`--no-build-isolation` uses this locked environment instead of resolving a
+separate backend environment. A fresh synchronization may download locked wheels;
+add `--offline` only when they are cached. The bundle assembler exports runtime
+requirements from the existing lock offline, excluding build dependencies.
+Record the backend version from the wheel's `WHEEL` metadata; source reconstruction
+does not promise identical binary bytes on a different machine.
 
 The assembler checks wheel version, Python/dependency metadata, exact raw profile,
 helper digest and license/notice payload against the selected source. It refuses
