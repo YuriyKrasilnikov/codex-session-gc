@@ -1,5 +1,5 @@
 # Copyright (c) 2026
-# ruff: noqa: EM101, TRY003, PLR2004, INP001, S607
+# ruff: noqa: EM101, TRY003, PLR2004, S607
 """Assemble an exact wheel/helper bundle without building or qualifying artifacts."""
 
 from __future__ import annotations
