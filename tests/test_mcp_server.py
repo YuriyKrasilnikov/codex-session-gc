@@ -7,7 +7,9 @@ import asyncio
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
+import subprocess
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -44,7 +46,7 @@ from codex_session_gc.execution.confirmed_declaration import (
 from codex_session_gc.execution.physical_manifest import decode_targets
 from codex_session_gc.inventory.query import CatalogueIndex
 from codex_session_gc.planning.closed_work import select_closed_work
-from codex_session_gc.recovery import AttemptId, inspect
+from codex_session_gc.recovery import AttemptId, TerminalKind, inspect
 from tests.current_storage_fixture import _A, _B, _LIMITS, _id
 from tests.current_storage_fixture import _catalogue_home as _home
 from tests.mcp_native_fixture import CHILD, ROOT, logical_rows, make_home
@@ -159,6 +161,14 @@ def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> N
             assert prepared["conditional"]
             assert prepared["can_apply_via_mcp"]
             assert len(prepared["preview_sha256"]) == 64
+            assert set(prepared["confirmation"]) == {"operation_id", "digest"}
+            apply_schema = next(
+                tool.input_schema for tool in tools.tools if tool.name == "apply_cleanup"
+            )
+            assert set(apply_schema["properties"]) == {"operation_id", "digest"}
+            assert all(value["type"] == "string" for value in apply_schema["properties"].values())
+            legacy = await session.call_tool("apply_cleanup", {"declaration": {}})
+            assert legacy.is_error
             refused = await session.call_tool("apply", {})
             assert refused.is_error
             bad = await session.call_tool("query_catalogue", {"limit": 100000})
@@ -216,6 +226,7 @@ def test_read_only_sdk_exposes_observation_without_cleanup_operation_or_receipt(
             )
             assert not prepared["can_apply_via_mcp"]
             assert "declaration" not in prepared
+            assert "confirmation" not in prepared
             assert "declaration" not in prepared["report"]
             assert "operation_id" not in prepared
             assert "operation_id" not in prepared["report"]
@@ -251,9 +262,10 @@ def test_read_only_prepare_allocates_no_operation_and_direct_calls_refuse_mutati
         prepared = await service.prepare_cleanup(listed["snapshot_id"], [CHILD], "2030-01-01")
         assert not prepared["can_apply_via_mcp"]
         assert "declaration" not in prepared
+        assert "confirmation" not in prepared
         assert prepared["report"]["deletions"] == [CHILD]
         with pytest.raises(PermissionError, match="Read-only"):
-            await service.apply_cleanup(Declaration.model_construct())
+            await service.apply_cleanup(str(UUID(int=1)), "0" * 64)
         with pytest.raises(PermissionError, match="Read-only"):
             await service.reconcile_cleanup(str(UUID(int=1)))
         assert not receipts.exists()
@@ -293,7 +305,7 @@ def test_read_only_status_reads_existing_cleanup_without_appending_evidence(
         assert status["outcome"] == "confirmed"
         assert status["operation_id"] == declaration.operation_id
         with pytest.raises(PermissionError, match="Read-only"):
-            await service.apply_cleanup(declaration)
+            await service.apply_cleanup(declaration.operation_id, declaration.digest)
         with pytest.raises(PermissionError, match="Read-only"):
             await service.reconcile_cleanup(declaration.operation_id)
 
@@ -617,9 +629,11 @@ def test_mcp_replaced_startup_home_refuses_before_receipt_or_dispatch(
     )
     options["codex_home"].rename(tmp_path / "original-home")
     options["codex_home"].mkdir()
-    with pytest.raises(ValueError, match="identity has changed"):
-        service.apply(declaration)
-    assert service.status(declaration.operation_id)["state"] == "receipt_absent"
+    result = service.apply(declaration)
+    assert result["outcome"] == "refused"
+    assert "identity has changed" in result["detail"]
+    assert service.apply(declaration) == result
+    assert service.status(declaration.operation_id) == result
     assert not observed.exists()
 
 
@@ -659,7 +673,7 @@ def test_changed_reviewed_candidate_set_refuses_before_receipt_or_dispatch(
         results = list(workers.map(service.apply, (declaration, declaration)))
     assert all(result["outcome"] == "refused" for result in results)
     assert all("manifest changed" in result["detail"] for result in results)
-    assert service.status(declaration.operation_id)["state"] == "receipt_absent"
+    assert service.status(declaration.operation_id) == results[0]
     assert not observed.exists()
 
 
@@ -692,8 +706,11 @@ def test_confirmed_operation_stale_profile_and_corrupt_claim_never_dispatch(
     )
     assert restarted.apply(declaration)["state"] == "receipt_absent"
     assert not observed.exists()
-    with pytest.raises(ValueError, match="identity has changed"):
-        service.apply(stale)
+    refused = service.apply(stale)
+    assert refused["outcome"] == "refused"
+    assert "identity has changed" in refused["detail"]
+    assert service.apply(stale) == refused
+    assert service.status(stale.operation_id) == refused
     assert not observed.exists()
     (tmp_path / "receipts").mkdir()
     path = tmp_path / "receipts" / f"{declaration.operation_id}.sqlite"
@@ -715,13 +732,13 @@ def test_confirmed_operation_transport_cancellation_joins_backend(
     )
     started, finish, joined = threading.Event(), threading.Event(), threading.Event()
 
-    def backend(_declaration: object) -> dict[str, Any]:
+    def backend(_operation_id: str, _digest: str) -> dict[str, Any]:
         started.set()
         assert finish.wait(10)
         joined.set()
         return {"outcome": "unknown"}
 
-    monkeypatch.setattr(service, "apply", backend)
+    monkeypatch.setattr(service, "apply_reference", backend)
 
     async def check() -> None:
         # No storage is observed by the bounded synthetic backend.
@@ -732,7 +749,9 @@ def test_confirmed_operation_transport_cancellation_joins_backend(
             facts.cutoff.timestamp.isoformat(),
             _manifest(facts, (root,), (root,), options["codex_home"]),
         )
-        task = asyncio.create_task(service.apply_owned(declaration))
+        task = asyncio.create_task(
+            service.apply_owned(declaration.operation_id, declaration.digest)
+        )
         assert await asyncio.to_thread(started.wait, 10)
         task.cancel()
         await asyncio.sleep(0.05)
@@ -835,7 +854,7 @@ def test_reviewed_guardian_association_change_refuses_before_receipt_or_dispatch
         assert not options["journal"].exists()
     else:
         result = service.apply(declaration)
-        assert service.status(declaration.operation_id)["state"] == "receipt_absent"
+        assert service.status(declaration.operation_id) == result
     assert result["outcome"] == "refused"
     assert "association changed" in result["detail"]
     assert not observed.exists()
@@ -922,3 +941,161 @@ def test_terminal_confirmation_binds_only_preview_candidates_from_larger_selecti
         json.loads(saved.start.evidence.data)["operation_declaration"]["selected"]
         == (report["deletions"])
     )
+
+
+def test_string_confirmation_survives_javascript_without_echoing_physical_integers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ordinary JSON client returns only strings; the exact reviewed bytes stay owned."""
+    facts, _, options, observed = _setup(tmp_path)
+    monkeypatch.setattr(confirmed_operation, "load_closed_work_contract", lambda: options["helper"])
+    monkeypatch.setattr(
+        closed_work_operation, "load_closed_work_contract", lambda: options["helper"]
+    )
+    monkeypatch.setattr(closed_work_operation, "read_closed_work_facts", lambda *_a, **_k: facts)
+    operations = confirmed_operation.ConfirmedOperations(
+        options["codex_home"], options["helper_executable"], tmp_path / "receipts"
+    )
+    root, child = (str(_id(number).value) for number in (1, 2))
+    declaration = operations.prepare(
+        (root,),
+        (root, child),
+        facts.cutoff.timestamp.isoformat(),
+        _manifest(facts, (root,), (root, child), options["codex_home"]),
+    )
+    assert any(
+        rollout.physical_identity.mtime_ns > 2**53
+        for target in declaration.physical_manifest
+        for rollout in target.rollouts
+    )
+    confirmation = {"operation_id": declaration.operation_id, "digest": declaration.digest}
+    node = shutil.which("node")
+    assert node is not None, "JavaScript confirmation acceptance requires node"
+    client = subprocess.run(  # noqa: S603
+        [
+            node,
+            "-e",
+            (
+                "let s='';process.stdin.on('data',x=>s+=x);"
+                "process.stdin.on('end',()=>process.stdout.write(JSON.stringify(JSON.parse(s))))"
+            ),
+        ],
+        input=json.dumps(
+            {
+                "confirmation": confirmation,
+                "review": declaration.model_dump(mode="json"),
+                "wide_integer": 2**53 + 1,
+            }
+        ),
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    returned = json.loads(client.stdout)
+    assert returned["confirmation"] == confirmation
+    assert returned["wide_integer"] == 2**53
+    # The client may round review numbers; apply never consumes that lossy review.
+    with pytest.raises(ValueError, match="digest differs"):
+        operations.apply_reference(declaration.operation_id, "0" * 64)
+    assert not observed.exists()
+    assert not (tmp_path / "receipts").exists()
+    assert operations.apply_reference(**returned["confirmation"])["outcome"] == "confirmed"
+    assert observed.read_text().splitlines() == [root]
+    (saved,) = inspect(tmp_path / "receipts" / f"{declaration.operation_id}.sqlite")
+    assert json.loads(saved.start.evidence.data)["operation_declaration"] == declaration.model_dump(
+        mode="json"
+    )
+    restarted = confirmed_operation.ConfirmedOperations(
+        options["codex_home"], options["helper_executable"], tmp_path / "receipts"
+    )
+    assert restarted.apply_reference(**confirmation)["outcome"] == "confirmed"
+    with pytest.raises(ValueError, match="digest differs"):
+        restarted.apply_reference(declaration.operation_id, "0" * 64)
+    assert observed.read_text().splitlines() == [root]
+
+
+def test_unclaimed_reference_expires_with_server_and_never_dispatches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts, _, options, observed = _setup(tmp_path)
+    monkeypatch.setattr(confirmed_operation, "load_closed_work_contract", lambda: options["helper"])
+    receipts = tmp_path / "receipts"
+    operations = confirmed_operation.ConfirmedOperations(
+        options["codex_home"], options["helper_executable"], receipts
+    )
+    root = str(_id(1).value)
+    declaration = operations.prepare(
+        (root,),
+        (root,),
+        facts.cutoff.timestamp.isoformat(),
+        _manifest(facts, (root,), (root,), options["codex_home"]),
+    )
+    restarted = confirmed_operation.ConfirmedOperations(
+        options["codex_home"], options["helper_executable"], receipts
+    )
+    for _ in range(2):
+        result = restarted.apply_reference(declaration.operation_id, declaration.digest)
+        assert result["state"] == "receipt_absent"
+        assert result["outcome"] == "unknown"
+    assert not receipts.exists()
+    assert not observed.exists()
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+def test_engine_exception_preserves_saved_outcome_or_unknown_without_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, claimed: bool
+) -> None:
+    """An exception after engine entry never proves that deletion was refused."""
+    facts, _, options, observed = _setup(tmp_path)
+    monkeypatch.setattr(confirmed_operation, "load_closed_work_contract", lambda: options["helper"])
+    monkeypatch.setattr(
+        closed_work_operation, "load_closed_work_contract", lambda: options["helper"]
+    )
+    monkeypatch.setattr(closed_work_operation, "read_closed_work_facts", lambda *_a, **_k: facts)
+    receipts = tmp_path / "receipts"
+    operations = confirmed_operation.ConfirmedOperations(
+        options["codex_home"], options["helper_executable"], receipts
+    )
+    root, child = (str(_id(number).value) for number in (1, 2))
+    declaration = operations.prepare(
+        (root,),
+        (root, child),
+        facts.cutoff.timestamp.isoformat(),
+        _manifest(facts, (root,), (root, child), options["codex_home"]),
+    )
+    original = confirmed_operation.execute
+    calls = 0
+
+    def failing_engine(
+        request: closed_work_operation.ExecutionRequest,
+    ) -> tuple[dict[str, Any], int]:
+        nonlocal calls
+        calls += 1
+        if claimed:
+            report, status = original(request)
+            assert status == 0, report
+        message = "injected failure after engine entry"
+        raise OSError(message)
+
+    monkeypatch.setattr(confirmed_operation, "execute", failing_engine)
+    reference = {"operation_id": declaration.operation_id, "digest": declaration.digest}
+    result = operations.apply_reference(**reference)
+    assert result["outcome"] == ("confirmed" if claimed else "unknown")
+    assert operations.status(declaration.operation_id) == result
+    assert operations.apply_reference(**reference) == result
+    assert calls == 1
+    path = receipts / f"{declaration.operation_id}.sqlite"
+    if claimed:
+        assert observed.read_text().splitlines() == [root]
+        (saved,) = inspect(path)
+        assert saved.units[0].effective_terminal_kind is TerminalKind.CONFIRMED
+    else:
+        assert result["detail"] == "injected failure after engine entry"
+        assert not path.exists()
+        assert not observed.exists()
+    restarted = confirmed_operation.ConfirmedOperations(
+        options["codex_home"], options["helper_executable"], receipts
+    )
+    assert restarted.apply_reference(**reference)["outcome"] == result["outcome"]
+    assert calls == 1

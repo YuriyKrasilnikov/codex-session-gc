@@ -52,7 +52,11 @@ manifest and Guardian associations. Textual carries the declaration from its
 reviewed preview through literal `DELETE`; ordinary read-only previews allocate
 no operation. Changed home/profile identities or Guardian associations refuse
 dispatch. A declaration digest does not establish human
-consent; the caller must explicitly authorize cleanup.
+consent; the caller must explicitly authorize cleanup. MCP returns a
+`confirmation` containing only the operation UUID and digest strings. Apply takes
+those two fields and resolves the immutable server-held declaration. It accepts
+no full declaration. After restart an unclaimed reference cannot dispatch; a
+matching saved reference observes the existing receipt only.
 
 Direct CLI apply creates its binding from fresh facts before creating a receipt,
 without an additional confirmation step or a saved-preview input. Its response

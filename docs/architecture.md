@@ -42,7 +42,11 @@ no operation. Its worker binds the observed home identity, qualified profile and
 exact selection to one operation UUID. The reviewed declaration travels unchanged
 through confirmation into the shared execution mapping. Fresh execution checks
 those identities and the reviewed physical/Guardian context before a receipt or
-native dispatch.
+native dispatch. MCP transports only the operation UUID and digest strings;
+the immutable declaration remains server-owned. Existing saved receipts supply
+observation after restart; an unknown reference never reconstructs execution.
+Completed pre-dispatch refusals remain available in process without implying a
+durable receipt exists.
 MCP startup selects an explicit observation-only or cleanup capability. The same
 capability governs tool registration and apply/reconciliation service entry points.
 Observation-only preparation uses the plain preview path without allocating an

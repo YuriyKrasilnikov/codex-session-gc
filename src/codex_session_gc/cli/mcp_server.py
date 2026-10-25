@@ -21,7 +21,6 @@ from codex_session_gc.cli.console_display import discover_helper
 from codex_session_gc.cli.console_tasks import Intent, async_preview, parse_cutoff
 from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.domain import ArchiveState, ThreadId
-from codex_session_gc.execution.confirmed_declaration import Declaration
 from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
 from codex_session_gc.execution.selection_provenance import reviewed_associations
 from codex_session_gc.inventory.catalogue import SessionEntry, read_session_catalogue
@@ -259,17 +258,20 @@ class CatalogueService:
                 report["physical_manifest"],
                 reviewed_associations(report["guardian_associations"]),
             )
-            prepared["declaration"] = declaration.model_dump(mode="json")
+            prepared["confirmation"] = {
+                "operation_id": declaration.operation_id,
+                "digest": declaration.digest,
+            }
         if len(json.dumps(prepared, ensure_ascii=False).encode()) > _REPORT_BYTES:
             raise ValueError(
                 "Complete preparation exceeds the response bound; reduce the selection."
             )
         return prepared
 
-    async def apply_cleanup(self, declaration: Declaration) -> dict[str, Any]:
-        """Explicitly apply the exact reviewed declaration once; digest is no consent proof."""
+    async def apply_cleanup(self, operation_id: str, digest: str) -> dict[str, Any]:
+        """Apply the exact server-held preparation referenced by two unchanged strings."""
         self._require_cleanup()
-        return await self.operations.apply_owned(Declaration.model_validate(declaration))
+        return await self.operations.apply_owned(operation_id, digest)
 
     async def cleanup_status(self, operation_id: str) -> dict[str, Any]:
         """Read the saved operation receipt without dispatch or fresh history observation."""
@@ -302,7 +304,7 @@ def create_server(
             "Read-only mode exposes catalogue, details, conditional preview and saved status. "
             "Preparation creates no cleanup operation. Apply and reconciliation are unavailable."
             if service.capability is McpCapability.READ_ONLY
-            else "Review prepare_cleanup report and declaration before explicitly calling "
+            else "Review prepare_cleanup report and confirmation before explicitly calling "
             "apply_cleanup. A digest binds the payload and does not prove human consent. "
             "After unknown or response loss, use cleanup_status/reconcile_cleanup; "
             "never create a replacement operation to retry deletion."

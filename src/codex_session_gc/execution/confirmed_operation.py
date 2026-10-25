@@ -5,8 +5,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import threading
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -94,6 +96,9 @@ class ConfirmedOperations:
             "dispatch_replayed": False,
         }
         if not path.exists():
+            completed = self._results.get(_identifier(operation_id))
+            if completed is not None:
+                return dict(completed)
             report["state"] = "receipt_absent"
             report["detail"] = "No durable claim observed; a prior RPC may still be preparing."
             return report
@@ -175,20 +180,84 @@ class ConfirmedOperations:
                 return self._results[identifier]
             if previous is None:
                 return self.status(identifier)
-            self._results[identifier] = self.status(identifier)
-            self._validate_current(declaration)
-            self.receipts.mkdir(parents=True, exist_ok=True)
-            report, _ = execute(
-                confirmed_execution_request(
-                    declaration,
-                    receipt=path,
-                    home=self.home,
-                    helper=self.helper,
-                )
-            )
-            result = {**report, "operation_id": identifier, "dispatch_replayed": False}
+            result = self._execute_prepared(declaration, path)
             self._results[identifier] = result
             return result
+
+    def _execute_prepared(self, declaration: Declaration, path: Path) -> dict[str, Any]:
+        try:
+            self._validate_current(declaration)
+            request = confirmed_execution_request(
+                declaration, receipt=path, home=self.home, helper=self.helper
+            )
+            self.receipts.mkdir(parents=True, exist_ok=True)
+        except (OSError, ValueError, TypeError) as error:
+            report = {
+                "outcome": "refused",
+                "detail": str(error),
+                "roots": [],
+                "receipt": str(path),
+            }
+        else:
+            try:
+                report, _ = execute(request)
+            except Exception as error:  # noqa: BLE001
+                # Engine entry can precede mutation or durable delivery. An exception
+                # cannot establish refusal; prefer the saved observation when readable.
+                report = {
+                    "outcome": "unknown",
+                    "detail": str(error),
+                    "roots": [],
+                    "receipt": str(path),
+                }
+                if path.exists():
+                    with suppress(OSError, RecoveryError, ValueError, TypeError):
+                        report = self.status(declaration.operation_id)
+        result = {
+            **report,
+            "operation_id": declaration.operation_id,
+            "dispatch_replayed": False,
+        }
+        if not path.exists():
+            result["state"] = "completed_without_receipt"
+        return result
+
+    def apply_reference(self, operation_id: str, digest: str) -> dict[str, Any]:
+        """Resolve only an exact prepared binding; saved references can observe, never replay."""
+        identifier = _identifier(operation_id)
+        if (
+            identifier != operation_id
+            or not isinstance(digest, str)
+            or len(digest) != hashlib.sha256().digest_size * 2
+        ):
+            message = "Confirmation requires a canonical operation UUID and SHA-256 digest."
+            raise ValueError(message)
+        with self._lock:
+            declaration = self._declarations.get(identifier)
+            if declaration is None:
+                path = self._receipt(identifier)
+                if not path.exists():
+                    return self.status(identifier)
+                try:
+                    (stored,) = inspect(path)
+                except OSError, RecoveryError:
+                    return self.status(identifier)
+                value = json.loads(stored.start.evidence.data).get("operation_declaration")
+                declaration = Declaration.model_validate(value)
+                if (
+                    declaration.operation_id != identifier
+                    or declaration.digest != declaration.calculated_digest()
+                ):
+                    message = "Saved operation does not contain a valid exact declaration."
+                    raise ValueError(message)
+                if declaration.digest != digest:
+                    message = "Confirmation digest differs from the saved declaration."
+                    raise ValueError(message)
+                return self.status(identifier)
+            if declaration.digest != digest:
+                message = "Confirmation digest differs from the prepared declaration."
+                raise ValueError(message)
+        return self.apply(declaration)
 
     def _validate_current(self, declaration: Declaration) -> None:
         metadata = self.home.stat()
@@ -218,9 +287,9 @@ class ConfirmedOperations:
                 "skipped_roots": whole.get("skipped_roots", []),
             }
 
-    async def apply_owned(self, declaration: Declaration) -> dict[str, Any]:
+    async def apply_owned(self, operation_id: str, digest: str) -> dict[str, Any]:
         """Keep backend ownership through cancellation and join native cleanup."""
-        task = asyncio.create_task(asyncio.to_thread(self.apply, declaration))
+        task = asyncio.create_task(asyncio.to_thread(self.apply_reference, operation_id, digest))
         try:
             return await asyncio.shield(task)
         except asyncio.CancelledError:

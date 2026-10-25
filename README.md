@@ -320,9 +320,12 @@ journal or deletion. Pages contain at most 100 histories; preparation accepts at
 most 200 distinct IDs per request. Larger selections can use the terminal UI.
 
 Review the complete preparation report, then explicitly call `apply_cleanup` with
-its unchanged `declaration`. Preparation supplies the operation UUID before apply,
-exact roots and candidate IDs, cutoff, startup home identity, Guardian associations,
-the exact physical manifest and qualified profile. Catalogue JSON uses
+the unchanged string fields from `confirmation`: `operation_id` and `digest`.
+The server retains the exact reviewed roots and candidate IDs, cutoff, startup
+home identity, Guardian associations, physical manifest and qualified profile.
+The client does not return filesystem integers or reconstruct the declaration.
+An unclaimed confirmation expires when the server restarts; applying it then
+returns unknown without dispatch. A matching saved receipt is observed only. Catalogue JSON uses
 `stored_bytes` for an exact total or null, `known_stored_bytes` for the observed
 lower bound, `physical_rollouts` for attributed objects and `physical_complete`
 for complete membership. Work groups expose corresponding own/agent/total
@@ -337,9 +340,10 @@ server discovers the qualified helper using the same rules as Textual.
 Keep the operation UUID after cancellation, disconnect or a lost response. Read
 `cleanup_status` or call `reconcile_cleanup` with that UUID. Reconciliation may
 write observation evidence to the existing receipt and never dispatches deletion.
-A duplicate apply observes the saved attempt; a changed declaration with the same
-UUID is refused. Missing or unreadable receipts mean unknown, including when an
-older call may still be preparing. Do not create a replacement operation to retry
+A duplicate apply observes the saved attempt; a different digest for a prepared
+or saved operation is refused. A completed refusal before receipt creation remains
+visible to apply and status in that server process. After restart, missing or
+unreadable receipts mean unknown, including when an older call may still be preparing. Do not create a replacement operation to retry
 an unknown deletion. Transport cancellation waits for owned backend cleanup;
 receipts retain explicit unresolved lifecycle state when cleanup is unproven.
 

@@ -91,9 +91,9 @@ async def prepare(session: ClientSession) -> dict[str, Any]:
         "prepare_cleanup",
         {"snapshot_id": catalogue["snapshot_id"], "thread_ids": [CHILD], "cutoff": "2030-01-01"},
     )
-    assert result["declaration"]["roots"] == [ROOT]
-    assert result["declaration"]["selected"] == [CHILD]
-    declaration = result["declaration"]
+    assert result["report"]["roots"] == [ROOT]
+    assert result["report"]["deletions"] == [CHILD]
+    declaration = result["confirmation"]
     assert isinstance(declaration, dict)
     return declaration
 
@@ -189,9 +189,7 @@ def test_native_confirmed_effects_writer_continuity_and_restart_duplicate(
             assert await peer.stdout.readline() == b"ready\n"
             async with server(home, native_helper, receipts) as session:
                 declaration = await prepare(session)
-                applying = asyncio.create_task(
-                    call(session, "apply_cleanup", {"declaration": declaration})
-                )
+                applying = asyncio.create_task(call(session, "apply_cleanup", declaration))
                 peer.stdin.write(b"append\n")
                 await peer.stdin.drain()
                 assert await peer.stdout.readline() == b"appended\n"
@@ -212,7 +210,7 @@ def test_native_confirmed_effects_writer_continuity_and_restart_duplicate(
                     session, "cleanup_status", {"operation_id": declaration["operation_id"]}
                 )
                 assert status["outcome"] == "confirmed", status
-                duplicate = await call(session, "apply_cleanup", {"declaration": declaration})
+                duplicate = await call(session, "apply_cleanup", declaration)
                 assert duplicate["outcome"] == "confirmed", duplicate
                 assert duplicate["dispatch_replayed"] is False
                 await call(
@@ -246,14 +244,16 @@ def test_native_retained_provider_refuses_without_logical_effects(
             retained_provider(paths[OTHER], paths[CHILD])
             before = logical_rows(home)
             files = {key: path.read_bytes() for key, path in paths.items()}
-            result = await call(session, "apply_cleanup", {"declaration": declaration})
+            result = await call(session, "apply_cleanup", declaration)
             assert result["outcome"] == "refused", result
             assert result["roots"] == []
             assert "manifest changed" in result["detail"]
             status = await call(
                 session, "cleanup_status", {"operation_id": declaration["operation_id"]}
             )
-            assert status["state"] == "receipt_absent"
+            assert status == result
+            assert status["outcome"] == "refused"
+            assert status["state"] == "completed_without_receipt"
             assert not (receipts / f"{declaration['operation_id']}.sqlite").exists()
             assert logical_rows(home) == before
             assert {key: path.read_bytes() for key, path in paths.items()} == files
@@ -299,7 +299,7 @@ def test_native_commit_lock_unknown_observation_never_replays(
             assert reader.stdin is not None
             try:
                 assert await reader.stdout.readline() == b"ready\n"
-                result = await call(session, "apply_cleanup", {"declaration": declaration})
+                result = await call(session, "apply_cleanup", declaration)
                 assert result["outcome"] == "unknown", result
                 native = result["roots"][0]["nativeReceipt"]
                 assert native["status"] == "unknown"
@@ -326,7 +326,7 @@ def test_native_commit_lock_unknown_observation_never_replays(
             assert status["outcome"] == "unknown", status
             for name, arguments in (
                 ("reconcile_cleanup", operation),
-                ("apply_cleanup", {"declaration": declaration}),
+                ("apply_cleanup", declaration),
                 ("cleanup_status", operation),
             ):
                 observed = await call(session, name, arguments)
@@ -464,26 +464,27 @@ def test_guardian_sdk_exact_effects_association_restart_and_parent_writer(
                         "cutoff": "2030-01-01",
                     },
                 )
-                declaration = prepared["declaration"]
-                assert declaration["roots"] == [CHILD]
-                assert declaration["selected"] == [CHILD]
-                assert declaration["guardian_associations"] == [
+                declaration = prepared["confirmation"]
+                assert prepared["report"]["roots"] == [CHILD]
+                assert prepared["report"]["deletions"] == [CHILD]
+                assert prepared["report"]["guardian_associations"] == [
                     {"guardian_thread_id": CHILD, "associated_parent_thread_id": ROOT}
                 ]
-                result = await call(session, "apply_cleanup", {"declaration": declaration})
+                result = await call(session, "apply_cleanup", declaration)
                 assert result["outcome"] == "confirmed", result
                 assert_native_confirmed(result, home, paths[CHILD])
             receipt = receipts / f"{declaration['operation_id']}.sqlite"
             assert_guardian_receipt(receipt)
             (stored,) = inspect(receipt)
-            assert json.loads(stored.start.evidence.data)["operation_declaration"] == declaration
+            saved_declaration = json.loads(stored.start.evidence.data)["operation_declaration"]
+            assert {key: saved_declaration[key] for key in declaration} == declaration
             after = logical_rows(home)
             assert_selected_effects(before, after, selected_root=True)
             async with server(home, native_helper, receipts) as session:
                 for name, arguments in (
                     ("cleanup_status", {"operation_id": declaration["operation_id"]}),
                     ("reconcile_cleanup", {"operation_id": declaration["operation_id"]}),
-                    ("apply_cleanup", {"declaration": declaration}),
+                    ("apply_cleanup", declaration),
                 ):
                     observed = await call(session, name, arguments)
                     assert observed["outcome"] == "confirmed", observed

@@ -131,7 +131,7 @@ async def assert_restarted_observation(
             assert_selected_effects(before, after, selected_deleted=False)
         for name, arguments in (
             ("reconcile_cleanup", operation),
-            ("apply_cleanup", {"declaration": declaration}),
+            ("apply_cleanup", declaration),
         ):
             observed = await call(session, name, arguments)
             assert observed["dispatch_replayed"] is False
@@ -159,7 +159,7 @@ def test_sdk_cancelled_destructive_request_joins_original_native_launch(
                 async def applying() -> None:
                     with anyio.CancelScope() as scope:
                         scopes.append(scope)
-                        await session.call_tool("apply_cleanup", {"declaration": declaration})
+                        await session.call_tool("apply_cleanup", declaration)
                     assert scope.cancelled_caught
                     cancelled.set()
 
@@ -336,7 +336,7 @@ def test_genuine_stdin_eof_joins_inflight_backend_and_reaps_native_child(
                         },
                     )
                 )
-                declaration = prepared["declaration"]
+                declaration = prepared["confirmation"]
                 async with reader(home) as blocker:
                     process.stdin.write(
                         (
@@ -347,7 +347,7 @@ def test_genuine_stdin_eof_joins_inflight_backend_and_reaps_native_child(
                                     "method": "tools/call",
                                     "params": {
                                         "name": "apply_cleanup",
-                                        "arguments": {"declaration": declaration},
+                                        "arguments": declaration,
                                     },
                                 }
                             )

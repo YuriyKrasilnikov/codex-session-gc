@@ -112,9 +112,9 @@ def test_actual_adapters_remove_all_owned_revert_formats_and_preserve_provider( 
                 },
             )
             assert prepared["report"]["sizes"] == [expected_size]
-            declaration = prepared["declaration"]
-            assert len(declaration["physical_manifest"][0]["rollouts"]) == 2
-            result = await call(session, "apply_cleanup", {"declaration": declaration})
+            declaration = prepared["confirmation"]
+            assert len(prepared["report"]["physical_manifest"][0]["rollouts"]) == 2
+            result = await call(session, "apply_cleanup", declaration)
             assert result["outcome"] == "confirmed", result
             assert set(result["roots"][0]["nativeReceipt"]["removed_rollouts"]) == owned
             operation = declaration["operation_id"]

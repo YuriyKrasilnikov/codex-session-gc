@@ -11,9 +11,11 @@ Reconcile accepts no home, helper or selection override and never starts another
 helper, sends deletion or continues undispatched work. Its scope is
 `saved_journal_units`; roots skipped before receipt creation are outside that scope.
 MCP uses the original operation UUID with `cleanup_status` or `reconcile_cleanup`.
-A duplicate apply observes its saved attempt; a changed declaration under the same
-UUID is refused. Missing/unreadable receipt means unknown, including when an
-original call might still be preparing. Do not create a new UUID to retry uncertainty.
+A duplicate apply observes its saved attempt; a different confirmation digest
+under the same UUID is refused. An unclaimed MCP reference cannot execute after
+a server restart. A completed pre-dispatch refusal is retained by that process;
+without a durable receipt, a restarted process reports unknown. Missing/unreadable
+receipt means unknown, including when an original call might still be preparing. Do not create a new UUID to retry uncertainty.
 
 ## Receipt format and evidence
 
