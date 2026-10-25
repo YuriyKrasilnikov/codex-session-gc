@@ -10,9 +10,11 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,6 +26,12 @@ from codex_session_gc.execution.process_identity import (
     observe_owned_child,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+_CLEANUP_TIMEOUT_SECONDS = 2
+_STDERR_DIAGNOSTIC_BYTES = 4096
+
 
 def _launcher() -> Path:
     owned_launch = import_module("codex_session_gc.execution.owned_launch")
@@ -31,14 +39,84 @@ def _launcher() -> Path:
     return Path(owned_launch.__file__).resolve()
 
 
-def _child(target: str, environment: dict[str, str]) -> subprocess.Popen[bytes]:
-    return subprocess.Popen(
+@contextmanager
+def _child(target: str, environment: dict[str, str]) -> Iterator[subprocess.Popen[bytes]]:
+    child = subprocess.Popen(
         [sys.executable, "-I", str(_launcher()), sys.executable, "-c", target],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=environment,
     )
+    failure: BaseException | None = None
+    try:
+        yield child
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        before_cleanup = _child_observation(child)
+        cleanup_errors: list[Exception] = []
+        try:
+            _reap_child(child)
+        except (OSError, subprocess.SubprocessError) as error:
+            cleanup_errors.append(error)
+        stderr = _bounded_stderr(child)
+        for stream in (child.stdin, child.stdout, child.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError as error:
+                    cleanup_errors.append(error)
+        note = (
+            f"Owned child before cleanup: {before_cleanup}; "
+            f"after cleanup: returncode={child.returncode}; stderr={stderr}"
+        )
+        if failure is not None:
+            failure.add_note(note)
+        if cleanup_errors:
+            if failure is not None:
+                for cleanup_error in cleanup_errors:
+                    failure.add_note(f"Owned child cleanup failed: {cleanup_error!r}")
+            else:
+                failures = ExceptionGroup("Owned child cleanup failed", cleanup_errors)
+                failures.add_note(note)
+                raise failures
+
+
+def _child_observation(child: subprocess.Popen[bytes]) -> str:
+    returncode = child.poll()
+    try:
+        status = (Path("/proc") / str(child.pid) / "status").read_text()
+    except OSError as error:
+        state = f"unavailable errno={error.errno}"
+    else:
+        states = [line for line in status.splitlines() if line.startswith("State:")]
+        state = repr(states)
+    return f"pid={child.pid}; returncode={returncode}; state={state}"
+
+
+def _reap_child(child: subprocess.Popen[bytes]) -> None:
+    try:
+        if child.stdin is not None and not child.stdin.closed:
+            child.stdin.close()
+    finally:
+        try:
+            child.wait(timeout=_CLEANUP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=_CLEANUP_TIMEOUT_SECONDS)
+
+
+def _bounded_stderr(child: subprocess.Popen[bytes]) -> str:
+    if child.stderr is None:
+        return "unavailable: no stderr pipe"
+    try:
+        os.set_blocking(child.stderr.fileno(), False)
+        captured = os.read(child.stderr.fileno(), _STDERR_DIAGNOSTIC_BYTES)
+    except OSError as error:
+        return f"unavailable errno={error.errno}"
+    return f"first {_STDERR_DIAGNOSTIC_BYTES} bytes: {captured!r}"
 
 
 def test_grant_runs_target_and_preserves_the_first_request_bytes(tmp_path: Path) -> None:
@@ -49,12 +127,12 @@ def test_grant_runs_target_and_preserves_the_first_request_bytes(tmp_path: Path)
         "OBSERVED": str(observed),
     }
     target = "import os,sys; open(os.environ['OBSERVED'],'wb').write(sys.stdin.buffer.readline())"
-    child = _child(target, environment)
-    assert child.stdin is not None
-    child.stdin.write(b"codex-session-gc:grant-v1\n" + b'{"id":1}\n')
-    child.stdin.close()
-    assert child.wait(timeout=2) == 0
-    assert observed.read_bytes() == b'{"id":1}\n'
+    with _child(target, environment) as child:
+        assert child.stdin is not None
+        child.stdin.write(b"codex-session-gc:grant-v1\n" + b'{"id":1}\n')
+        child.stdin.close()
+        assert child.wait(timeout=2) == 0
+        assert observed.read_bytes() == b'{"id":1}\n'
 
 
 def test_eof_and_invalid_grant_never_run_target(tmp_path: Path) -> None:
@@ -65,13 +143,15 @@ def test_eof_and_invalid_grant_never_run_target(tmp_path: Path) -> None:
             OWNED_MARKER_ENV: name,
             "OBSERVED": str(observed),
         }
-        child = _child("import os; open(os.environ['OBSERVED'],'wb').write(b'ran')", environment)
-        assert child.stdin is not None
-        if input_bytes:
-            child.stdin.write(input_bytes)
-        child.stdin.close()
-        assert child.wait(timeout=2) != 0
-        assert not observed.exists()
+        with _child(
+            "import os; open(os.environ['OBSERVED'],'wb').write(b'ran')", environment
+        ) as child:
+            assert child.stdin is not None
+            if input_bytes:
+                child.stdin.write(input_bytes)
+            child.stdin.close()
+            assert child.wait(timeout=2) != 0
+            assert not observed.exists()
 
 
 def test_grant_timeout_never_runs_target(tmp_path: Path) -> None:
@@ -82,20 +162,20 @@ def test_grant_timeout_never_runs_target(tmp_path: Path) -> None:
         OWNED_MARKER_ENV: "timeout-marker",
         "OBSERVED": str(observed),
     }
-    child = _child("import os; open(os.environ['OBSERVED'],'wb').write(b'ran')", environment)
-    assert child.wait(timeout=6) != 0
-    assert not observed.exists()
+    with _child("import os; open(os.environ['OBSERVED'],'wb').write(b'ran')", environment) as child:
+        assert child.wait(timeout=6) != 0
+        assert not observed.exists()
 
 
 def test_owned_identity_is_alive_then_absent() -> None:
     environment = {"PATH": os.environ["PATH"], OWNED_MARKER_ENV: "identity-marker"}
-    child = _child("import time; time.sleep(2)", environment)
-    identity = observe_owned_child(child.pid, environment)
-    assert child_presence(identity) is Presence.ALIVE
-    assert child.stdin is not None
-    child.stdin.close()
-    assert child.wait(timeout=2) != 0
-    assert child_presence(identity) is Presence.ABSENT
+    with _child("import time; time.sleep(2)", environment) as child:
+        identity = observe_owned_child(child.pid, environment)
+        assert child_presence(identity) is Presence.ALIVE
+        assert child.stdin is not None
+        child.stdin.close()
+        assert child.wait(timeout=2) != 0
+        assert child_presence(identity) is Presence.ABSENT
 
 
 @pytest.mark.parametrize("field", ["pid_namespace", "mount_namespace", "proc_mount"])
@@ -104,14 +184,14 @@ def test_same_child_identity_drift_is_ambiguous(
 ) -> None:
     """A coordinate change cannot turn the same live child into an absence."""
     environment = {"PATH": os.environ["PATH"], OWNED_MARKER_ENV: "drift-marker"}
-    child = _child("import time; time.sleep(2)", environment)
-    identity = observe_owned_child(child.pid, environment)
-    changed = replace(identity, **{field: "changed"})
-    monkeypatch.setattr(process_identity, "_read_identity", lambda *_: changed)
-    assert child_presence(identity) is Presence.AMBIGUOUS
-    assert child.stdin is not None
-    child.stdin.close()
-    child.wait(timeout=2)
+    with _child("import time; time.sleep(2)", environment) as child:
+        identity = observe_owned_child(child.pid, environment)
+        changed = replace(identity, **{field: "changed"})
+        monkeypatch.setattr(process_identity, "_read_identity", lambda *_: changed)
+        assert child_presence(identity) is Presence.AMBIGUOUS
+        assert child.stdin is not None
+        child.stdin.close()
+        child.wait(timeout=2)
 
 
 def test_readable_replacement_in_the_same_coordinate_is_absent(
@@ -119,17 +199,17 @@ def test_readable_replacement_in_the_same_coordinate_is_absent(
 ) -> None:
     """A different start tick is a positive replacement observation in one coordinate."""
     environment = {"PATH": os.environ["PATH"], OWNED_MARKER_ENV: "replacement-marker"}
-    child = _child("import time; time.sleep(2)", environment)
-    identity = observe_owned_child(child.pid, environment)
-    monkeypatch.setattr(
-        process_identity,
-        "_read_identity",
-        lambda *_: replace(identity, start_ticks=identity.start_ticks + 1),
-    )
-    assert child_presence(identity) is Presence.ABSENT
-    assert child.stdin is not None
-    child.stdin.close()
-    child.wait(timeout=2)
+    with _child("import time; time.sleep(2)", environment) as child:
+        identity = observe_owned_child(child.pid, environment)
+        monkeypatch.setattr(
+            process_identity,
+            "_read_identity",
+            lambda *_: replace(identity, start_ticks=identity.start_ticks + 1),
+        )
+        assert child_presence(identity) is Presence.ABSENT
+        assert child.stdin is not None
+        child.stdin.close()
+        child.wait(timeout=2)
 
 
 def test_missing_pid_during_a_changed_observer_view_is_ambiguous(
@@ -137,19 +217,19 @@ def test_missing_pid_during_a_changed_observer_view_is_ambiguous(
 ) -> None:
     """A vanished PID is useful absence evidence only when both observer reads agree."""
     environment = {"PATH": os.environ["PATH"], OWNED_MARKER_ENV: "missing-view-marker"}
-    child = _child("import time; time.sleep(2)", environment)
-    identity = observe_owned_child(child.pid, environment)
-    assert child.stdin is not None
-    child.stdin.close()
-    child.wait(timeout=2)
-    coordinates = iter(
-        [
-            (identity.boot_id, identity.proc_mount),
-            (identity.boot_id, f"{identity.proc_mount}-changed"),
-        ]
-    )
-    monkeypatch.setattr(process_identity, "_observer_coordinate", lambda: next(coordinates))
-    assert child_presence(identity) is Presence.AMBIGUOUS
+    with _child("import time; time.sleep(2)", environment) as child:
+        identity = observe_owned_child(child.pid, environment)
+        assert child.stdin is not None
+        child.stdin.close()
+        child.wait(timeout=2)
+        coordinates = iter(
+            [
+                (identity.boot_id, identity.proc_mount),
+                (identity.boot_id, f"{identity.proc_mount}-changed"),
+            ]
+        )
+        monkeypatch.setattr(process_identity, "_observer_coordinate", lambda: next(coordinates))
+        assert child_presence(identity) is Presence.AMBIGUOUS
 
 
 def test_restored_endpoints_do_not_hide_an_intermediate_coordinate_drift(
@@ -157,22 +237,39 @@ def test_restored_endpoints_do_not_hide_an_intermediate_coordinate_drift(
 ) -> None:
     """A readable identity carries the observer coordinate used to read it."""
     environment = {"PATH": os.environ["PATH"], OWNED_MARKER_ENV: "intermediate-view-marker"}
-    child = _child("import time; time.sleep(2)", environment)
-    identity = observe_owned_child(child.pid, environment)
-    monkeypatch.setattr(
-        process_identity,
-        "_read_identity",
-        lambda *_: replace(identity, proc_mount=f"{identity.proc_mount}-intermediate"),
-    )
-    monkeypatch.setattr(
-        process_identity,
-        "_observer_coordinate",
-        lambda: (identity.boot_id, identity.proc_mount),
-    )
-    assert child_presence(identity) is Presence.AMBIGUOUS
-    assert child.stdin is not None
-    child.stdin.close()
-    child.wait(timeout=2)
+    with _child("import time; time.sleep(2)", environment) as child:
+        identity = observe_owned_child(child.pid, environment)
+        monkeypatch.setattr(
+            process_identity,
+            "_read_identity",
+            lambda *_: replace(identity, proc_mount=f"{identity.proc_mount}-intermediate"),
+        )
+        monkeypatch.setattr(
+            process_identity,
+            "_observer_coordinate",
+            lambda: (identity.boot_id, identity.proc_mount),
+        )
+        assert child_presence(identity) is Presence.AMBIGUOUS
+        assert child.stdin is not None
+        child.stdin.close()
+        child.wait(timeout=2)
+
+
+def test_identity_refusal_reaps_child_and_preserves_diagnostic(tmp_path: Path) -> None:
+    observed = tmp_path / "refused-target"
+    environment = {"PATH": os.environ["PATH"], "OBSERVED": str(observed)}
+    with (
+        pytest.raises(process_identity.IdentityObservationError) as raised,
+        _child("import os; open(os.environ['OBSERVED'],'wb').write(b'ran')", environment) as child,
+    ):
+        observe_owned_child(child.pid, {OWNED_MARKER_ENV: "expected-marker-not-present-in-child"})
+
+    assert raised.value.diagnostic.stage is process_identity.IdentityStage.ENVIRONMENT
+    assert any("Owned child before cleanup:" in note for note in raised.value.__notes__)
+    assert child.returncode is not None
+    assert not observed.exists()
+    with pytest.raises(ChildProcessError):
+        os.waitpid(child.pid, os.WNOHANG)
 
 
 def _identity_proc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[int, dict[str, str]]:

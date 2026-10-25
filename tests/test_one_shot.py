@@ -105,13 +105,16 @@ def test_exact_payload_digest_status_exit_and_owned_lifecycle(
 ) -> None:
     binding, command, unit, request, observed = _setup(tmp_path, status.value)
     result = one_shot.dispatch_once(binding, command, unit, request, _evidence())
+    assert result.reply is not None, (
+        f"Expected a helper reply; status={result.status.value}; detail={result.detail!r}; "
+        f"returncode={result.returncode}; stderr={result.stderr[:_OUTPUT_BOUND]!r}"
+    )
     assert result.status is status
     assert result.request_digest == request.digest
     assert result.reaped
     assert result.closure_recorded
     assert result.terminal_recorded
     assert observed.read_bytes() == b"consumed\n"
-    assert result.reply is not None
     assert json.loads(result.reply.data)["status"] == status.value
     (journal,) = inspect(binding.receipt)
     assert journal.units[0].request == request
