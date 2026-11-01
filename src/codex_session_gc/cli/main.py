@@ -20,6 +20,7 @@ from codex_session_gc.cli.console_tasks import preview_selection
 from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.domain import ThreadId, UtcCutoff
 from codex_session_gc.execution.resource_policy import READ_BYTES, TIMEOUT_SECONDS
+from codex_session_gc.installation.__main__ import main as installer_main
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -64,6 +65,8 @@ def _parser() -> argparse.ArgumentParser:
     """Expose one supported cleanup route and its browsing adapters."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("install", help="Verify, stage and optionally activate a release")
+    commands.add_parser("update", help="Verify, stage and optionally activate a release")
     doctor = commands.add_parser("doctor", help="Observe helper and exact storage compatibility")
     doctor.add_argument("--home", type=Path, required=True)
     doctor.add_argument("--helper", type=Path)
@@ -130,7 +133,10 @@ def _print_preview(report: dict[str, Any]) -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one current command; unsupported commands fail during argument parsing."""
-    arguments = _parser().parse_args(argv)
+    values = list(sys.argv[1:] if argv is None else argv)
+    if values and values[0] in ("install", "update"):
+        return installer_main(values[1:])
+    arguments = _parser().parse_args(values)
     if arguments.command == "doctor":
         try:
             doctor_report = diagnostics.inspect_compatibility(

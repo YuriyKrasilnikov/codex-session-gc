@@ -4,16 +4,20 @@
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 import os
 import re
-import signal
 import stat
 import tempfile
 from enum import StrEnum
 from typing import TYPE_CHECKING, Self
+
+from codex_session_gc.installation.process import (
+    OwnedProcessError,
+    ProcessFailure,
+    ProcessLimits,
+    run_owned,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,6 +30,18 @@ PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
 _OUTPUT_LIMIT = 1024 * 1024
 _TIMEOUT = 120.0
 _LEASE_TOKEN = object()
+
+
+class VerificationOption(StrEnum):
+    """Options required for the trusted artifact-verification policy."""
+
+    REPOSITORY = "--repo"
+    SIGNER_WORKFLOW = "--signer-workflow"
+    SOURCE_DIGEST = "--source-digest"
+    SOURCE_REF = "--source-ref"
+    PREDICATE_TYPE = "--predicate-type"
+    DENY_SELF_HOSTED = "--deny-self-hosted-runners"
+    FORMAT = "--format"
 
 
 class RefusalReason(StrEnum):
@@ -169,111 +185,27 @@ def _statement_matches(output: bytes, expected: ArtifactIdentity) -> bool:
         return False
 
 
-def _wake(ready: asyncio.Future[None]) -> None:
-    if not ready.done():
-        ready.set_result(None)
-
-
-async def _read_pipe(fd: int) -> bytes:
-    loop = asyncio.get_running_loop()
-    output = bytearray()
-    while True:
-        ready: asyncio.Future[None] = loop.create_future()
-
-        loop.add_reader(fd, _wake, ready)
-        try:
-            await ready
-        finally:
-            loop.remove_reader(fd)
-        try:
-            block = os.read(fd, 65536)
-        except BlockingIOError:
-            continue
-        if not block:
-            return bytes(output)
-        output.extend(block)
-        if len(output) > _OUTPUT_LIMIT:
-            raise ProvenanceRefusalError(RefusalReason.OUTPUT)
-
-
-def _kill_group(process: asyncio.subprocess.Process) -> None:
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGKILL)
-
-
-async def _cleanup_verifier(
-    creation: asyncio.Task[asyncio.subprocess.Process] | None,
-    process: asyncio.subprocess.Process | None,
-    read_fd: int,
-    write_fd: int,
-) -> None:
-    try:
-        if process is None and creation is not None:
-            with contextlib.suppress(OSError):
-                process = await creation
-        if process is not None:
-            _kill_group(process)
-            await process.wait()
-    finally:
-        try:
-            os.close(read_fd)
-        finally:
-            if write_fd >= 0:
-                os.close(write_fd)
-
-
-async def _await_cleanup(cleanup: asyncio.Task[None]) -> None:
-    cancelled = False
-    while not cleanup.done():
-        try:
-            await asyncio.shield(cleanup)
-        except asyncio.CancelledError:
-            cancelled = True
-    try:
-        cleanup.result()
-    finally:
-        if cancelled:
-            raise asyncio.CancelledError
-
-
 async def _run_verifier(command: list[str], fd: int, directory: str) -> bytes:
     allowed = ("HOME", "PATH", "SYSTEMROOT", "SSL_CERT_FILE", "SSL_CERT_DIR")
     environment = {key: os.environ[key] for key in allowed if key in os.environ}
     environment["GH_PROMPT_DISABLED"] = "1"
-    read_fd, write_fd = os.pipe2(os.O_CLOEXEC)
-    os.set_blocking(read_fd, False)
-    process: asyncio.subprocess.Process | None = None
-    creation: asyncio.Task[asyncio.subprocess.Process] | None = None
     try:
-        creation = asyncio.create_task(
-            asyncio.create_subprocess_exec(
-                *command,
-                cwd=directory,
-                env=environment,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=write_fd,
-                stderr=asyncio.subprocess.DEVNULL,
-                pass_fds=(fd,),
-                start_new_session=True,
-            )
+        return await run_owned(
+            command,
+            cwd=directory,
+            environment=environment,
+            limits=ProcessLimits(_TIMEOUT, _OUTPUT_LIMIT),
+            pass_fds=(fd,),
         )
-        try:
-            async with asyncio.timeout(_TIMEOUT):
-                process = await asyncio.shield(creation)
-                os.close(write_fd)
-                write_fd = -1
-                output = await _read_pipe(read_fd)
-                await process.wait()
-                if process.returncode != 0:
-                    raise ProvenanceRefusalError(RefusalReason.VERIFIER_FAILED)
-                return output
-        except TimeoutError as exc:
-            raise ProvenanceRefusalError(RefusalReason.TIMEOUT) from exc
-    except OSError as exc:
-        raise ProvenanceRefusalError(RefusalReason.VERIFIER_UNAVAILABLE) from exc
-    finally:
-        cleanup = asyncio.create_task(_cleanup_verifier(creation, process, read_fd, write_fd))
-        await _await_cleanup(cleanup)
+    except OwnedProcessError as error:
+        reason = {
+            ProcessFailure.UNAVAILABLE: RefusalReason.VERIFIER_UNAVAILABLE,
+            ProcessFailure.FAILED: RefusalReason.VERIFIER_FAILED,
+            ProcessFailure.TIMEOUT: RefusalReason.TIMEOUT,
+            ProcessFailure.OUTPUT: RefusalReason.OUTPUT,
+            ProcessFailure.STORAGE: RefusalReason.VERIFIER_FAILED,
+        }[error.reason]
+        raise ProvenanceRefusalError(reason) from error
 
 
 async def _verify_open_artifact(
@@ -290,18 +222,18 @@ async def _verify_open_artifact(
         "attestation",
         "verify",
         f"/proc/self/fd/{fd}",
-        "--repo",
+        VerificationOption.REPOSITORY.value,
         REPOSITORY,
-        "--signer-workflow",
+        VerificationOption.SIGNER_WORKFLOW.value,
         SIGNER_WORKFLOW,
-        "--source-digest",
+        VerificationOption.SOURCE_DIGEST.value,
         source.commit,
-        "--source-ref",
+        VerificationOption.SOURCE_REF.value,
         source.ref,
-        "--predicate-type",
+        VerificationOption.PREDICATE_TYPE.value,
         PREDICATE_TYPE,
-        "--deny-self-hosted-runners",
-        "--format",
+        VerificationOption.DENY_SELF_HOSTED.value,
+        VerificationOption.FORMAT.value,
         "json",
     ]
     with tempfile.TemporaryDirectory(prefix="codex-gc-verify-") as directory:
