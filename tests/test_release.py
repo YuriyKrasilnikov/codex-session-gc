@@ -41,6 +41,7 @@ _LICENSE_FILES = (
 def _inputs(root: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     """Build a tiny Python wheel and a lock-export fixture without native execution."""
     (root / "tools").mkdir()
+    (root / "tools/__init__.py").write_bytes((_PROJECT / "tools/__init__.py").read_bytes())
     (root / ".gitignore").write_text("__pycache__/\n")
     tool = root / "tools/build_release.py"
     tool.write_bytes((_PROJECT / "tools/build_release.py").read_bytes())
@@ -68,6 +69,12 @@ def _inputs(root: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     source_contract.write_text(json.dumps(contract))
     package = root / "src/codex_session_gc"
     (package / "__init__.py").write_text('"""Synthetic release fixture."""\n')
+    artifacts = package / "artifacts"
+    artifacts.mkdir()
+    for name in ("__init__.py", "bundle.py"):
+        (artifacts / name).write_bytes(
+            (_PROJECT / "src/codex_session_gc/artifacts" / name).read_bytes()
+        )
     (package / "api.py").write_text("SELECTED = 'original'\n")
     (package / "resources").mkdir()
     (package / "resources/settings.json").write_text('{"fixture":true}\n')
@@ -100,6 +107,7 @@ def _inputs(root: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     environment = os.environ.copy()
     environment["PATH"] = str(binary) + os.pathsep + os.defpath
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["PYTHONPATH"] = str(root / "src") + os.pathsep + environment.get("PYTHONPATH", "")
     return tool, wheel, helper, environment
 
 

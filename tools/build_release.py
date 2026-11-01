@@ -5,21 +5,25 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import tomllib
 import zipfile
 from email.parser import BytesParser
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
+from codex_session_gc.artifacts.bundle import MANIFEST_MAX_BYTES, RELEASE_FORMAT, parse_manifest
 from tools import source_map
 
 DOCUMENTS = (
@@ -219,7 +223,7 @@ def assemble(wheel: Path, helper: Path, output: Path, root: Path) -> None:
         ):
             raise ValueError("The copied wheel differs from the inspected contract or metadata.")
         manifest = {
-            "format": "codex-session-gc-release-v1",
+            "format": RELEASE_FORMAT,
             "package_version": version,
             "requires_python": python_requirement,
             "native_source_identity": contract["source_identity"],
@@ -236,25 +240,180 @@ def assemble(wheel: Path, helper: Path, output: Path, root: Path) -> None:
                 if path.is_file()
             },
         }
-        (staging / "manifest.json").write_text(
-            json.dumps(manifest, sort_keys=True, indent=2) + "\n"
-        )
+        manifest_bytes = (json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()
+        parse_manifest(manifest_bytes)
+        (staging / "manifest.json").write_bytes(manifest_bytes)
         if output.exists():
             raise ValueError("Output appeared during assembly; refusing replacement.")
         staging.rename(output)
 
 
+def _manifest_payload(bundle: Path) -> tuple[bytes, dict[str, tuple[int, str]]]:
+    manifest_path = bundle / "manifest.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError("Release manifest must be a regular file.")
+    with manifest_path.open("rb") as stream:
+        raw = stream.read(MANIFEST_MAX_BYTES + 1)
+    manifest = parse_manifest(raw)
+    if bundle.name != f"codex-session-gc-{manifest.version}-linux-x86_64":
+        raise ValueError("Release directory name differs from manifest version.")
+    return raw, {name: (entry.size, entry.sha256) for name, entry in manifest.files.items()}
+
+
+def _release_members(bundle: Path, entries: dict[str, tuple[int, str]]) -> list[str]:
+    directories = {
+        str(parent)
+        for name in entries
+        for parent in PurePosixPath(name).parents
+        if str(parent) != "."
+    }
+    actual = {path.relative_to(bundle).as_posix(): path for path in bundle.rglob("*")}
+    if set(actual) != set(entries) | directories | {"manifest.json"}:
+        raise ValueError("Release directory contains undeclared or missing members.")
+    for name, path in actual.items():
+        if (
+            path.is_symlink()
+            or (name in directories and not path.is_dir())
+            or (name not in directories and not path.is_file())
+        ):
+            raise ValueError("Release directory contains an invalid member.")
+    for name, (size, sha) in entries.items():
+        path = actual[name]
+        if path.stat().st_size != size or digest(path) != sha:
+            raise ValueError("Release payload changed or differs from its manifest.")
+    return sorted(set(entries) | directories)
+
+
+def _archive_info(
+    name: str, *, directory: bool, size: int = 0, executable: bool = False
+) -> tarfile.TarInfo:
+    info = tarfile.TarInfo(name)
+    info.type = tarfile.DIRTYPE if directory else tarfile.REGTYPE
+    info.mode = 0o755 if directory or executable else 0o644
+    info.uid = info.gid = info.mtime = 0
+    info.uname = info.gname = ""
+    info.size = size
+    return info
+
+
+def _verify_archive(
+    path: Path, root: str, manifest: bytes, entries: dict[str, tuple[int, str]], members: list[str]
+) -> None:
+    expected = [root, f"{root}/manifest.json", *(f"{root}/{name}" for name in members)]
+    with tarfile.open(path, "r:gz") as archive:
+        actual = archive.getmembers()
+        if [item.name for item in actual] != expected:
+            raise ValueError("Release archive member order or names differ.")
+        for item in actual:
+            relative = item.name.removeprefix(root + "/")
+            file_expected = item.name != root and (
+                relative == "manifest.json" or relative in entries
+            )
+            if (
+                item.uid != 0
+                or item.gid != 0
+                or item.mtime != 0
+                or item.mode
+                != (0o755 if not file_expected or relative == "codex-session-gc-native" else 0o644)
+            ):
+                raise ValueError("Release archive metadata differs.")
+            if not file_expected:
+                if not item.isdir():
+                    raise ValueError("Release archive directory differs.")
+                continue
+            if not item.isfile():
+                raise ValueError("Release archive file differs.")
+            stream = archive.extractfile(item)
+            if stream is None:
+                raise ValueError("Release archive file is unavailable.")
+            with stream:
+                hashed = hashlib.sha256()
+                while chunk := stream.read(1024 * 1024):
+                    hashed.update(chunk)
+                sha = hashed.hexdigest()
+            size, wanted = (
+                (len(manifest), hashlib.sha256(manifest).hexdigest())
+                if relative == "manifest.json"
+                else entries[relative]
+            )
+            if item.size != size or sha != wanted:
+                raise ValueError("Release archive payload differs from manifest.")
+
+
+def archive_release(bundle: Path, output: Path) -> tuple[str, int]:
+    """Create a deterministic, manifest-first archive and return its SHA-256 and size."""
+    if (
+        bundle.is_symlink()
+        or not bundle.is_dir()
+        or output.exists()
+        or output.is_symlink()
+        or output.resolve().is_relative_to(bundle.resolve())
+    ):
+        raise ValueError("Archive requires an existing directory and absent external output.")
+    root = bundle.name
+    manifest, entries = _manifest_payload(bundle)
+    members = _release_members(bundle, entries)
+    with tempfile.TemporaryDirectory(prefix=".gc-archive-", dir=output.parent) as temporary:
+        candidate = Path(temporary) / "release.tar.gz"
+        with (
+            candidate.open("wb") as raw,
+            gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as compressed,
+            tarfile.open(fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT) as archive,
+        ):
+            archive.addfile(_archive_info(root, directory=True))
+            path = bundle / "manifest.json"
+            with path.open("rb") as stream:
+                archive.addfile(
+                    _archive_info(f"{root}/manifest.json", directory=False, size=len(manifest)),
+                    stream,
+                )
+            for name in members:
+                path = bundle / name
+                is_directory = name not in entries
+                info = _archive_info(
+                    f"{root}/{name}",
+                    directory=is_directory,
+                    size=0 if is_directory else entries[name][0],
+                    executable=name == "codex-session-gc-native",
+                )
+                if is_directory:
+                    archive.addfile(info)
+                else:
+                    with path.open("rb") as stream:
+                        archive.addfile(info, stream)
+        _verify_archive(candidate, root, manifest, entries, members)
+        identity = (digest(candidate), candidate.stat().st_size)
+        os.link(candidate, output)
+        if (digest(output), output.stat().st_size) != identity:
+            output.unlink()
+            raise ValueError("Published archive identity differs from verified bytes.")
+        return identity
+
+
 def main() -> None:
     """Require source-matched Python files and an independently qualified native helper."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--wheel", required=True, type=Path)
-    parser.add_argument("--helper", required=True, type=Path)
+    parser.add_argument("--wheel", type=Path)
+    parser.add_argument("--helper", type=Path)
+    parser.add_argument("--archive", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     arguments = parser.parse_args()
+    if arguments.archive is not None and (
+        arguments.wheel is not None or arguments.helper is not None
+    ):
+        parser.error("Archive mode cannot combine wheel or helper inputs.")
+    if arguments.archive is None and (arguments.wheel is None or arguments.helper is None):
+        parser.error("Assembly requires wheel and helper inputs.")
     try:
-        assemble(
-            arguments.wheel, arguments.helper, arguments.output, Path(__file__).resolve().parents[1]
-        )
+        if arguments.archive is not None:
+            archive_release(arguments.archive, arguments.output)
+        elif arguments.wheel is not None and arguments.helper is not None:
+            assemble(
+                arguments.wheel,
+                arguments.helper,
+                arguments.output,
+                Path(__file__).resolve().parents[1],
+            )
     except (
         OSError,
         ValueError,

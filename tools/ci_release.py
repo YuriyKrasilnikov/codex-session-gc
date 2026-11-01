@@ -13,6 +13,11 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from codex_session_gc.artifacts.bundle import (
+    MANIFEST_MAX_BYTES,
+    BundleManifestError,
+    parse_manifest,
+)
 from tools import build_release, ci_native, source_map
 from tools.source_map import ArtifactError
 
@@ -50,14 +55,23 @@ def inspect_release(
         "Supplied helper differs from the candidate profile.",
         condition=contract.get("binary_sha256") == list(bytes.fromhex(helper_hash)),
     )
-    manifest = json.loads((bundle / "manifest.json").read_bytes())
+    _require(
+        "Bundle manifest is a symbolic link.", condition=not (bundle / "manifest.json").is_symlink()
+    )
+    try:
+        with (bundle / "manifest.json").open("rb") as stream:
+            parsed = parse_manifest(stream.read(MANIFEST_MAX_BYTES + 1))
+    except BundleManifestError as error:
+        message = "Bundle manifest is invalid."
+        raise ArtifactError(message) from error
+    manifest = parsed.raw
+    _require("Bundle version differs.", condition=parsed.version == version)
     _require(
         "Bundle raw profile identity differs.",
         condition=manifest["wheel_contract_sha256"] == hashlib.sha256(raw_profile).hexdigest()
         and manifest["wheel_source_map_sha256"] == wheel_map.digest,
     )
-    payload = manifest["payload"]
-    _require("Bundle payload must be an object.", condition=isinstance(payload, dict))
+    payload = parsed.files
     names = {path.relative_to(bundle).as_posix() for path in bundle.rglob("*") if path.is_file()}
     expected = (
         set(build_release.DOCUMENTS)
@@ -81,8 +95,7 @@ def inspect_release(
         )
         _require(
             f"Bundle payload differs for {name}.",
-            condition=entry["sha256"] == ci_native.digest(path)
-            and entry["bytes"] == path.stat().st_size,
+            condition=entry.sha256 == ci_native.digest(path) and entry.size == path.stat().st_size,
         )
     _require(
         "Bundle contains a different wheel or helper.",

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import py_compile
@@ -17,7 +18,7 @@ from hatchling.builders.sdist import SdistBuilder
 from hatchling.builders.wheel import WheelBuilder
 
 from tests.test_release import _inputs, _run, _write_wheel
-from tools import ci_native, ci_release, source_map
+from tools import build_release, ci_native, ci_release, source_map
 
 DIST_INFO = "codex_session_gc-1.2.3.dist-info"
 
@@ -411,3 +412,78 @@ def test_malformed_record_is_a_structured_artifact_refusal(
 
     with pytest.raises(source_map.ArtifactError):
         source_map.verify_wheel(wheel, root)
+
+
+def test_release_archive_is_manifest_first_and_deterministic(
+    artifacts: tuple[Path, Path, Path, Path, Path], tmp_path: Path
+) -> None:
+    """The archive's first metadata precedes exactly the declared payload."""
+    _, _, _, bundle, _ = artifacts
+    bundle = bundle.rename(bundle.with_name("codex-session-gc-1.2.3-linux-x86_64"))
+    first, second = tmp_path / "first.tar.gz", tmp_path / "second.tar.gz"
+    first_identity = build_release.archive_release(bundle, first)
+    second_identity = build_release.archive_release(bundle, second)
+    _equal(first.read_bytes(), second.read_bytes())
+    _equal(first.read_bytes()[4:8], b"\0\0\0\0")
+    _equal(first_identity, second_identity)
+    _equal(first_identity, (hashlib.sha256(first.read_bytes()).hexdigest(), first.stat().st_size))
+    with tarfile.open(first, "r:gz") as archive:
+        members = archive.getmembers()
+        _equal(
+            [member.name for member in members[:2]], [bundle.name, f"{bundle.name}/manifest.json"]
+        )
+        manifest = json.loads((bundle / "manifest.json").read_bytes())
+        files = {
+            member.name.removeprefix(bundle.name + "/") for member in members[2:] if member.isfile()
+        }
+        _equal(files, set(manifest["payload"]))
+        _equal(
+            [member.name for member in members[2:]], sorted(member.name for member in members[2:])
+        )
+        _equal(
+            all(member.uid == member.gid == member.mtime == 0 for member in members), expected=True
+        )
+
+
+def test_release_archive_rejects_changed_payload(
+    artifacts: tuple[Path, Path, Path, Path, Path], tmp_path: Path
+) -> None:
+    """An archive cannot admit bytes changed after manifest assembly."""
+    _, _, _, bundle, _ = artifacts
+    bundle = bundle.rename(bundle.with_name("codex-session-gc-1.2.3-linux-x86_64"))
+    (bundle / "NOTICE").write_bytes(b"changed")
+    output = tmp_path / "output.tar.gz"
+    with pytest.raises(ValueError, match="payload"):
+        build_release.archive_release(bundle, output)
+    _equal(output.exists(), expected=False)
+
+
+@pytest.mark.parametrize("bad", [b"{}", b'{"format":', b'{"format":"x","format":"y"}'])
+def test_release_archive_rejects_bad_manifest(
+    artifacts: tuple[Path, Path, Path, Path, Path], tmp_path: Path, bad: bytes
+) -> None:
+    """Unsupported, malformed and duplicate-key manifests cannot be archived."""
+    _, _, _, bundle, _ = artifacts
+    bundle = bundle.rename(bundle.with_name("codex-session-gc-1.2.3-linux-x86_64"))
+    (bundle / "manifest.json").write_bytes(bad)
+    with pytest.raises(ValueError, match=r"."):
+        build_release.archive_release(bundle, tmp_path / "output.tar.gz")
+
+
+def test_release_archive_rejects_old_format_and_undeclared_files(
+    artifacts: tuple[Path, Path, Path, Path, Path], tmp_path: Path
+) -> None:
+    """An old manifest or an extra file cannot become an install archive."""
+    _, _, _, bundle, _ = artifacts
+    bundle = bundle.rename(bundle.with_name("codex-session-gc-1.2.3-linux-x86_64"))
+    manifest_path = bundle / "manifest.json"
+    original = manifest_path.read_bytes()
+    manifest = json.loads(original)
+    manifest["format"] = "codex-session-gc-release-v1"
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="manifest"):
+        build_release.archive_release(bundle, tmp_path / "old.tar.gz")
+    manifest_path.write_bytes(original)
+    (bundle / "unexpected").write_bytes(b"unlisted")
+    with pytest.raises(ValueError, match="undeclared"):
+        build_release.archive_release(bundle, tmp_path / "extra.tar.gz")

@@ -335,10 +335,12 @@ command with `--installed-site-packages /absolute/site-packages`. It compares
 installed project package and metadata bytes, classifying named installer records
 and source-derived bytecode separately. Generated command wrappers and other
 installed distributions are outside that file comparison. CLI/UI/MCP behavior
-still requires separate execution checks. Archive only the verified artifacts:
+still requires separate execution checks. Archive only the verified artifacts. The
+shared archiver writes the v2 manifest before the payload and checks the archive
+against it; use the same archiver for local and CI releases:
 
 ```sh
-tar -C build/release-0.4.0 -czf build/release-0.4.0/codex-session-gc-0.4.0-linux-x86_64.tar.gz codex-session-gc-0.4.0-linux-x86_64
+PYTHONPATH=src .venv/bin/python -m tools.build_release --archive build/release-0.4.0/codex-session-gc-0.4.0-linux-x86_64 --output build/release-0.4.0/codex-session-gc-0.4.0-linux-x86_64.tar.gz
 cd build/release-0.4.0
 sha256sum codex-session-gc-0.4.0-linux-x86_64.tar.gz codex_session_gc-0.4.0-py3-none-any.whl codex_session_gc-0.4.0.tar.gz > SHA256SUMS
 ```
