@@ -11,12 +11,14 @@ import hashlib
 import json
 import os
 import uuid
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
 
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 
+from codex_session_gc import diagnostics
 from codex_session_gc.cli.console_display import discover_helper
 from codex_session_gc.cli.console_tasks import Intent, async_preview, parse_cutoff
 from codex_session_gc.cli.mcp_capability import McpCapability
@@ -94,6 +96,13 @@ class CatalogueService:
         self.snapshot_id: str | None = None
         self.index: CatalogueIndex | None = None
         self._lock = asyncio.Lock()
+
+    async def compatibility_status(self) -> dict[str, Any]:
+        """Observe the startup home and helper without granting cleanup authority."""
+        report = await asyncio.to_thread(
+            diagnostics.inspect_compatibility, self.home, self.operations.helper
+        )
+        return asdict(report)
 
     async def _snapshot(
         self, snapshot_id: str | None, *, refresh: bool = False
@@ -319,7 +328,12 @@ def create_server(
     annotations = ToolAnnotations(
         read_only_hint=True, destructive_hint=False, open_world_hint=False
     )
-    for tool in (service.query_catalogue, service.session_details, service.prepare_cleanup):
+    for tool in (
+        service.query_catalogue,
+        service.session_details,
+        service.prepare_cleanup,
+        service.compatibility_status,
+    ):
         server.tool(annotations=annotations)(tool)
     server.tool(annotations=annotations)(service.cleanup_status)
     if service.capability is McpCapability.CLEANUP:

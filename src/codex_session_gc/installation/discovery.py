@@ -47,9 +47,10 @@ def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-async def _json(
+async def fetch_metadata(
     transport: Transport, url: str, limit: int, network_seconds: float
 ) -> dict[str, object]:
+    """Fetch one bounded JSON object using the caller's explicit network deadline."""
     deadline = asyncio.get_running_loop().time() + network_seconds
     data = bytearray()
 
@@ -104,7 +105,9 @@ def _asset(metadata: dict[str, object], tag: str, version: str) -> tuple[str, Ar
 
 
 async def _commit(transport: Transport, tag: str, limit: int, network_seconds: float) -> str:
-    reference = await _json(transport, f"{_API}/git/ref/tags/{tag}", limit, network_seconds)
+    reference = await fetch_metadata(
+        transport, f"{_API}/git/ref/tags/{tag}", limit, network_seconds
+    )
     if reference.get("ref") != f"refs/tags/{tag}":
         _fail("Resolved Git reference does not match the release tag.")
     obj = reference.get("object")
@@ -116,7 +119,9 @@ async def _commit(transport: Transport, tag: str, limit: int, network_seconds: f
             _fail("Git tag object identity is invalid.")
         if obj["type"] == "commit":
             return sha
-        annotated = await _json(transport, f"{_API}/git/tags/{sha}", limit, network_seconds)
+        annotated = await fetch_metadata(
+            transport, f"{_API}/git/tags/{sha}", limit, network_seconds
+        )
         if annotated.get("sha") != sha or (depth == 0 and annotated.get("tag") != tag):
             _fail("Annotated Git tag identity differs.")
         obj = annotated.get("object")
@@ -136,7 +141,7 @@ async def discover_release(
     else:
         tag, _ = _tag(selector)
         url = f"{_API}/releases/tags/{tag}"
-    metadata = await _json(transport, url, max_metadata_bytes, network_seconds)
+    metadata = await fetch_metadata(transport, url, max_metadata_bytes, network_seconds)
     tag, version = _tag(metadata.get("tag_name"))
     if selector not in ("latest", tag):
         _fail("Release metadata tag does not match the requested tag.")

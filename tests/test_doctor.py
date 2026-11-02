@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sqlite3
 from contextlib import closing
 from dataclasses import replace
 from hashlib import sha256
+from importlib.resources import files
 from shlex import quote
 from typing import TYPE_CHECKING
 
@@ -17,6 +19,13 @@ import pytest
 
 from codex_session_gc import diagnostics
 from codex_session_gc.cli.main import main
+from codex_session_gc.compatibility import observation
+from codex_session_gc.compatibility.record import (
+    BindingState,
+    ProducerObservation,
+    SupportStatus,
+    parse_record,
+)
 from codex_session_gc.execution.closed_work_profile import (
     ContractRefused,
     load_closed_work_contract,
@@ -310,6 +319,13 @@ def test_cli_json_and_text_report_observations(
     _equal(main([*args, "--json"]), 0)
     report = json.loads(capsys.readouterr().out)
     _equal(report["helper"]["status"], "matched")
+    _equal(report["helper"]["sha256"], sha256(helper.read_bytes()).hexdigest())
+    selected = parse_record(
+        files("codex_session_gc.compatibility").joinpath("support.json").read_bytes()
+    )
+    _equal(
+        report["source_support"]["record"]["source_origin"]["scope"], selected.source_origin.scope
+    )
     _equal(
         report["profile"]["sha256"], sha256(load_closed_work_contract().evidence.data).hexdigest()
     )
@@ -317,6 +333,7 @@ def test_cli_json_and_text_report_observations(
     output = capsys.readouterr().out
     _equal("Expected SHA-256:" in output, expected=True)
     _equal("not a global snapshot or permission to delete" in output, expected=True)
+    _equal(f"  Scope: {selected.source_origin.scope}" in output, expected=True)
 
 
 @pytest.mark.parametrize("flags", [["--max-read-bytes", "0"], ["--timeout-seconds", "nan"]])
@@ -408,3 +425,115 @@ def test_symlink_database_is_unavailable_without_following_it(
     report = diagnostics.inspect_compatibility(home, helper)
     _equal(_database(report, DatabaseKind.STATE).status, diagnostics.Status.UNKNOWN)
     _equal(_source(home), before)
+
+
+def test_source_support_is_separate_from_local_execution_observation(
+    environment: tuple[Path, Path],
+) -> None:
+    """A bundled support claim cannot establish producer or native-input identity."""
+    home, helper = environment
+    target = ProducerObservation(
+        repository="openai/codex",
+        commit="6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
+        ref="refs/tags/rust-v0.166.0",
+    )
+    report = diagnostics.inspect_compatibility(home, helper, producer=target)
+    support = report.source_support
+    _equal(report.exit_code, 0)
+    _equal(support.origin, "bundled_static_app_data")
+    _equal(support.claim_verified, expected=False)
+    _equal(support.authorizes_operation, expected=False)
+    _equal(support.native_inputs_independently_observed, expected=False)
+    if support.record is None or support.bindings is None:
+        pytest.fail("Bundled support claim is unavailable")
+    _equal(support.record.status, SupportStatus.SUPPORTED_WITHIN_SCOPE)
+    checks = {item.field: item.state for item in support.bindings.checks}
+    _equal(checks["source_commit"], BindingState.MATCH)
+    _equal(checks["source_ref"], BindingState.MATCH)
+    _equal(checks["producer_binary"], BindingState.UNKNOWN)
+    _equal(checks["native_inputs"], BindingState.UNKNOWN)
+    _equal(checks["report"], BindingState.UNKNOWN)
+    _equal(checks["helper"], BindingState.MISMATCH)
+    _equal(support.bindings.state, BindingState.MISMATCH)
+    _equal(
+        support.profile_declared_native_inputs_sha256,
+        "34a4efb11d12a2f630047952b7ada0c0a5781e6201ca4490e396b31431ec5a86",
+    )
+    _equal(support.profile_native_inputs_origin, "profile_declaration_not_independent_observation")
+
+
+def test_missing_or_malformed_support_record_does_not_change_doctor_exit(
+    environment: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unavailable support claim remains unknown beside otherwise matching local checks."""
+    home, helper = environment
+    record_dir = tmp_path / "record-resource"
+    record_dir.mkdir()
+    monkeypatch.setattr(observation, "files", lambda _package: record_dir)
+    missing = diagnostics.inspect_compatibility(home, helper)
+    _equal(missing.exit_code, 0)
+    _equal(missing.source_support.availability, observation.RecordAvailability.UNKNOWN)
+    _equal(missing.source_support.record, None)
+    (record_dir / "support.json").write_bytes(b'{"malformed":true}')
+    malformed = diagnostics.inspect_compatibility(home, helper)
+    _equal(malformed.exit_code, 0)
+    _equal(malformed.source_support.availability, observation.RecordAvailability.UNKNOWN)
+    _equal(malformed.source_support.authorizes_operation, expected=False)
+
+
+def test_cli_producer_values_are_caller_observations_not_source_proof(
+    environment: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Explicit producer fields compare independently without changing local exit status."""
+    home, helper = environment
+    result = main(
+        [
+            "doctor",
+            "--home",
+            str(home),
+            "--helper",
+            str(helper),
+            "--json",
+            "--producer-repository",
+            "openai/codex",
+            "--producer-commit",
+            "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
+            "--producer-ref",
+            "refs/tags/rust-v0.166.0",
+            "--producer-binary-sha256",
+            "b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8",
+        ]
+    )
+    _equal(result, 0)
+    support = json.loads(capsys.readouterr().out)["source_support"]
+    _equal(support["producer_origin"], "caller_supplied_unverified")
+    _equal(support["claim_verified"], expected=False)
+    _equal(support["authorizes_operation"], expected=False)
+    checks = {item["field"]: item["state"] for item in support["bindings"]["checks"]}
+    _equal(checks["source_commit"], "match")
+    _equal(checks["source_ref"], "match")
+    _equal(checks["producer_binary"], "unknown")
+    _equal(checks["native_inputs"], "unknown")
+
+
+def test_cli_rejects_invalid_producer_identity_before_observation(
+    environment: tuple[Path, Path],
+) -> None:
+    """Malformed caller observations never become a version-based support match."""
+    home, helper = environment
+    with pytest.raises(SystemExit) as failure:
+        main(
+            ["doctor", "--home", str(home), "--helper", str(helper), "--producer-commit", "partial"]
+        )
+    _equal(failure.value.code, 2)
+
+
+def test_source_support_observation_does_not_open_network(
+    environment: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reading a bundled support claim needs no network or target-version lookup."""
+    home, helper = environment
+    monkeypatch.setattr(socket, "socket", lambda *_args, **_kwargs: pytest.fail("network access"))
+    result = diagnostics.inspect_compatibility(home, helper)
+    _equal(result.source_support.origin, observation.RecordOrigin.BUNDLED)
+    _equal(result.source_support.claim_verified, expected=False)

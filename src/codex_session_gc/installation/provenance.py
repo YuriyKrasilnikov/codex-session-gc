@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import stat
@@ -12,6 +13,7 @@ import tempfile
 from enum import StrEnum
 from typing import TYPE_CHECKING, Self
 
+from codex_session_gc.artifacts import ArtifactIdentity, SourceIdentity
 from codex_session_gc.installation.process import (
     OwnedProcessError,
     ProcessFailure,
@@ -22,12 +24,10 @@ from codex_session_gc.installation.process import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from codex_session_gc.artifacts import ArtifactIdentity, SourceIdentity
-
 REPOSITORY = "YuriyKrasilnikov/codex-session-gc"
 SIGNER_WORKFLOW = f"{REPOSITORY}/.github/workflows/artifacts.yml"
 PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
-_OUTPUT_LIMIT = 1024 * 1024
+VERIFIER_OUTPUT_LIMIT = 1024 * 1024
 _TIMEOUT = 120.0
 _LEASE_TOKEN = object()
 
@@ -63,6 +63,46 @@ class ProvenanceRefusalError(Exception):
         super().__init__(reason.value)
 
 
+class VerifierPreflightError(Exception):
+    """The separately trusted verifier cannot satisfy the required policy."""
+
+
+async def preflight_gh(gh: Path, directory: Path, limits: ProcessLimits) -> None:
+    """Check the verifier's required policy options before acquiring an artifact."""
+    if (
+        type(limits.seconds) not in (int, float)
+        or not math.isfinite(limits.seconds)
+        or limits.seconds <= 0
+        or type(limits.output_bytes) is not int
+        or limits.output_bytes <= 0
+    ):
+        message = "Verifier resource bounds must be finite and positive."
+        raise VerifierPreflightError(message)
+    environment = {
+        key: os.environ[key]
+        for key in ("HOME", "PATH", "SSL_CERT_FILE", "SSL_CERT_DIR")
+        if key in os.environ
+    }
+    environment["GH_PROMPT_DISABLED"] = "1"
+    try:
+        output = await run_owned(
+            [str(gh), "attestation", "verify", "--help"],
+            cwd=directory,
+            environment=environment,
+            limits=limits,
+        )
+    except OwnedProcessError as error:
+        message = "Trusted gh cannot provide the required attestation verifier."
+        raise VerifierPreflightError(message) from error
+    text = output.decode("utf-8", errors="replace")
+    if any(
+        re.search(rf"(?<![\w-]){re.escape(option.value)}(?![\w-])", text) is None
+        for option in VerificationOption
+    ):
+        message = "Trusted gh lacks required attestation verification options."
+        raise VerifierPreflightError(message)
+
+
 def _fingerprint(fd: int) -> tuple[int, int, int, int]:
     try:
         info = os.fstat(fd)
@@ -76,19 +116,41 @@ def _fingerprint(fd: int) -> tuple[int, int, int, int]:
 class VerifiedArtifact:
     """Own the verified descriptor for the duration of artifact consumption."""
 
-    def __init__(self, fd: int, fingerprint: tuple[int, int, int, int], *, _token: object) -> None:
+    def __init__(
+        self,
+        fd: int,
+        fingerprint: tuple[int, int, int, int],
+        artifact: ArtifactIdentity,
+        source: SourceIdentity,
+        *,
+        _token: object,
+    ) -> None:
         """Retain a descriptor admitted by provenance verification."""
         if _token is not _LEASE_TOKEN:
             msg = "verified leases are created by provenance verification"
             raise ValueError(msg)
         self._fd = fd
         self._fingerprint = fingerprint
+        self._artifact = artifact
+        self._source = source
         self._offset = 0
 
     def validate(self) -> None:
         """Refuse if the leased file has changed or is closed."""
         if self._fd < 0 or _fingerprint(self._fd) != self._fingerprint:
             raise ProvenanceRefusalError(RefusalReason.ARTIFACT)
+
+    @property
+    def artifact_identity(self) -> ArtifactIdentity:
+        """Return the exact artifact identity verified for this open lease."""
+        self.validate()
+        return self._artifact
+
+    @property
+    def source_identity(self) -> SourceIdentity:
+        """Return the source identity enforced by the verifier for this lease."""
+        self.validate()
+        return self._source
 
     def read(self, size: int) -> bytes:
         """Read the next bytes from the verified descriptor after checking its identity."""
@@ -194,7 +256,7 @@ async def _run_verifier(command: list[str], fd: int, directory: str) -> bytes:
             command,
             cwd=directory,
             environment=environment,
-            limits=ProcessLimits(_TIMEOUT, _OUTPUT_LIMIT),
+            limits=ProcessLimits(_TIMEOUT, VERIFIER_OUTPUT_LIMIT),
             pass_fds=(fd,),
         )
     except OwnedProcessError as error:
@@ -242,7 +304,7 @@ async def _verify_open_artifact(
         raise ProvenanceRefusalError(RefusalReason.OUTPUT)
     if _fingerprint(fd) != before:
         raise ProvenanceRefusalError(RefusalReason.ARTIFACT)
-    return VerifiedArtifact(fd, before, _token=_LEASE_TOKEN)
+    return VerifiedArtifact(fd, before, expected, source, _token=_LEASE_TOKEN)
 
 
 async def verify_artifact(
@@ -257,6 +319,8 @@ async def verify_artifact(
     The caller obtains gh independently and controls the staging file throughout
     verification and consumption. The signature establishes assembly origin.
     """
+    if type(expected) is not ArtifactIdentity or type(source) is not SourceIdentity:
+        raise ProvenanceRefusalError(RefusalReason.ARTIFACT)
     if not trusted_gh.is_absolute():
         raise ProvenanceRefusalError(RefusalReason.VERIFIER_UNAVAILABLE)
     try:

@@ -14,6 +14,10 @@ from enum import StrEnum
 from hashlib import sha256
 from typing import TYPE_CHECKING
 
+from codex_session_gc.compatibility.observation import (
+    SourceSupportObservation,
+    observe_bundled_support,
+)
 from codex_session_gc.execution.closed_work_profile import (
     ContractRefused,
     load_closed_work_contract,
@@ -29,6 +33,7 @@ from codex_session_gc.sqlite_read import DirectReadError, read_transaction
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from codex_session_gc.compatibility.record import ProducerObservation
     from codex_session_gc.execution.closed_work_request import DatabaseContract
 
 
@@ -62,6 +67,7 @@ class DoctorReport:
     profile: Observation
     helper: Observation
     databases: tuple[Observation, ...]
+    source_support: SourceSupportObservation
     kind: str = "compatibility_observations"
     boundary: str = (
         "Separate read-only observations, not a global snapshot or permission to delete. "
@@ -200,6 +206,7 @@ def inspect_compatibility(
     *,
     maximum_read_bytes: int = READ_BYTES,
     timeout_seconds: float = TIMEOUT_SECONDS,
+    producer: ProducerObservation | None = None,
 ) -> DoctorReport:
     """Observe only profile/helper identities and the declared database schemas.
 
@@ -227,19 +234,28 @@ def inspect_compatibility(
                 "A valid installed profile is required before comparing helper bytes.",
             ),
             (),
+            observe_bundled_support(profile_raw=None, helper_sha256=None, producer=producer),
         )
+    profile_observation = Observation(
+        "profile",
+        None,
+        Status.LOADED,
+        contract.source_identity,
+        sha256(contract.evidence.data).hexdigest(),
+    )
+    helper_observation = _helper(helper, contract.binary_sha256, maximum_read_bytes, deadline)
+    database_observations = tuple(
+        _database(home / item.kind.value, item, maximum_read_bytes, deadline)
+        for item in contract.databases
+    )
     return DoctorReport(
-        Observation(
-            "profile",
-            None,
-            Status.LOADED,
-            contract.source_identity,
-            sha256(contract.evidence.data).hexdigest(),
-        ),
-        _helper(helper, contract.binary_sha256, maximum_read_bytes, deadline),
-        tuple(
-            _database(home / item.kind.value, item, maximum_read_bytes, deadline)
-            for item in contract.databases
+        profile_observation,
+        helper_observation,
+        database_observations,
+        observe_bundled_support(
+            profile_raw=contract.evidence.data,
+            helper_sha256=helper_observation.sha256,
+            producer=producer,
         ),
     )
 
@@ -255,4 +271,26 @@ def terminal(report: DoctorReport) -> str:
             lines.append(f"  SHA-256: {item.sha256}")
         if item.expected_sha256 is not None:
             lines.append(f"  Expected SHA-256: {item.expected_sha256}")
+    support = report.source_support
+    lines.append(f"source support: {support.availability} — {support.detail}")
+    lines.append(f"  Origin: {support.origin}")
+    if support.record is not None:
+        record = support.record
+        lines.append(f"  Claimed status: {record.status}")
+        lines.append(f"  Scope: {record.source_origin.scope}")
+        lines.append(
+            f"  Target source: {record.target.repository} "
+            f"{record.target.source.ref} {record.target.source.commit}"
+        )
+        lines.append(f"  Source report SHA-256: {record.report_sha256}")
+        lines.extend(f"  Condition: {condition.description}" for condition in record.conditions)
+    if support.bindings is not None:
+        lines.append(f"  Identity binding: {support.bindings.state}")
+        lines.extend(f"    {check.field}: {check.state}" for check in support.bindings.checks)
+    if support.profile_declared_native_inputs_sha256 is not None:
+        lines.append(
+            "  Profile-declared native inputs SHA-256 "
+            "(not an independent source observation): "
+            f"{support.profile_declared_native_inputs_sha256}"
+        )
     return "\n".join(lines)

@@ -58,7 +58,8 @@ def _ensure_directory(path: Path) -> None:
 
 
 @contextmanager
-def _lock(layout: InstallLayout) -> Iterator[None]:
+def installation_lock(layout: InstallLayout) -> Iterator[None]:
+    """Serialize cooperating changes to one owner-controlled installation base."""
     _owned_directory(layout.base)
     if layout.base.resolve(strict=True) != layout.base:
         _fail("Installation base must not traverse aliases.")
@@ -335,7 +336,7 @@ async def install(
 ) -> InstallReceipt:
     """Create a verified final-path environment without switching any active link."""
     _validate_options(options, installation_id)
-    with _lock(layout):
+    with installation_lock(layout):
         _ensure_directory(layout.releases)
         _ensure_directory(layout.receipts)
         _require_settled_receipts(layout)

@@ -211,7 +211,7 @@ def test_output_cap_and_descendant_pipe(
     artifact, identity, source, verifier = inputs
     monkeypatch.setattr(provenance, "_TIMEOUT", 3.0)
     verifier.write_text(f"#!{sys.executable}\nprint('x' * 20000)\n")
-    monkeypatch.setattr(provenance, "_OUTPUT_LIMIT", 100)
+    monkeypatch.setattr(provenance, "VERIFIER_OUTPUT_LIMIT", 100)
     with pytest.raises(provenance.ProvenanceRefusalError, match="output"):
         run_verify(artifact, identity, source, verifier)
     verifier.write_text(f"#!{sys.executable}\nimport os, time\nif os.fork() == 0: time.sleep(20)\n")

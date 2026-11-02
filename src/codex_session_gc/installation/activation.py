@@ -9,7 +9,7 @@ import json
 import os
 import re
 import stat
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -17,16 +17,20 @@ from typing import TYPE_CHECKING, NoReturn
 from uuid import UUID, uuid4
 
 from codex_session_gc.artifacts.bundle import MANIFEST_MAX_BYTES, parse_manifest
+from codex_session_gc.installation.model import CompletedInstallation, InstallBinding
 from codex_session_gc.installation.payload import _wheel_binding
 from codex_session_gc.installation.transaction import (
     InstallationError,
-    _lock,
     _owned_directory,
     _read_receipt,
     _valid_link_record,
+    _validate_receipt,
+    installation_lock,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from codex_session_gc.installation.model import InstallLayout
 
 
@@ -182,6 +186,30 @@ def _checked_release(layout: InstallLayout, data: dict[str, object], resources: 
     return root
 
 
+@contextmanager
+def completed_installation(
+    layout: InstallLayout, installation_id: UUID
+) -> Iterator[CompletedInstallation]:
+    """Hold verified completed-release descriptors; callers lock separately for mutation."""
+    _owned_directory(layout.base)
+    if layout.base.resolve(strict=True) != layout.base:
+        _fail("Installation base must not traverse aliases.")
+    _validate_receipt(layout, layout.receipts / f"{installation_id}.json")
+    data = _receipt(layout, installation_id)
+    with ExitStack() as resources:
+        root = _checked_release(layout, data, resources)
+        binding = data.get("binding")
+        if not isinstance(binding, dict):
+            _fail("Installation receipt binding is unavailable.")
+        yield CompletedInstallation(
+            installation_id,
+            root,
+            InstallBinding(
+                binding["manifest_sha256"], binding["launcher_sha256"], binding["launcher_size"]
+            ),
+        )
+
+
 def _link_identity(parent_fd: int, name: str) -> LinkIdentity | None:
     try:
         info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
@@ -275,7 +303,7 @@ def activate(
     layout: InstallLayout, installation_id: UUID, link: Path, expected: ExpectedLink
 ) -> ActivationStatus:
     """Record an intent, then conditionally switch one caller-observed CLI symlink."""
-    with _lock(layout), ExitStack() as resources:
+    with installation_lock(layout), ExitStack() as resources:
         data = _receipt(layout, installation_id)
         if data.get("activation") is not None:
             _fail("This installation already has an activation intent.")
@@ -414,7 +442,7 @@ def activation_status(layout: InstallLayout, installation_id: UUID) -> Activatio
 
 def reconcile_activation(layout: InstallLayout, installation_id: UUID) -> ActivationStatus:
     """Record an observed terminal state without retrying or reversing the switch."""
-    with _lock(layout):
+    with installation_lock(layout):
         status = activation_status(layout, installation_id)
         if status is ActivationStatus.UNKNOWN:
             return status

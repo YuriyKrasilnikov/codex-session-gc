@@ -1,0 +1,75 @@
+{
+  "conditions": [
+    {
+      "description": "The explicitly selected work is closed, and related fork, resume and publication operations have finished; this includes selected-thread metadata updates. Unrelated work may continue."
+    },
+    {
+      "description": "The selected rollout locations and every affected database and log location use the qualified local filesystem and cooperative writer and SQLite locks."
+    },
+    {
+      "description": "No NFS or cross-host filesystem behavior is covered, and no offline database cutover or arbitrary operator replacement may run concurrently."
+    },
+    {
+      "description": "A catalogue activity label, age or a writer-lock observation alone does not certify quiescence; exact native ownership and fresh execution checks remain required."
+    },
+    {
+      "description": "This scoped assessment does not certify historical-body integrity, a complete Core lifecycle, generic Rust equivalence or the source and signature of an observed producer binary."
+    }
+  ],
+  "coverage_complete": true,
+  "coverage_gaps": [],
+  "execution": {
+    "helper_sha256": "a21f923664a98c096758eca54c91f2d79b507dd8576793f1b4fe214b86313e4d",
+    "native_inputs_sha256": "34a4efb11d12a2f630047952b7ada0c0a5781e6201ca4490e396b31431ec5a86",
+    "profile_sha256": "17d36bd25ed15ca5a28e02ef0adee8ce8cfc3af4e8ec98463629e9fda94ca38b"
+  },
+  "record_version": 1,
+  "report_sha256": "a91c2ac5d7d7467a28385e8ba82c017d06800f5d873b3ba7c2cec60a584a25ea",
+  "review": {
+    "scope": "Selected closed-work cleanup on matching qualified storage with cooperative local locking; scoped manual source and witness assessment, not a generic no-impact or whole-Cargo conclusion. The full source comparison remains UNKNOWN.",
+    "source": "scoped-support-acceptance:sha256:684e5a419173db9ce4f864532791c17aefc31f52583fd6024d9465401e1a2ad6"
+  },
+  "source_origin": {
+    "scope": "Selected closed-work cleanup on matching qualified storage with cooperative local locking; scoped manual source and witness assessment, not a generic no-impact or whole-Cargo conclusion. The full source comparison remains UNKNOWN.",
+    "source": "https://github.com/openai/codex/tree/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856"
+  },
+  "status": "supported_within_scope",
+  "target": {
+    "observed_binary_sha256": null,
+    "repository": "openai/codex",
+    "source": {
+      "commit": "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
+      "ref": "refs/tags/rust-v0.166.0"
+    }
+  },
+  "witnesses": [
+    {
+      "reference": "native-qualification-id:sha256:5b37875fdf3045d3d6f49a857b7a7955cd69f7353fea039bc0c27d4b7ad94d87",
+      "scope": "Selected storage, exact effects, retained dependencies and cooperative writer ownership."
+    },
+    {
+      "reference": "native-qualification-receipt:sha256:7d0dfb45e2c0ae07940305432de93a3c5cb82c17c04ab2377907f56cc058e688",
+      "scope": "Bounded disposable native cases and one observed stock producer writer-contention witness."
+    },
+    {
+      "reference": "installed-qualification-summary:sha256:cb84ee75605af35890d8642207490ce072e52ff6ada18bd0bfa597dd54aa3fd3",
+      "scope": "Installed-wheel consumer, terminal and attachment cases on disposable storage."
+    },
+    {
+      "reference": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/message-board/src/local/lifecycle.rs#L95-L108 sha256:e065a2c070b2012bbbf19bbd372e8a866f7c6c4870f4d94fdabb72e620736fe5",
+      "scope": "Board lifecycle tombstone checks inside the retained write transaction."
+    },
+    {
+      "reference": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/message-board/src/local/setup.rs#L61-L74 sha256:65ab0c965050975909cc037b8dbbba926138438e9fbc656657621f8b4aca872d",
+      "scope": "Board setup uses the same tombstone guard."
+    },
+    {
+      "reference": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/state/src/sqlite/connection.rs sha256:81952e24fe6c2bb29380632062cd4822bbb748911868ee32ff12be979446e4f8",
+      "scope": "SQLite initialization and managed journal-mode policy within the stated filesystem conditions."
+    },
+    {
+      "reference": "scoped-assessment:sha256:8f534b0c64320f74c973e775de3297cf4dfb23ed8d81dd73ea236beaa8054b54",
+      "scope": "Source and runtime evidence input to the scoped acceptance."
+    }
+  ]
+}

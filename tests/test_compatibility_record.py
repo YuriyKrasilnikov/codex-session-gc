@@ -7,10 +7,17 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import FrozenInstanceError, replace
+from importlib.resources import files
 from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from codex_session_gc.compatibility.observation import (
+    RecordAvailability,
+    RecordOrigin,
+    observe_bundled_support,
+    observe_record,
+)
 from codex_session_gc.compatibility.record import (
     MAX_RECORD_BYTES,
     BindingState,
@@ -21,6 +28,7 @@ from codex_session_gc.compatibility.record import (
     observe_bindings,
     parse_record,
 )
+from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -243,3 +251,69 @@ def test_unresolved_coverage_is_distinct_and_immutable() -> None:
         setattr(record.conditions[0], field, "changed")
     with pytest.raises(FrozenInstanceError):
         setattr(record.coverage_gaps[0], field, "changed")
+
+
+def test_bundled_record_is_exact_scoped_unverified_claim() -> None:
+    """The shipped resource remains a scoped claim tied to the current profile."""
+    raw = files("codex_session_gc.compatibility").joinpath("support.json").read_bytes()
+    profile = files("codex_session_gc.execution").joinpath("closed_work_contract.json").read_bytes()
+    contract = load_closed_work_contract()
+    record = parse_record(raw)
+    observed = observe_bundled_support(
+        profile_raw=profile, helper_sha256=contract.binary_sha256.hex()
+    )
+    if observed.bindings is None:
+        raise AssertionError
+    checks = {item.field: item.state for item in observed.bindings.checks}
+    if (
+        record.status is not SupportStatus.SUPPORTED_WITHIN_SCOPE
+        or not record.coverage_complete
+        or record.coverage_gaps
+        or not record.conditions
+        or not record.witnesses
+        or record.review is None
+        or observed.origin is not RecordOrigin.BUNDLED
+        or observed.availability is not RecordAvailability.AVAILABLE
+        or observed.record_sha256 != hashlib.sha256(raw).hexdigest()
+        or observed.claim_verified
+        or observed.authorizes_operation
+        or observed.native_inputs_independently_observed
+        or checks["helper"] is not BindingState.MATCH
+        or checks["profile"] is not BindingState.MATCH
+        or checks["native_inputs"] is not BindingState.UNKNOWN
+        or checks["report"] is not BindingState.UNKNOWN
+    ):
+        raise AssertionError
+
+
+def test_caller_record_origin_is_unverified_even_with_matching_source() -> None:
+    """A caller's matching synthetic claim never proves binary origin or authority."""
+    profile = b'{"synthetic":"profile"}'
+    data = _record()
+    target = cast("dict[str, object]", data["target"])
+    target["observed_binary_sha256"] = None
+    execution = cast("dict[str, object]", data["execution"])
+    execution["profile_sha256"] = hashlib.sha256(profile).hexdigest()
+    observed = observe_record(
+        json.dumps(data).encode(),
+        profile_raw=profile,
+        helper_sha256=_HELPER,
+        producer=ProducerObservation("example/project", _COMMIT, _REF, _BINARY),
+    )
+    if observed.bindings is None:
+        raise AssertionError
+    checks = {item.field: item.state for item in observed.bindings.checks}
+    if (
+        observed.origin is not RecordOrigin.CALLER
+        or observed.claim_verified
+        or observed.authorizes_operation
+        or observed.native_inputs_independently_observed
+        or checks["source_commit"] is not BindingState.MATCH
+        or checks["helper"] is not BindingState.MATCH
+        or checks["profile"] is not BindingState.MATCH
+        or checks["producer_binary"] is not BindingState.UNKNOWN
+        or checks["native_inputs"] is not BindingState.UNKNOWN
+        or checks["report"] is not BindingState.UNKNOWN
+        or observed.bindings.state is not BindingState.UNKNOWN
+    ):
+        raise AssertionError

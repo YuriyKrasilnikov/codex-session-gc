@@ -11,7 +11,6 @@ import json
 import math
 import os
 import platform
-import re
 import shutil
 import stat
 import sys
@@ -36,10 +35,11 @@ from codex_session_gc.installation.discovery import DiscoveryError, discover_rel
 from codex_session_gc.installation.download import DownloadError, HttpsTransport, download_asset
 from codex_session_gc.installation.model import InstallLayout, InstallOptions
 from codex_session_gc.installation.payload import PayloadRefusalError
-from codex_session_gc.installation.process import OwnedProcessError, ProcessLimits, run_owned
+from codex_session_gc.installation.process import OwnedProcessError, ProcessLimits
 from codex_session_gc.installation.provenance import (
     ProvenanceRefusalError,
-    VerificationOption,
+    VerifierPreflightError,
+    preflight_gh,
     verify_artifact,
 )
 from codex_session_gc.installation.transaction import (
@@ -144,32 +144,6 @@ def _tool(explicit: Path | None, name: str) -> Path:
     if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
         _fail(f"The separately trusted {name} executable must be an absolute executable file.")
     return path.resolve(strict=True)
-
-
-async def preflight_gh(gh: Path, directory: Path, limits: Limits) -> None:
-    """Require the local verifier command and every canonical policy option before download."""
-    environment = {
-        key: os.environ[key]
-        for key in ("HOME", "PATH", "SSL_CERT_FILE", "SSL_CERT_DIR")
-        if key in os.environ
-    }
-    environment["GH_PROMPT_DISABLED"] = "1"
-    try:
-        output = await run_owned(
-            [str(gh), "attestation", "verify", "--help"],
-            cwd=directory,
-            environment=environment,
-            limits=ProcessLimits(limits.network_seconds, limits.output_bytes),
-        )
-    except OwnedProcessError as error:
-        message = "Trusted gh cannot provide the required attestation verifier."
-        raise InstallerError(message) from error
-    text = output.decode("utf-8", errors="replace")
-    if any(
-        re.search(rf"(?<![\w-]){re.escape(option.value)}(?![\w-])", text) is None
-        for option in VerificationOption
-    ):
-        _fail("Trusted gh lacks required attestation verification options.")
 
 
 def _ensure_directory(path: Path) -> None:
@@ -337,7 +311,14 @@ async def execute(request: Request, transport: Transport) -> dict[str, object]:
         _fail("Installation requires separately trusted executables.")
     with tempfile.TemporaryDirectory(prefix="codex-gc-download-") as temporary:
         staging = Path(temporary)
-        await preflight_gh(request.tools.gh, staging, request.limits)
+        try:
+            await preflight_gh(
+                request.tools.gh,
+                staging,
+                ProcessLimits(request.limits.network_seconds, request.limits.output_bytes),
+            )
+        except VerifierPreflightError as error:
+            raise InstallerError(str(error)) from error
         release = await discover_release(
             transport,
             request.release,

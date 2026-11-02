@@ -75,6 +75,15 @@ class InstallReceipt:
 
 
 @dataclass(frozen=True, slots=True)
+class CompletedInstallation:
+    """One verified completed installation while its owner holds descriptors."""
+
+    installation_id: UUID
+    release: Path
+    binding: InstallBinding
+
+
+@dataclass(frozen=True, slots=True)
 class InstallOptions:
     """Explicit trusted executables and resource bounds for installation."""
 

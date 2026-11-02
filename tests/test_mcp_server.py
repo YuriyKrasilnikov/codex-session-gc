@@ -13,7 +13,7 @@ import subprocess
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -23,6 +23,7 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
+from codex_session_gc import diagnostics
 from codex_session_gc.cli import console_tasks
 from codex_session_gc.cli.console_tasks import (
     Intent,
@@ -147,6 +148,7 @@ def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> N
                 "apply_cleanup",
                 "cleanup_status",
                 "reconcile_cleanup",
+                "compatibility_status",
             }
             queried = _data(await session.call_tool("query_catalogue", {"limit": 1}))
             assert len(queried["histories"]) == 1
@@ -232,7 +234,21 @@ def test_read_only_sdk_exposes_observation_without_cleanup_operation_or_receipt(
                 "session_details",
                 "prepare_cleanup",
                 "cleanup_status",
+                "compatibility_status",
             }
+            diagnostic_tool = next(
+                tool for tool in tools.tools if tool.name == "compatibility_status"
+            )
+            assert "home" not in diagnostic_tool.input_schema.get("properties", {})
+            assert "helper" not in diagnostic_tool.input_schema.get("properties", {})
+            support = _data(await session.call_tool("compatibility_status", {}))["source_support"]
+            assert support["origin"] == "bundled_static_app_data"
+            assert support["availability"] == "available"
+            assert support["claim_verified"] is False
+            assert support["authorizes_operation"] is False
+            assert support["producer_origin"] == "not_observed"
+            direct = await asyncio.to_thread(diagnostics.inspect_compatibility, home, None)
+            assert support == json.loads(json.dumps(asdict(direct.source_support)))
             catalogue = _data(await session.call_tool("query_catalogue", {}))
             snapshot = catalogue["snapshot_id"]
             details = _data(
@@ -411,6 +427,7 @@ def test_actual_adapter_cancellation_reaps_owned_worker_and_removes_copies(tmp_p
     bootstrap = """
 import asyncio,json,os,sys
 from pathlib import Path
+from codex_session_gc import diagnostics
 from codex_session_gc.cli import console_tasks
 from codex_session_gc.cli.mcp_server import run
 original=asyncio.create_subprocess_exec
