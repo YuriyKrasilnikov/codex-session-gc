@@ -7,6 +7,15 @@ Explicit Guardian histories can also be selected. Their historical parent associ
 does not select or require deletion of the parent. Age is a caller-supplied filter,
 not a fixed retention policy.
 
+## What is new in 0.5.0
+
+A matched installer stages releases alongside older consumers and reports an
+explicit MCP command. The cleanup contract recognizes attached histories and
+the state schema at migration 62. Doctor and MCP can compare an explicitly
+imported source-support record with the current helper and profile; that record
+does not authorize cleanup. The terminal keeps essential controls visible while
+its content scrolls in compact windows.
+
 ## Download and install
 
 The 0.5.0 installation workflow uses a matched Linux x86_64 bundle and a
@@ -15,7 +24,7 @@ verify their attestations before using them. Python 3.14 or newer, `uv` and a
 separately trusted GitHub CLI (`gh`) are prerequisites. The qualified deployment
 is Ubuntu 26.04 LTS, glibc 2.43;
 other environments require qualification. The native contract uses wire 6, the
-exact state schema through migration 62 and the bundled companion schemas.
+exact state schema and migration 62, and the specified companion schemas.
 
 Obtain the full 40-character assembly source commit independently from a trusted
 release record. Use a trusted `gh` whose `attestation verify --help` includes
@@ -72,7 +81,12 @@ requires network access and does not require a Rust toolchain.
 For an existing installation, retain old receipt consumers and follow
 [recovery and upgrades](docs/recovery.md). Consumers of the
 [0.4.0 release](https://github.com/YuriyKrasilnikov/codex-session-gc/releases/tag/v0.4.0)
-must retain it while their unresolved receipts require it.
+must retain it while their unresolved receipts require it. A version directory
+already present in an application directory is not replaced. To install another
+copy of 0.5.0, choose both a fresh `--install-dir` and a fresh `--bin-dir`; use
+the resulting absolute CLI and reported MCP command. This does not switch a
+launcher in the old application directory. See the replacement steps in
+[recovery and upgrades](docs/recovery.md#replace-an-existing-050-installation).
 
 ## Source checkout
 
