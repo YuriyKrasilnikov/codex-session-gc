@@ -14,6 +14,21 @@
     },
     {
       "description": "This scoped assessment does not certify historical-body integrity, a complete Core lifecycle, generic Rust equivalence or the source and signature of an observed producer binary."
+    },
+    {
+      "description": "Relevant local source, caller and generated-input effects were reviewed within the declared scope; external implementation, compiler, feature-matrix and runtime configuration equivalence are not established."
+    },
+    {
+      "description": "Only qualified owner, provider, attachment and Guardian representations are covered; unsupported Internal Guardian selections remain protected or refused."
+    },
+    {
+      "description": "This record does not establish producer binary identity, verify its own origin, prove current quiescence or authorize a cleanup operation."
+    },
+    {
+      "description": "The actual producer and helper use matching qualified roots for the state database, companion databases, logs and selected rollout locations. Neither this record nor the helper request independently observes that the producer uses those locations."
+    },
+    {
+      "description": "Ordinary cache, plugin, process and output paths do not alias selected storage locations."
     }
   ],
   "coverage_complete": true,
@@ -24,13 +39,13 @@
     "profile_sha256": "17d36bd25ed15ca5a28e02ef0adee8ce8cfc3af4e8ec98463629e9fda94ca38b"
   },
   "record_version": 1,
-  "report_sha256": "a91c2ac5d7d7467a28385e8ba82c017d06800f5d873b3ba7c2cec60a584a25ea",
+  "report_sha256": "096ca2523efeaba64de35ba7a2f4a2697c0838bc46a6ec7cb2a54aace326f8d2",
   "review": {
-    "scope": "Selected closed-work cleanup on matching qualified storage with cooperative local locking; scoped manual source and witness assessment, not a generic no-impact or whole-Cargo conclusion. The full source comparison remains UNKNOWN.",
-    "source": "scoped-support-acceptance:sha256:684e5a419173db9ce4f864532791c17aefc31f52583fd6024d9465401e1a2ad6"
+    "scope": "Selected closed-work cleanup on matching qualified local storage; scoped source-effect assessment and bounded observations, not generic Rust or producer binary equivalence.",
+    "source": "scoped-source-coverage-decision:sha256:20c7f99cb300dbeb09f570f5199c75eb6ccd378bf4d6af3792bfddea5f6c89c2"
   },
   "source_origin": {
-    "scope": "Selected closed-work cleanup on matching qualified storage with cooperative local locking; scoped manual source and witness assessment, not a generic no-impact or whole-Cargo conclusion. The full source comparison remains UNKNOWN.",
+    "scope": "Selected closed-work cleanup on matching qualified local storage; scoped source-effect assessment and bounded observations, not generic Rust or producer binary equivalence.",
     "source": "https://github.com/openai/codex/tree/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856"
   },
   "status": "supported_within_scope",
@@ -70,6 +85,22 @@
     {
       "reference": "scoped-assessment:sha256:8f534b0c64320f74c973e775de3297cf4dfb23ed8d81dd73ea236beaa8054b54",
       "scope": "Source and runtime evidence input to the scoped acceptance."
+    },
+    {
+      "reference": "source-assessment-bytes:sha256:cb68fd0f9d1e3fa237d6e80ef2dea59265e75c00e857fd6fdd79899955f69871",
+      "scope": "Exact reviewed source assessment bytes, including scoped coverage and applicability conditions."
+    },
+    {
+      "reference": "source-assessment-identity:sha256:8b5a4c4a5e3b5688c7dff3294e0fb372fbf9179382529154863c2a1596fc940c",
+      "scope": "Canonical normalized assessment identity for evaluation against the bound source report."
+    },
+    {
+      "reference": "scoped-source-comparison-repeat:sha256:93218f6b69246811e2f8de5ff8e39325078591c5e934ad57e44b86ae6484c207",
+      "scope": "Repeated immutable source observation with the same execution identities; the repeat used the earlier equivalent assessment wording."
+    },
+    {
+      "reference": "scoped-assessment-evaluation:sha256:5d429be4f7baf44aa34f3c89b2c9bc0d496137336b8a0bd8d47a059e2c94e463",
+      "scope": "Pure evaluation of the final assessment against the retained comparison report."
     }
   ]
 }
