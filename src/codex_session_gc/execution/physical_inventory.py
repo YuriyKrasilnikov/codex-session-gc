@@ -5,6 +5,9 @@
 from __future__ import annotations
 
 import os
+import stat
+from contextlib import closing, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,26 +32,66 @@ from codex_session_gc.execution.closed_work_request import (
     CollectionBudget,
     HeaderObservation,
     PreparationRefused,
-    is_empty_regular,
-    observe_header,
+    _absolute,
+    _empty_descriptor,
+    _observe_header_descriptor,
 )
 from codex_session_gc.planning.physical_lineage import normalize_history_providers
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Iterator, Mapping
 
 
-def _files(home: Path) -> Iterator[Path]:
+@dataclass(frozen=True, slots=True)
+class _Entry:
+    path: Path
+    parent_fd: int
+
+
+@contextmanager
+def _leaf(entry: _Entry) -> Iterator[int]:
+    """Own one regular file opened under a live traversal descriptor."""
+    _absolute(entry.path)
+    descriptor = os.open(
+        entry.path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=entry.parent_fd
+    )
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            message = "Only regular native input files are supported."
+            raise PreparationRefused(message)
+        yield descriptor
+    finally:
+        os.close(descriptor)
+
+
+def _open_directory(path: Path) -> int:
+    """Open every component of a managed namespace without following aliases."""
+    _absolute(path)
+    descriptor = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.parts[1:]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        result = descriptor
+        descriptor = -1
+        return result
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _files(home: Path) -> Generator[_Entry]:
     for name in ("sessions", "archived_sessions"):
         root = home / name
         try:
-            descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            descriptor = _open_directory(root)
         except FileNotFoundError:
             continue
         yield from _directory(descriptor, root)
 
 
-def _directory(descriptor: int, path: Path) -> Iterator[Path]:
+def _directory(descriptor: int, path: Path) -> Generator[_Entry]:
     try:
         with os.scandir(descriptor) as entries:
             for entry in entries:
@@ -62,7 +105,7 @@ def _directory(descriptor: int, path: Path) -> Iterator[Path]:
                     )
                     yield from _directory(nested, child)
                 elif entry.is_file(follow_symlinks=False):
-                    yield child
+                    yield _Entry(child, descriptor)
                 else:
                     message = "A managed physical namespace contains an unsupported object."
                     raise PreparationRefused(message)
@@ -138,47 +181,62 @@ def observe_inventory(  # noqa: C901
     items = []
     headers = {}
     seen = set()
-    for path in _files(home):
-        budget.check()
-        representation = (
-            PhysicalRepresentation.ZSTD
-            if path.name.endswith(".jsonl.zst")
-            else PhysicalRepresentation.PLAIN
-        )
-        empty = is_empty_regular(path)
-        try:
-            ownership = ownership_from_path(path, representation)
-        except InvalidRecordError:
-            if empty:
-                continue
-            raise
-        if ownership.rollout_id in seen:
-            message = "One physical rollout has duplicate or competing representations."
-            raise PreparationRefused(message)
-        seen.add(ownership.rollout_id)
-        if empty:
-            row = current_rows.get(str(ownership.thread_id.value))
-            raw = None if row is None else Path(str(row["rollout_path"]))
-            plain = path.with_suffix("") if representation is PhysicalRepresentation.ZSTD else path
-            if ownership.thread_id in capture_owners or raw in (
-                plain,
-                plain.with_name(plain.name + ".zst"),
-            ):
-                message = "A selected or current physical history is empty."
-                raise PreparationRefused(message)
-            continue
-        selected = ownership.thread_id in capture_owners
-        header = observe_header(
-            path, budget, require_stable_extent=selected, enforce_extent_limit=selected
-        )
-        item = _metadata(header, representation)
-        items.append(item)
-        row = current_rows.get(str(ownership.thread_id.value))
-        if row is not None and ownership.thread_id in capture_owners:
-            raw = Path(str(row["rollout_path"]))
-            plain = path.with_suffix("") if representation is PhysicalRepresentation.ZSTD else path
-            if raw in (plain, plain.with_name(plain.name + ".zst")):
-                headers[path] = header
+    with closing(_files(home)) as entries:
+        for entry in entries:
+            budget.check()
+            with _leaf(entry) as descriptor:
+                path = entry.path
+                representation = (
+                    PhysicalRepresentation.ZSTD
+                    if path.name.endswith(".jsonl.zst")
+                    else PhysicalRepresentation.PLAIN
+                )
+                empty = _empty_descriptor(path, descriptor)
+                try:
+                    ownership = ownership_from_path(path, representation)
+                except InvalidRecordError:
+                    if empty:
+                        continue
+                    raise
+                if ownership.rollout_id in seen:
+                    message = "One physical rollout has duplicate or competing representations."
+                    raise PreparationRefused(message)
+                seen.add(ownership.rollout_id)
+                if empty:
+                    row = current_rows.get(str(ownership.thread_id.value))
+                    raw = None if row is None else Path(str(row["rollout_path"]))
+                    plain = (
+                        path.with_suffix("")
+                        if representation is PhysicalRepresentation.ZSTD
+                        else path
+                    )
+                    if ownership.thread_id in capture_owners or raw in (
+                        plain,
+                        plain.with_name(plain.name + ".zst"),
+                    ):
+                        message = "A selected or current physical history is empty."
+                        raise PreparationRefused(message)
+                    continue
+                selected = ownership.thread_id in capture_owners
+                header = _observe_header_descriptor(
+                    path,
+                    descriptor,
+                    budget,
+                    require_stable_extent=selected,
+                    enforce_extent_limit=selected,
+                )
+                item = _metadata(header, representation)
+                items.append(item)
+                row = current_rows.get(str(ownership.thread_id.value))
+                if row is not None and ownership.thread_id in capture_owners:
+                    raw = Path(str(row["rollout_path"]))
+                    plain = (
+                        path.with_suffix("")
+                        if representation is PhysicalRepresentation.ZSTD
+                        else path
+                    )
+                    if raw in (plain, plain.with_name(plain.name + ".zst")):
+                        headers[path] = header
     pointers = []
     for owner, row in current_rows.items():
         raw = Path(str(row["rollout_path"]))

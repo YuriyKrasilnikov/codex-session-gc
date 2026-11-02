@@ -818,17 +818,22 @@ def _read_transaction(source: Path, budget: CollectionBudget) -> Iterator[sqlite
     budget.check()
 
 
+def _empty_descriptor(path: Path, descriptor: int) -> bool:
+    """Observe an empty borrowed regular descriptor and its current absolute path."""
+    before = os.fstat(descriptor)
+    if before.st_size != 0:
+        return False
+    after = os.fstat(descriptor)
+    if _identity(before) != _identity(after) or _sample(path) != (after.st_dev, after.st_ino):
+        raise PreparationRefused("An empty namespace object changed during observation.")
+    return True
+
+
 def is_empty_regular(path: Path) -> bool:
     """Observe definitely empty regular input without admitting a filename or ownership."""
     descriptor = _open(path)
     try:
-        before = os.fstat(descriptor)
-        if before.st_size != 0:
-            return False
-        after = os.fstat(descriptor)
-        if _identity(before) != _identity(after) or _sample(path) != (after.st_dev, after.st_ino):
-            raise PreparationRefused("An empty namespace object changed during observation.")
-        return True
+        return _empty_descriptor(path, descriptor)
     finally:
         os.close(descriptor)
 
@@ -843,56 +848,74 @@ def observe_header(
     """Capture only the bounded first line; body length does not affect read work."""
     descriptor = _open(path)
     try:
-        before = os.fstat(descriptor)
-        if enforce_extent_limit and before.st_size > budget.limits.maximum_rollout_bytes:
-            raise PreparationRefused("The selected rollout exceeds its size bound.")
-        representation = (
-            PhysicalRepresentation.ZSTD
-            if path.name.endswith(".jsonl.zst")
-            else PhysicalRepresentation.PLAIN
+        return _observe_header_descriptor(
+            path,
+            descriptor,
+            budget,
+            require_stable_extent=require_stable_extent,
+            enforce_extent_limit=enforce_extent_limit,
         )
-        try:
-            captured = read_bounded_header(
-                descriptor,
-                representation,
-                limits=HeaderReadLimits(
-                    budget.limits.maximum_header_bytes,
-                    budget.limits.maximum_total_bytes - budget.used,
-                    require_stable_extent,
-                ),
-                charge=budget.check,
-            )
-        except HeaderReadError as error:
-            raise PreparationRefused(str(error)) from error
-        after = os.fstat(descriptor)
-        if (require_stable_extent and _identity(before) != _identity(after)) or _sample(path) != (
-            after.st_dev,
-            after.st_ino,
-        ):
-            raise PreparationRefused("The selected physical history changed during header capture.")
-        envelope = json.loads(captured.line)
-        if (
-            not isinstance(envelope, dict)
-            or envelope.get("type") != "session_meta"
-            or not isinstance(envelope.get("payload"), dict)
-        ):
-            raise PreparationRefused("A complete native metadata line is unavailable.")
-        keys = (
-            "id",
-            "source",
-            "parent_thread_id",
-            "model_provider",
-            "agent_role",
-            "history_mode",
-            "history_base",
-            "forked_from_id",
-            "attached_thread",
-            "forked_from_ordinal_exclusive",
-        )
-        metadata = {key: envelope["payload"][key] for key in keys if key in envelope["payload"]}
-        return HeaderObservation(path, metadata, sha256(captured.line).digest(), _identity(after))
     finally:
         os.close(descriptor)
+
+
+def _observe_header_descriptor(
+    path: Path,
+    descriptor: int,
+    budget: CollectionBudget,
+    *,
+    require_stable_extent: bool = True,
+    enforce_extent_limit: bool = True,
+) -> HeaderObservation:
+    """Capture a bounded header through a borrowed regular descriptor."""
+    before = os.fstat(descriptor)
+    if enforce_extent_limit and before.st_size > budget.limits.maximum_rollout_bytes:
+        raise PreparationRefused("The selected rollout exceeds its size bound.")
+    representation = (
+        PhysicalRepresentation.ZSTD
+        if path.name.endswith(".jsonl.zst")
+        else PhysicalRepresentation.PLAIN
+    )
+    try:
+        captured = read_bounded_header(
+            descriptor,
+            representation,
+            limits=HeaderReadLimits(
+                budget.limits.maximum_header_bytes,
+                budget.limits.maximum_total_bytes - budget.used,
+                require_stable_extent,
+            ),
+            charge=budget.check,
+        )
+    except HeaderReadError as error:
+        raise PreparationRefused(str(error)) from error
+    after = os.fstat(descriptor)
+    if (require_stable_extent and _identity(before) != _identity(after)) or _sample(path) != (
+        after.st_dev,
+        after.st_ino,
+    ):
+        raise PreparationRefused("The selected physical history changed during header capture.")
+    envelope = json.loads(captured.line)
+    if (
+        not isinstance(envelope, dict)
+        or envelope.get("type") != "session_meta"
+        or not isinstance(envelope.get("payload"), dict)
+    ):
+        raise PreparationRefused("A complete native metadata line is unavailable.")
+    keys = (
+        "id",
+        "source",
+        "parent_thread_id",
+        "model_provider",
+        "agent_role",
+        "history_mode",
+        "history_base",
+        "forked_from_id",
+        "attached_thread",
+        "forked_from_ordinal_exclusive",
+    )
+    metadata = {key: envelope["payload"][key] for key in keys if key in envelope["payload"]}
+    return HeaderObservation(path, metadata, sha256(captured.line).digest(), _identity(after))
 
 
 def _identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
