@@ -11,6 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from codex_session_gc.domain.model import (
+    Attachment,
     InvalidRecordError,
     OwnershipEdge,
     RolloutId,
@@ -192,6 +193,7 @@ class RolloutMetadata:
     physical: PhysicalIdentity | None
     history_prefix: HistoryPrefix | None
     logical_fork: LogicalForkBoundary | None
+    attachment: Attachment | None = None
 
     def __post_init__(self) -> None:
         """Validate facts without traversing providers or inventing missing physical data."""
@@ -210,6 +212,14 @@ class RolloutMetadata:
         _require(
             condition=self.logical_fork is None or type(self.logical_fork) is LogicalForkBoundary,
             message="Logical fork must be typed or explicitly absent.",
+        )
+        _require(
+            condition=self.attachment is None
+            or (
+                type(self.attachment) is Attachment
+                and self.attachment.child_thread_id == self.ownership.thread_id
+            ),
+            message="Attachment must belong to the rollout owner.",
         )
         if self.physical is not None:
             _require(

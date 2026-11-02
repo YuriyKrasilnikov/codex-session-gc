@@ -48,7 +48,7 @@ def targets(request):
     b.refresh(request)
 
 
-def case(name, schema_version=61, body_size=None):
+def case(name, schema_version=62, body_size=None):
     with tempfile.TemporaryDirectory(prefix="cw-direct-") as temporary:
         directory = pathlib.Path(temporary)
         manifest, unrelated, request, aid, uid, payload = b.prepare(directory, schema_version=schema_version)
@@ -57,7 +57,7 @@ def case(name, schema_version=61, body_size=None):
         path = pathlib.Path(manifest["target_path"])
         request["version"] = 6
         request["deletion_scope"] = [child]
-        if schema_version == 61:
+        if schema_version == 62:
             upgrade(home)
             with sqlite3.connect(home / "state_5.sqlite") as db:
                 db.execute("INSERT INTO guardian_review_feedback VALUES(?,?,?)", ("retained", root, b"preserve"))
@@ -157,7 +157,7 @@ def case(name, schema_version=61, body_size=None):
             assert not path.exists() and pathlib.Path(manifest["main_path"]).exists()
             with sqlite3.connect(home / "state_5.sqlite") as db:
                 assert db.execute("SELECT id FROM threads WHERE id=?", (root,)).fetchone()
-                if schema_version == 61:
+                if schema_version == 62:
                     assert db.execute("SELECT thread_id,record FROM guardian_review_feedback").fetchall() == [(root, b"preserve")]
                     assert db.execute("SELECT * FROM thread_read_receipts").fetchall() == [(root, None, "preserve", None)]
         result = dict(case=name, schema=schema_version, outcome=outcome,
@@ -172,13 +172,13 @@ def case(name, schema_version=61, body_size=None):
 
 
 if __name__ == "__main__":
-    case("eligible", 61)
+    case("eligible", 62)
     for name in ("closed-status", "parent-change", "changed-header", "replaced-file",
                  "changed-body-stat", "retained-provider", "retained-header-missing",
                  "oversized-header", "effect-overrun", "retained-writer", "missing-retained"):
         case(name)
     for name in ("selected-guardian", "selected-receipt", "late-receipt"):
-        case(name, 61)
+        case(name, 62)
     case("late-status")
     small = case("io-small", body_size=128 * 1024)
     large = case("io-large", body_size=4 * 1024**3)

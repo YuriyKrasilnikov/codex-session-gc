@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 from codex_session_gc.domain import (
     ActivityState,
     ArchiveState,
+    Attachment,
     GraphSnapshot,
     GuardianAssociation,
     LastActivity,
@@ -104,6 +105,15 @@ def _selected_provenance(
     return source, parent, _guardian_association(identifier, metadata)
 
 
+def _sql_attachment(identifier: ThreadId, value: object) -> Attachment | None:
+    if value is None:
+        return None
+    try:
+        return Attachment(identifier, ThreadId.parse(value))
+    except (TypeError, ValueError) as error:
+        raise collector.PreparationRefused("The SQL attachment source is invalid.") from error
+
+
 def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
     home: Path,
     cutoff: UtcCutoff,
@@ -141,8 +151,16 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
         rows = {
             row["id"]: row
             for row in connection.execute(
-                "SELECT id,source,updated_at_ms,archived,rollout_path "
+                "SELECT id,source,updated_at_ms,archived,rollout_path,attached_thread_parent_id "
                 f"FROM threads WHERE id IN ({marks})",
+                scope,
+            )
+        }
+        sql_attachments = {
+            _sql_attachment(ThreadId.parse(row[0]), row[1])
+            for row in connection.execute(
+                "SELECT id,attached_thread_parent_id FROM threads "
+                f"WHERE attached_thread_parent_id IN ({marks})",
                 scope,
             )
         }
@@ -201,6 +219,12 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
             continue
         header = current_headers[current.physical.path]
         metadata = header.metadata
+        header_attachment = current.attachment
+        sql_attachment = _sql_attachment(
+            identifier, rows[str(identifier.value)]["attached_thread_parent_id"]
+        )
+        if header_attachment != sql_attachment:
+            raise collector.PreparationRefused("Selected attachment SQL/header disagree.")
         src, parent, association = _selected_provenance(
             identifier, metadata, rows[str(identifier.value)]["source"], records[identifier].origin
         )
@@ -237,6 +261,7 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
                     if item.history_prefix is None
                     else item.history_prefix.provider_rollout_id,
                     guardian_parent,
+                    item.attachment,
                 )
             )
     known = tuple(item for item in inventory.rollouts if item.ownership.thread_id in records)
@@ -255,6 +280,13 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
         spawn_edges=spawn_edges,
         ownership_edges=tuple(item.ownership for item in known),
         guardian_associations=tuple(associations),
+        attachments=tuple(
+            sorted(
+                {item for item in sql_attachments if item is not None}
+                | {item.attachment for item in inventory.rollouts if item.attachment is not None},
+                key=lambda item: (item.source_thread_id, item.child_thread_id),
+            )
+        ),
     )
     return collector.ClosedWorkFacts(
         snapshot,

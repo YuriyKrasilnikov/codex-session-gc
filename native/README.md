@@ -129,14 +129,14 @@ loads `src/codex_session_gc/execution/closed_work_contract.json` and accepts onl
 its qualified production binary SHA-256, wire version, and exact schema and
 migration identities. The supported production helper uses Rust 1.99.1, edition
 2024, wire 6, and SHA-256
-`6ca072bf606733acd180031a34a55c9c6581c4b749dd8374a7a12c81d0d4efa5`
-(81,913,024 bytes). The release bundle names the executable
+`a21f923664a98c096758eca54c91f2d79b507dd8576793f1b4fe214b86313e4d`
+(81,839,984 bytes). The release bundle names the executable
 `codex-session-gc-native`; supply its absolute path with `--helper`.
 A digest becomes selectable
 only when the Python contract resource records its qualification. Source profile
 qualification and installation are separate operations.
 
-The validator accepts only the exact deployed state schema through migration 61
+The validator accepts only the exact deployed state schema through migration 62
 and the pinned exact companion database schemas. These deployed DDL and checksum
 identities are qualification inputs. Different schemas, triggers or migrations
 refuse cleanup; no additional schema variant is qualified.
@@ -200,16 +200,38 @@ pointer cannot make all members historical. Incoming spawn edges refuse this
 exception. Exact declared supplemental writer paths remain mandatory.
 
 The closed-work boundary requires selected related fork, resume and publication
-operations to finish before cleanup; unrelated work continues. Maintenance
-publication exclusion, authoritative activity, exact SQL row effects, descriptor
+operations to finish before cleanup; unrelated work continues. The caller must
+establish completion of related publication, including selected metadata
+rename/upsert. A closed label, age or
+writer acquisition does not establish that related publication has finished.
+Each affected rollout, SQLite and log location must use a qualified local
+filesystem; NFS and concurrent offline replacement are outside qualification.
+Maintenance ownership, authoritative activity, exact SQL row effects, descriptor
 checks and per-file/per-database outcome evidence remain enforced. Unselected
 closure members stay locked; selected state rows and the work root remain
 mandatory. Historical names remain untouched. Ambiguous multi-database commit
 evidence reports UNKNOWN rather than claiming rollback.
 
 Qualification receipts remain attributed to the actual source and binary tested.
-The production artifact above passed 62 current-contract cases, 24 physical
-storage cases, and two reconstructed fresh/official-known-predecessor-upgrade board witnesses.
+The production artifact above passed current-contract, physical-storage,
+attachment, Guardian and direct closed-work cases, plus a stock writer coordination
+witness. These retain their exact producer and scope attribution. To run the stock
+writer witness against the same qualified identities, supply explicit absolute
+paths to the stock Codex executable, the fixture and the native helper, and an
+absent trace path:
+
+```sh
+.venv/bin/python native/helper/tests/stock_attached_writer.py \
+  --stock /absolute/path/to/codex --fixture /absolute/path/to/gc-native-fixture \
+  --native /absolute/path/to/codex-session-gc-native --trace /absolute/new-trace.json
+```
+
+The witness checks all three executable digests before starting its disposable
+producer. Its trace can contain the disposable JSON-RPC exchange; retain it only
+where qualification evidence is intended to be stored. Each qualification receipt
+remains bound to the exact test-source digest it records; a later change to the
+witness does not change the historical receipt. Record the current source digest
+separately when running the witness again.
 These are native recorder/storage ownership, retained-history read/resume,
 exact-effect and refusal observations. The qualified host is Linux x86_64,
 Ubuntu 26.04 LTS, glibc 2.43, with Python 3.14.7 test oracles. Other deployment

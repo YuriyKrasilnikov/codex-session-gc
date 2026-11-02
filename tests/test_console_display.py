@@ -138,11 +138,14 @@ def test_preview_names_exact_ids_and_retained_reasons(tmp_path: Path) -> None:
     intent = tasks.Intent(tmp_path, _DATE, (_ROOT,), (_ROOT, _AGENT))
     report = _report(intent, (_AGENT,))
     report["labels"] = {str(_ROOT.value): "Website | /projects/site"}
-    report["retained"] = [{"id": str(_ROOT.value), "reason": "provider retained"}]
+    report["retained"] = [
+        {"id": str(_ROOT.value), "reason": "provider retained", "witness": str(_UNKNOWN.value)}
+    ]
     text = "\n".join(ui.preview_lines(report))
     assert "Website | /projects/site" in text
     assert str(_AGENT.value) in text
     assert "provider retained" in text
+    assert f"witness: {_UNKNOWN.value}" in text
     assert "unknown sizes: 1" in text
 
 

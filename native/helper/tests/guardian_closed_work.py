@@ -34,7 +34,7 @@ def locked(path):
     return False
 
 
-def case(name, schema=61):
+def case(name, schema=62):
     with tempfile.TemporaryDirectory(prefix="gc-guardian-") as temporary:
         directory = pathlib.Path(temporary)
         manifest, guardian, request, aid, uid, payload = b.prepare(directory)
@@ -45,7 +45,7 @@ def case(name, schema=61):
         b.edit_header(guardian_path, lambda meta: meta.update(source=source, parent_thread_id=parent))
         with closing(sqlite3.connect(home / "state_5.sqlite")) as db, db:
             db.execute("UPDATE threads SET source=? WHERE id=?", (json.dumps(source), guardian["id"]))
-        if schema == 61:
+        if schema == 62:
             d.upgrade(home)
         request["version"] = 6
         request["deletion_scope"] = [parent]
@@ -192,8 +192,8 @@ def case(name, schema=61):
 
 
 if __name__ == "__main__":
-    case("retained-resume", 61)
-    case("python-prepared", 61)
+    case("retained-resume", 62)
+    case("python-prepared", 62)
     for name in ("busy", "held-through-commit", "undeclared", "extra-guard", "invalid-guard",
                  "ordinary-child", "wire3-guardian", "physical-provider", "sql-source", "sql-path", "sql-history",
                  "sql-provider", "sql-role", "sql-archive", "sql-absent", "sql-edge",

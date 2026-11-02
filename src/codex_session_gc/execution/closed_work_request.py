@@ -886,6 +886,7 @@ def observe_header(
             "history_mode",
             "history_base",
             "forked_from_id",
+            "attached_thread",
             "forked_from_ordinal_exclusive",
         )
         metadata = {key: envelope["payload"][key] for key in keys if key in envelope["payload"]}

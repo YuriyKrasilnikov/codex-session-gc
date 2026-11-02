@@ -124,7 +124,11 @@ def preview_lines(report: dict[str, Any]) -> list[str]:
             else []
         ),
         "Retained selections:",
-        *[f"  {x['id']}: {x['reason']}" for x in report["retained"]],
+        *[
+            f"  {item['id']}: {item['reason']}"
+            + (f"; witness: {item['witness']}" if item.get("witness") else "")
+            for item in report["retained"]
+        ],
         *[f"ERROR: {x}" for x in report["errors"]],
         "Native ownership and fresh checks may refuse or narrow this selection.",
     ]

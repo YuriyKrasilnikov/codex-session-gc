@@ -1,4 +1,4 @@
-"""Isolated wire-6/schema-61 closed-work effects through native storage and journal APIs."""
+"""Isolated wire-6/schema-62 closed-work effects through native storage and journal APIs."""
 
 import concurrent.futures
 import fcntl
@@ -199,28 +199,18 @@ def capture_targets(home, selected):
 
 
 def upgrade(home):
-    """Explicit deployed DDL and checksums, independent of upstream migrations."""
-    contract = json.loads((ROOT / "src/codex_session_gc/execution/closed_work_contract.json").read_text())
-    schema = next(item for item in contract["databases"] if item["kind"] == "state_5.sqlite")
-    with s.sqlite_context(home / "state_5.sqlite") as db:
-        existing = {row[0] for row in db.execute("SELECT name FROM sqlite_schema")}
-        versions = {row[0] for row in db.execute("SELECT version FROM _sqlx_migrations")}
-        for kind, name, table, ddl in schema["schema"]:
-            if name not in existing:
-                db.execute(ddl)
-        for version, checksum, success in schema["migrations"]:
-            if version not in versions:
-                db.execute("INSERT INTO _sqlx_migrations(version,description,installed_on,success,checksum,execution_time) VALUES(?,?,CURRENT_TIMESTAMP,?,?,0)",
-                    (version, "isolated deployed schema", success, bytes(checksum)))
+    """The fixture producer runs the compiled official reference migrations itself."""
+    with s.connection(home / "state_5.sqlite") as db:
+        latest = db.execute("SELECT MAX(version) FROM _sqlx_migrations").fetchone()[0]
+        assert latest == 62, latest
 
 
-def prepare(directory, schema_version=61):
+def prepare(directory, schema_version=62):
     home = directory / "home"
     made = native("create-batch", home)
     assert made.returncode == 0, made.stderr
     manifest = json.loads(made.stdout)
-    if schema_version == 61:
-        upgrade(home)
+    upgrade(home)
     member = native("add-member", home)
     assert member.returncode == 0, member.stderr
     unrelated = json.loads(member.stdout)
@@ -229,6 +219,18 @@ def prepare(directory, schema_version=61):
             "INSERT INTO thread_spawn_edges(parent_thread_id,child_thread_id,status) VALUES(?,?,'closed')",
             (manifest["main"], manifest["target"]),
         )
+    if schema_version in (59, 61):
+        # Construct an older, explicitly unsupported deployed state for refusal tests.
+        with s.sqlite_context(home / "state_5.sqlite") as db:
+            db.execute("DROP INDEX idx_threads_attached_parent")
+            db.execute("ALTER TABLE threads DROP COLUMN attached_thread_parent_id")
+            db.execute("DELETE FROM _sqlx_migrations WHERE version=62")
+            if schema_version == 59:
+                db.execute("DROP TABLE guardian_review_feedback")
+                db.execute("DROP TABLE thread_read_receipts")
+                db.execute("DELETE FROM _sqlx_migrations WHERE version IN (60,61)")
+    else:
+        assert schema_version == 62
     # Populate native history-cache tables with isolated fixture-owned rows.
     with s.sqlite_context(home / "thread_history_1.sqlite") as db:
         for identity in (manifest["main"], manifest["target"], unrelated["id"]):

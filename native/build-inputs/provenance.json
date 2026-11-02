@@ -2,6 +2,7 @@
   "archive_sha256": "79c8ea8547e1dd9969f63ef6b76a4fb0d1a024ef36c0c627fbcd2ffb658d9312",
   "archive_url": "https://codeload.github.com/openai/codex/tar.gz/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
   "build_qualification": {
+    "build_log_sha256": "ea3a0a6fc125521db23edec4b845b66a3803f64c00ddbbf335c3797fac1e0bde",
     "build_settings": {
       "cargo": "1.99.1 (5f94df478 2026-08-27)",
       "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
@@ -29,37 +30,86 @@
       "profile": "dev",
       "target": "x86_64-unknown-linux-gnu"
     },
-    "contract_sha256": "890ad434de974c6848ab27ac7b934b83d96ea1d437551ce774ef281a8b2e0026",
-    "helper_bytes": 81913024,
-    "helper_sha256": "6ca072bf606733acd180031a34a55c9c6581c4b749dd8374a7a12c81d0d4efa5",
+    "contract_sha256": "17d36bd25ed15ca5a28e02ef0adee8ce8cfc3af4e8ec98463629e9fda94ca38b",
+    "dynamic_libraries": [
+      "libgcc_s.so.1",
+      "libm.so.6",
+      "libc.so.6",
+      "ld-linux-x86-64.so.2"
+    ],
+    "fixture_build_log_sha256": "3933fa52962e1150c5f00eab735a3c910a3f54ad667db13cbadac3ede64a3ff3",
+    "fixture_helper_bytes": 100615912,
+    "fixture_helper_sha256": "a08fa74e22b90ff9b181a460c65e825647cf11014cb0ab552bdc2835364d11d3",
+    "helper_bytes": 81839984,
+    "helper_sha256": "a21f923664a98c096758eca54c91f2d79b507dd8576793f1b4fe214b86313e4d",
+    "native_candidate": {
+      "summary_sha256": "2f557589fed6f7a1dd7de3eb8c81702bdc7663557c688affdafe24778fbc7f60",
+      "transport": {
+        "asset_id": 702630146,
+        "bytes": 15697994,
+        "sha256": "c6d1a89817e4fc13e4eb565bc0b1be6cbd3038b168210ef1c6c59eb883088cf1"
+      }
+    },
     "partitions": [
       {
-        "cases": 62,
+        "cases": 63,
         "exit_code": 0,
+        "filesystem": "9p",
         "kind": "native-contract",
-        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "stdout_sha256": "8b8f24d063f72838e73d070b721dc190ce4bd6d3e0cdcf41a8d683d8af9f305e",
+        "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+        "stdout_sha256": "6ad7639bc04d962206beebdb24674542730a3a75899def67bbcf3737726fcb56",
         "test_source": "native/helper/tests/current_contract.py",
-        "test_source_sha256": "0a50c873853808f754dfe3af0e25969f642cd0b5e9c9219a6142cd6d266541f7"
+        "test_source_sha256": "9a114cfcb32e9eeb0b8de79dec4f4a067e08306df768cbc2066732710cec8f51"
       },
       {
         "cases": 24,
         "exit_code": 0,
-        "kind": "physical-manifest",
-        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "stdout_sha256": "e846823a681f4b2549a4f737f6db03b70ec596dd36787fd4dfce2f821d7415a5",
+        "filesystem": "overlay",
+        "kind": "physical-storage",
+        "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+        "stdout_sha256": "61694524fb03deb34545d7684940e5a8dbcf19e793ad8aa78037495652b69ebc",
         "test_source": "native/helper/tests/physical_rollouts.py",
         "test_source_sha256": "fa0aa0b13e9a0d2175a32c8b8f1ef8acc9f6527ecd1a902fa0bd65f9089e3bad"
       },
       {
-        "cases": 2,
+        "cases": 13,
         "exit_code": 0,
-        "kind": "board-schema-and-effects",
-        "result_sha256": "810e849fa9c09c4f3694cbdf58a693c47f5ccf631f9c17d2ea5cdd38d09cbf65",
-        "schema_rows": 12,
-        "schema_rows_json_sha256": "44f2e7d75a6a5118cf85d143756b3c5db67c40983c0e1f3ab7156b07cf10287c",
-        "witness": "Reconstructed disposable fresh-board and exact-known-predecessor official-SQL-upgrade witness.",
-        "witness_source_sha256": "8a4acd16a01a1b5c9dd1fc40b908479150e77f8f037c90096ab11567522de512"
+        "filesystem": "9p",
+        "kind": "attached-retention",
+        "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+        "stdout_sha256": "3ba457e5af13bb531f8396b34d1b8ce63d9dff3415e398f00cefe056838bf991",
+        "test_source": "native/helper/tests/attached_cleanup.py",
+        "test_source_sha256": "5ca30a2ff7bfe8af0f3501a3ee8829ffe41c8f5761778088b1de72b821ac3a5c"
+      },
+      {
+        "cases": 20,
+        "exit_code": 0,
+        "filesystem": "overlay",
+        "kind": "guardian-retention",
+        "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+        "stdout_sha256": "e2c994b94eb0529289548745e62abfc9b1e71d2b119a0b3da6a355e39d53ede6",
+        "test_source": "native/helper/tests/guardian_closed_work.py",
+        "test_source_sha256": "f78c5d7164b3fcad4200b3876d99f921a9c88121dcc57aba2c185d1cb4cf8a0d"
+      },
+      {
+        "cases": 18,
+        "exit_code": 0,
+        "filesystem": "overlay",
+        "kind": "direct-closed-work",
+        "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+        "stdout_sha256": "62f99578c9f2e318b09b337d22b3b584173fd6230283325b15ba35b76013e510",
+        "test_source": "native/helper/tests/direct_closed_work.py",
+        "test_source_sha256": "a76e63541d0feeed28533de86f8c125a43f52ae84767184d9d1989b5b74ff26f"
+      },
+      {
+        "cases": 1,
+        "exit_code": 0,
+        "kind": "stock0166-writer-coordination",
+        "producer_sha256": "b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8",
+        "scope": "Observed installed0.166 producer source-parent writer exclusion and post-release canonical/SQL attachment; no vendor signature/source binary provenance proof.",
+        "stdout_sha256": "732b8a70e14277747451fe7b747788c60c40eef4943fc359030ef5e4f2fc85cd",
+        "test_source": "native/helper/tests/stock_attached_writer.py",
+        "test_source_sha256": "e1e95d33212d1abfb21fc4d1fd408f2f5920381cb1cfdb9e93ed715ba70544fa"
       }
     ],
     "patch_targets": [
@@ -72,6 +122,16 @@
         "bytes": 6217,
         "path": "codex-rs/ext/agent-message-board/src/local/lifecycle.rs",
         "sha256": "96ea5175b66772e094ae9e672c60e21436142a98945a4057f99cc678e31094f6"
+      },
+      {
+        "bytes": 236046,
+        "path": "codex-rs/protocol/src/protocol.rs",
+        "sha256": "89979b5c6df4bca1a70936bf164c45026b49b43222c52146377adc8faa087c95"
+      },
+      {
+        "bytes": 34152,
+        "path": "codex-rs/rollout/src/compression_tests.rs",
+        "sha256": "f5b1d2d8566aa3fc761754a26cb8147e51f8b650d31bfd09a329fe08860df65a"
       },
       {
         "bytes": 6558,
@@ -89,6 +149,36 @@
         "sha256": "26b6331518e9432595a6e347243281a71623e67f65133991991b2fdfa5902967"
       },
       {
+        "bytes": 20635,
+        "path": "codex-rs/rollout/src/metadata_tests.rs",
+        "sha256": "9bcdb3d1555f823dfce3bcb6c71def5133bae2d9126354d7ff7b4da6d7ac315e"
+      },
+      {
+        "bytes": 77177,
+        "path": "codex-rs/rollout/src/recorder.rs",
+        "sha256": "8b72a00846bcba5289a0ec3d096f9c08927213fcc8949d20a2e6579050961e2e"
+      },
+      {
+        "bytes": 67089,
+        "path": "codex-rs/rollout/src/recorder_tests.rs",
+        "sha256": "76fe4405c039a398ec803757f227e41d9aa363cc91b05d6baae6ac57138210cd"
+      },
+      {
+        "bytes": 21442,
+        "path": "codex-rs/rollout/src/session_index_tests.rs",
+        "sha256": "f9fdd7c4fa8566b65e317ce6e40da628fde7a0048d305e68be3b351a1ce27323"
+      },
+      {
+        "bytes": 12285,
+        "path": "codex-rs/rollout/src/state_db_tests.rs",
+        "sha256": "48c9b50180ac114da613f4fd45feb075834a3905ba97cbea6729d7a51047d509"
+      },
+      {
+        "bytes": 63861,
+        "path": "codex-rs/rollout/src/tests.rs",
+        "sha256": "c1855de4cc66631373869eebf007938e673ffd67e04cd6ddf01a75a1dcac01a5"
+      },
+      {
         "bytes": 7537,
         "path": "codex-rs/rollout/src/writer_lock.rs",
         "sha256": "d1d0f04cbef0710a98763c0e726ac249a0a055c0f9c204ac86850ea448ac739b"
@@ -97,6 +187,26 @@
         "bytes": 5155,
         "path": "codex-rs/rollout/src/writer_lock_tests.rs",
         "sha256": "958eb4edb01f7679ec76e95615198e9a4117833affc9cd79ad0140093a498db5"
+      },
+      {
+        "bytes": 172,
+        "path": "codex-rs/state/migrations/0060_guardian_review_feedback.sql",
+        "sha256": "1c0c6b83f5d0a4732e897e622293ca801d9a9c1f9ed141f721b2646503132245"
+      },
+      {
+        "bytes": 350,
+        "path": "codex-rs/state/migrations/0061_thread_read_state.sql",
+        "sha256": "dd036445db2c6ed9093794e38825cae146da12ebc994148874c96695acb65a37"
+      },
+      {
+        "bytes": 192,
+        "path": "codex-rs/state/migrations/0062_threads_attached_parent.sql",
+        "sha256": "d0ea9bbff023692fb2076bd9b3ba9f750f6382161a01a4b51a19bd84b65358bd"
+      },
+      {
+        "bytes": 35273,
+        "path": "codex-rs/state/src/extract.rs",
+        "sha256": "5aa0ed3310ae73c28c1940ccc776318b684200cbbfe3c628eebf995bc76b784e"
       },
       {
         "bytes": 56360,
@@ -114,14 +224,14 @@
         "sha256": "f0dc06c562fe01baa75b49099823ca2d5ce056b62da7b5d9bec0f77148283371"
       },
       {
-        "bytes": 141253,
+        "bytes": 141333,
         "path": "codex-rs/state/src/runtime/threads.rs",
-        "sha256": "880054b0cfdad5db316006d0fe3c09e114ab837f2ccad7a46defb3baa2ae45b3"
+        "sha256": "11f25d54280f336402c8203238f99d5d56d9118a7db8c75ad1e6588c3ff54290"
       },
       {
-        "bytes": 21562,
+        "bytes": 19874,
         "path": "codex-rs/state/src/sqlite.rs",
-        "sha256": "1d293d3ec621c26d1449341819b0d9be90746edd336ecb8b2f59fcd36a84e3a8"
+        "sha256": "c1ba3e76a8c2322f9decdd98df1167bd717181be6d060194001f5197b40dd74b"
       },
       {
         "bytes": 6562,
@@ -134,14 +244,19 @@
         "sha256": "5d3de879b8dc935c510ee093816b01d6ec2c889340184f818923d18238e57f9e"
       },
       {
+        "bytes": 44220,
+        "path": "codex-rs/thread-store/src/in_memory.rs",
+        "sha256": "14d656c56213f6b716f73576fad0f7fb114f0c513f3472f401d9feb41f3be51f"
+      },
+      {
         "bytes": 4529,
         "path": "codex-rs/thread-store/src/lib.rs",
         "sha256": "cdee0ca24d6244979840a211ff9432e43d17b717d5170516b8d69b78f9cf5535"
       },
       {
-        "bytes": 71899,
+        "bytes": 73759,
         "path": "codex-rs/thread-store/src/local/bounded_cleanup.rs",
-        "sha256": "e60aaf912255b9e5c8adda6eba26c1e2808a2c34d767032b1cdda912285e4274"
+        "sha256": "e229b3919ea7b57e20e8b5b18314469ff914b924877dce2eacb1ff2eb806ac72"
       },
       {
         "bytes": 33916,
@@ -154,20 +269,140 @@
         "sha256": "7209a7883af42e1cdac5405df4274363b4f635a00da6c28c013080cd26c650cf"
       },
       {
+        "bytes": 2931,
+        "path": "codex-rs/thread-store/src/local/read_thread_tests.rs",
+        "sha256": "c4a7ad91d60c1951969cc9d407ef7d6be0298036cf13fc66a0bb89d423bcfd16"
+      },
+      {
+        "bytes": 10907,
+        "path": "codex-rs/thread-store/src/local/rollout_lineage_tests.rs",
+        "sha256": "8e306b204fa1dc0601b55c61e83074456f4335fb3495ae7657ed43319c87e624"
+      },
+      {
+        "bytes": 18618,
+        "path": "codex-rs/thread-store/src/local/rollout_migration/startup_tests.rs",
+        "sha256": "049172b1437abe3961feb4879804a36cc7c78095a660ce131f0d85bceeeeccb7"
+      },
+      {
+        "bytes": 108087,
+        "path": "codex-rs/thread-store/src/local/rollout_migration_tests.rs",
+        "sha256": "9d505a0373140c3be914dc691988c7ea7579a01b8c555f9ebb8468b2d90c17fc"
+      },
+      {
         "bytes": 20368,
         "path": "codex-rs/thread-store/src/local/thread_history.rs",
         "sha256": "7511b89ce285b71008ba908d7343946fc4498d50feb738639b3dd186e1a09f52"
       },
       {
+        "bytes": 55526,
+        "path": "codex-rs/thread-store/src/local/thread_history/read_tests.rs",
+        "sha256": "6a0d5765ae8dc1e013e6972e6b3cae04bef9602c96700499b722f425799dd58a"
+      },
+      {
         "bytes": 97279,
         "path": "codex-rs/thread-store/src/local/update_thread_metadata.rs",
         "sha256": "ac17f2ca7ef950b8c3214b581dfccfb14454981d0f0893a001b3fd13e7a321fd"
+      },
+      {
+        "bytes": 37706,
+        "path": "codex-rs/thread-store/src/thread_metadata_sync.rs",
+        "sha256": "5f0adfee3c8d08eaa2d958b47626965fd54df02845d9ab62d76f7c6f73d7eac2"
+      },
+      {
+        "bytes": 43617,
+        "path": "codex-rs/thread-store/src/types.rs",
+        "sha256": "1e3dbc694f014bc9be4214a79c1e570ab8eb392ba6e1acf08f6fe5170686f6bd"
       }
     ],
     "patch_targets_manifest_encoding": "UTF-8 JSON array with sorted object keys, indent 2 and one trailing newline.",
-    "patch_targets_manifest_sha256": "6fd3917b0c8387aa287140e410a30c7b8ad3a268639501944cd1c7239008ead6",
-    "qualification_boundary": "Bounded native storage cleanup of explicitly selected closed work, with no related in-flight fork, resume or publication. Unrelated work continues. Exact schema, ownership, physical manifests and selected file/SQL effects are checked; no full live Core lifecycle or whole-history integrity claim. Application and installed-artifact acceptance are separate.",
-    "qualification_identity": "2f8d94c7d0d601951cc34ae72a2d49753a4056beb5e1c53033c944711be57714"
+    "patch_targets_manifest_sha256": "1e857caab3bae8aa3fa46360c216a829d85f86a2d437c71866313f0031e8b1a9",
+    "qualification_boundary": "Explicitly selected closed work, no related in-flight fork/resume/publication; unrelated work continues. Exact schema62, metadata, locks, admitted file/SQL effects. No whole Core lifecycle or whole-history integrity guarantee.",
+    "qualification_identity": "5b37875fdf3045d3d6f49a857b7a7955cd69f7353fea039bc0c27d4b7ad94d87",
+    "qualification_identity_encoding": "SHA-256 of UTF-8 JSON qualification material with sorted keys and compact separators.",
+    "qualification_receipt_sha256": "7d0dfb45e2c0ae07940305432de93a3c5cb82c17c04ab2377907f56cc058e688",
+    "qualification_summary": {
+      "archive_sha256": "79c8ea8547e1dd9969f63ef6b76a4fb0d1a024ef36c0c627fbcd2ffb658d9312",
+      "boundary": "Explicitly selected closed work, no related in-flight fork/resume/publication; unrelated work continues. Exact schema62, metadata, locks, admitted file/SQL effects. No whole Core lifecycle or whole-history integrity guarantee.",
+      "build_log_sha256": "ea3a0a6fc125521db23edec4b845b66a3803f64c00ddbbf335c3797fac1e0bde",
+      "build_settings": {
+        "debug": 0,
+        "incremental": false,
+        "jobs": 2,
+        "productionFeatures": [],
+        "rust": "1.99.1"
+      },
+      "fixture_build_log_sha256": "3933fa52962e1150c5f00eab735a3c910a3f54ad667db13cbadac3ede64a3ff3",
+      "fixture_helper_sha256": "a08fa74e22b90ff9b181a460c65e825647cf11014cb0ab552bdc2835364d11d3",
+      "format": "codex-session-gc-native-qualification-v1",
+      "helper_bytes": 81839984,
+      "helper_sha256": "a21f923664a98c096758eca54c91f2d79b507dd8576793f1b4fe214b86313e4d",
+      "native_input_manifest_sha256": "34a4efb11d12a2f630047952b7ada0c0a5781e6201ca4490e396b31431ec5a86",
+      "partitions": [
+        {
+          "cases": 63,
+          "exit_code": 0,
+          "filesystem": "9p",
+          "kind": "native-contract",
+          "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+          "stdout_sha256": "6ad7639bc04d962206beebdb24674542730a3a75899def67bbcf3737726fcb56",
+          "test_source": "native/helper/tests/current_contract.py",
+          "test_source_sha256": "9a114cfcb32e9eeb0b8de79dec4f4a067e08306df768cbc2066732710cec8f51"
+        },
+        {
+          "cases": 24,
+          "exit_code": 0,
+          "filesystem": "overlay",
+          "kind": "physical-storage",
+          "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+          "stdout_sha256": "61694524fb03deb34545d7684940e5a8dbcf19e793ad8aa78037495652b69ebc",
+          "test_source": "native/helper/tests/physical_rollouts.py",
+          "test_source_sha256": "fa0aa0b13e9a0d2175a32c8b8f1ef8acc9f6527ecd1a902fa0bd65f9089e3bad"
+        },
+        {
+          "cases": 13,
+          "exit_code": 0,
+          "filesystem": "9p",
+          "kind": "attached-retention",
+          "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+          "stdout_sha256": "3ba457e5af13bb531f8396b34d1b8ce63d9dff3415e398f00cefe056838bf991",
+          "test_source": "native/helper/tests/attached_cleanup.py",
+          "test_source_sha256": "5ca30a2ff7bfe8af0f3501a3ee8829ffe41c8f5761778088b1de72b821ac3a5c"
+        },
+        {
+          "cases": 20,
+          "exit_code": 0,
+          "filesystem": "overlay",
+          "kind": "guardian-retention",
+          "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+          "stdout_sha256": "e2c994b94eb0529289548745e62abfc9b1e71d2b119a0b3da6a355e39d53ede6",
+          "test_source": "native/helper/tests/guardian_closed_work.py",
+          "test_source_sha256": "f78c5d7164b3fcad4200b3876d99f921a9c88121dcc57aba2c185d1cb4cf8a0d"
+        },
+        {
+          "cases": 18,
+          "exit_code": 0,
+          "filesystem": "overlay",
+          "kind": "direct-closed-work",
+          "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+          "stdout_sha256": "62f99578c9f2e318b09b337d22b3b584173fd6230283325b15ba35b76013e510",
+          "test_source": "native/helper/tests/direct_closed_work.py",
+          "test_source_sha256": "a76e63541d0feeed28533de86f8c125a43f52ae84767184d9d1989b5b74ff26f"
+        },
+        {
+          "cases": 1,
+          "exit_code": 0,
+          "kind": "stock0166-writer-coordination",
+          "producer_sha256": "b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8",
+          "scope": "Observed installed0.166 producer source-parent writer exclusion and post-release canonical/SQL attachment; no vendor signature/source binary provenance proof.",
+          "stdout_sha256": "732b8a70e14277747451fe7b747788c60c40eef4943fc359030ef5e4f2fc85cd",
+          "test_source": "native/helper/tests/stock_attached_writer.py",
+          "test_source_sha256": "e1e95d33212d1abfb21fc4d1fd408f2f5920381cb1cfdb9e93ed715ba70544fa"
+        }
+      ],
+      "upstream_commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d"
+    },
+    "qualification_summary_encoding": "UTF-8 JSON with sorted keys, indent 2 and one trailing newline; excludes the final raw profile.",
+    "qualification_summary_sha256": "742f9145e15a2f805a233a94c2d5827ee61e567e174a4a747119b3bcf652a7dc"
   },
   "commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
   "compatibility_backports": [
@@ -189,6 +424,16 @@
         }
       ],
       "source_ref": "rust-v0.164.0"
+    },
+    {
+      "patches": [
+        "attached-thread-metadata.patch",
+        "state-schema-0165.patch"
+      ],
+      "repository": "https://github.com/openai/codex",
+      "scope": "Selected schema62 and attached-thread metadata and retention behavior; not a whole upstream rebase or producer binary provenance claim.",
+      "source_commit": "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
+      "source_ref": "rust-v0.166.0"
     }
   ],
   "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13); Cargo 1.99.1 (5f94df478 2026-08-27); Edition 2024",
@@ -227,6 +472,11 @@
           "sha256": "f0c461883e8c6381dd4cf2966c50a6cf9e34b22a6fc0cb21abc7a3ab28f6e7f6"
         },
         {
+          "bytes": 10930,
+          "path": "native/patches/attached-thread-metadata.patch",
+          "sha256": "84dc26fefcde5edb8d29f54cd91b75cf1a3bfd7161a310a35bf7b369c40f7b10"
+        },
+        {
           "bytes": 702,
           "path": "native/patches/board-schema-0164.patch",
           "sha256": "89e7dfa6be9032be77165f132d806fa32db5171e968428a6f6f92a8f2a9021e2"
@@ -247,9 +497,9 @@
           "sha256": "0bb80ce7341180b50d938b2fd06e75604c0ae99adb15fc3c6d95d20959e9dedd"
         },
         {
-          "bytes": 5989,
+          "bytes": 4276,
           "path": "native/patches/existing-cleanup-pool.patch",
-          "sha256": "ba6f5c7690906d94e5912bc180e856d5e849c2df0e54896cf5bc5a7dbee31cfa"
+          "sha256": "3d944025ce7d600d204efeb27a796a4e1d36ba75c831fc3a979bb6c19e820d5f"
         },
         {
           "bytes": 2155,
@@ -267,9 +517,14 @@
           "sha256": "355c89553267b7fb218b200c91251e3bc8ea279854664b4df10c7565fc372fcb"
         },
         {
-          "bytes": 73826,
+          "bytes": 75731,
           "path": "native/patches/native-operation.patch",
-          "sha256": "7a1f07391ab36b9033bf28e5986d5b604b8bc500baddb1aea34e39f0fba04617"
+          "sha256": "66ed13b77b57b10c52789b2d75d3be9261f0140c476c40a078fd3e5dab0ac6e8"
+        },
+        {
+          "bytes": 1011,
+          "path": "native/patches/state-schema-0165.patch",
+          "sha256": "72e4940ca27afc680d371012601061e00f339def72d6f995733d5825b4237807"
         },
         {
           "bytes": 3077,
@@ -304,7 +559,7 @@
       ]
     },
     "manifest_encoding": "UTF-8 JSON with sorted keys, indent 2 and one trailing newline; provenance, qualification and distribution metadata are sealed separately.",
-    "manifest_sha256": "79faa67e13f740b7d889c028ee296fea36ccf605962582caba04e198312530d9",
+    "manifest_sha256": "34a4efb11d12a2f630047952b7ada0c0a5781e6201ca4490e396b31431ec5a86",
     "scope": "Exact helper source, Cargo, toolchain and patch inputs used for the qualified production executable."
   },
   "repository": "https://github.com/openai/codex",

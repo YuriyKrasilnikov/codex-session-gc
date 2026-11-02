@@ -56,14 +56,16 @@ def work_home(home: Path) -> Intent:
         connection.execute(
             "CREATE TABLE threads(id TEXT PRIMARY KEY, source TEXT, updated_at_ms INTEGER, "
             "archived INTEGER, rollout_path TEXT, agent_role TEXT, "
-            "model_provider TEXT, history_mode TEXT)"
+            "model_provider TEXT, history_mode TEXT, attached_thread_parent_id TEXT)"
         )
         connection.execute(
             "CREATE TABLE thread_spawn_edges("
             "parent_thread_id TEXT,child_thread_id TEXT,status TEXT)"
         )
         connection.executemany(
-            "INSERT INTO threads VALUES(?,?,?,0,?,NULL,'openai','legacy')",
+            "INSERT INTO threads(id,source,updated_at_ms,archived,rollout_path,agent_role,"
+            "model_provider,history_mode,attached_thread_parent_id) "
+            "VALUES(?,?,?,0,?,NULL,'openai','legacy',NULL)",
             [
                 (str(identifier.value), json.dumps(source), 1_780_272_000_000, str(path))
                 for identifier, (path, source) in paths.items()

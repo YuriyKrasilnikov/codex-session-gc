@@ -85,6 +85,7 @@ def terminal(report: dict[str, Any]) -> str:
             lines.append("  selection errors: " + ", ".join(row["selectionErrors"]))
         lines.extend(
             f"  retained {retained['threadId']}: {retained['reason']}"
+            + (f"; witness: {retained['witness']}" if retained.get("witness") else "")
             for retained in row.get("retained", [])
         )
     return "\n".join(lines)

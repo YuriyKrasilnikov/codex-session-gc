@@ -55,7 +55,8 @@ _DDL = {
     DatabaseKind.STATE: [
         (
             "CREATE TABLE threads(id TEXT,rollout_path TEXT,source TEXT,agent_role TEXT,"
-            "model_provider TEXT,updated_at_ms INTEGER,archived INTEGER,history_mode TEXT)"
+            "model_provider TEXT,updated_at_ms INTEGER,archived INTEGER,history_mode TEXT,"
+            "attached_thread_parent_id TEXT)"
         ),
         "CREATE TABLE thread_spawn_edges(parent_thread_id TEXT,child_thread_id TEXT,status TEXT)",
         "CREATE TABLE thread_dynamic_tools(thread_id TEXT)",
@@ -158,7 +159,8 @@ def _fixture(  # noqa: C901, PLR0912
                 for number, fact in zip((1, 2, 3), facts, strict=True):
                     source = json.loads(fact.path.read_text())["payload"]["source"]
                     connection.execute(
-                        "INSERT INTO threads VALUES(?,?,?,?,?,?,?,?)",
+                        "INSERT INTO threads(id,rollout_path,source,agent_role,model_provider,"
+                        "updated_at_ms,archived,history_mode) VALUES(?,?,?,?,?,?,?,?)",
                         (
                             str(_id(number).value),
                             str(fact.path),
@@ -325,7 +327,8 @@ def _guardian_fixture(tmp_path: Path, *, parent: int = 2, kind: str = "guardian"
     path.write_text(json.dumps({"type": "session_meta", "payload": metadata}) + "\n")
     with sqlite3.connect(home / DatabaseKind.STATE) as connection:
         connection.execute(
-            "INSERT INTO threads VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO threads(id,rollout_path,source,agent_role,model_provider,"
+            "updated_at_ms,archived,history_mode) VALUES(?,?,?,?,?,?,?,?)",
             (
                 str(_id(4).value),
                 str(path),
@@ -383,6 +386,18 @@ def _native_home(home: Path) -> None:
             for object_ in objects:
                 if object_["type"] != "table":
                     connection.execute(object_["sql"])
+            _synthetic_attachment_projection(database["path"], connection)
+
+
+def _synthetic_attachment_projection(name: str, connection: sqlite3.Connection) -> None:
+    """Bring this detached plan fixture forward to the current attachment projection."""
+    if name == "state_5.sqlite":
+        connection.execute("ALTER TABLE threads ADD COLUMN attached_thread_parent_id TEXT")
+        connection.execute(
+            "CREATE INDEX idx_threads_attached_parent "
+            "ON threads(attached_thread_parent_id) "
+            "WHERE attached_thread_parent_id IS NOT NULL"
+        )
 
 
 def _cell(value: object, home: Path) -> object:
@@ -413,6 +428,10 @@ def _catalogue_home(home: Path) -> Path:
             if item["name"] in {"threads", "thread_spawn_edges"}:
                 connection.execute(item["sql"])
         columns = profile["threads"]["columns"]
+        existing_columns = {row[1] for row in connection.execute("PRAGMA table_info(threads)")}
+        for column in ("creator_user_id", "creator_account_id", "attached_thread_parent_id"):
+            if column not in existing_columns:
+                connection.execute(f"ALTER TABLE threads ADD COLUMN {column} TEXT")
         for identifier, archived in ((_A, 0), (_B, 1), (_C, 0)):
             values = list(profile["threads"]["rows"][0])
             for key, value in {
@@ -440,7 +459,7 @@ def _review_manifest(
     identifiers: tuple[ThreadId, ...], stored_bytes: int = 900
 ) -> list[dict[str, object]]:
     """Build detached exact transport values for adapter-only confirmation tests."""
-    targets = []
+    targets: list[dict[str, object]] = []
     for ordinal, identifier in enumerate(sorted(identifiers), 1):
         path = f"/synthetic/sessions/rollout-2026-06-01T00-00-00-{identifier.value}.jsonl"
         targets.append(

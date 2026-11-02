@@ -1,6 +1,6 @@
 --- a/codex-rs/state/src/sqlite.rs
 +++ b/codex-rs/state/src/sqlite.rs
-@@ -446,6 +446,116 @@
+@@ -446,6 +446,92 @@
          Ok(pool)
      }
  
@@ -70,43 +70,19 @@
 +            .await?;
 +        migrator.run(&reference).await?;
 +        let schema_sql = "SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND name != '_sqlx_migrations' ORDER BY type, name";
-+        let mut expected: Vec<(String, String, String, Option<String>)> =
++        let expected: Vec<(String, String, String, Option<String>)> =
 +            sqlx::query_as(schema_sql).fetch_all(&reference).await?;
 +        let observed: Vec<(String, String, String, Option<String>)> = sqlx::query_as(schema_sql)
 +            .fetch_all(&mut *connection)
 +            .await?;
 +        let versions_sql =
 +            "SELECT version, checksum, success FROM _sqlx_migrations ORDER BY version";
-+        let mut expected_versions: Vec<(i64, Vec<u8>, i64)> =
++        let expected_versions: Vec<(i64, Vec<u8>, i64)> =
 +            sqlx::query_as(versions_sql).fetch_all(&reference).await?;
 +        let observed_versions: Vec<(i64, Vec<u8>, i64)> = sqlx::query_as(versions_sql)
 +            .fetch_all(&mut *connection)
 +            .await?;
 +        reference.close().await;
-+        // The only supported state contract is exact deployed schema 61.
-+        if matches!(spec.kind, DbKind::State) {
-+            expected.push(("table".to_owned(),"guardian_review_feedback".to_owned(),"guardian_review_feedback".to_owned(),Some("CREATE TABLE guardian_review_feedback (\n    id TEXT PRIMARY KEY NOT NULL,\n    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,\n    record BLOB NOT NULL\n)".to_owned())));
-+            expected.push(("table".to_owned(),"thread_read_receipts".to_owned(),"thread_read_receipts".to_owned(),Some("CREATE TABLE thread_read_receipts (\n    thread_id TEXT PRIMARY KEY NOT NULL,\n    first_unread_turn TEXT,\n    revision TEXT NOT NULL,\n    last_published_turn TEXT\n)".to_owned())));
-+            expected_versions.push((
-+                60,
-+                vec![
-+                    215, 240, 207, 10, 105, 250, 113, 153, 154, 255, 205, 72, 204, 116, 178, 208,
-+                    162, 99, 123, 139, 189, 167, 59, 213, 129, 149, 71, 204, 219, 21, 84, 58, 117,
-+                    210, 57, 49, 31, 160, 127, 207, 105, 155, 233, 188, 188, 24, 116, 168,
-+                ],
-+                1,
-+            ));
-+            expected_versions.push((
-+                61,
-+                vec![
-+                    74, 131, 55, 4, 139, 185, 88, 162, 31, 213, 39, 44, 27, 214, 112, 96, 92, 132,
-+                    212, 6, 53, 52, 39, 13, 62, 65, 205, 197, 197, 162, 232, 101, 240, 254, 106,
-+                    227, 195, 54, 222, 216, 115, 135, 126, 226, 234, 16, 242, 224,
-+                ],
-+                1,
-+            ));
-+            expected.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
-+        }
 +        anyhow::ensure!(
 +            observed == expected && observed_versions == expected_versions,
 +            "native database schema is not qualified for bounded cleanup"

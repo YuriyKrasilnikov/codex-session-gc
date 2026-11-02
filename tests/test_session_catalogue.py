@@ -714,3 +714,16 @@ def test_scandir_failure_preserves_successfully_enumerated_known_prefix(
     assert [
         item.path.name for entry in result.entries for item in entry.physical_rollouts
     ] == prefix
+
+
+@pytest.mark.parametrize("schema_change", ["older", "future"])
+def test_only_qualified_attachment_schema_is_listed(tmp_path: Path, schema_change: str) -> None:
+    database = _home(tmp_path)
+    with sqlite3.connect(database) as connection:
+        if schema_change == "older":
+            connection.execute("ALTER TABLE threads DROP COLUMN attached_thread_parent_id")
+        else:
+            connection.execute("ALTER TABLE threads ADD COLUMN unknown_future TEXT")
+    result = catalogue.read_session_catalogue(tmp_path)
+    assert not result.entries
+    assert result.diagnostics == ("unsupported_state_schema",)

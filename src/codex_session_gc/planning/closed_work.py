@@ -34,6 +34,7 @@ class ClosedWorkReason(StrEnum):
     NO_HISTORY = "owned_history_unavailable"
     DESCENDANT = "retained_descendant"
     PROVIDER = "required_by_retained_consumer"
+    ATTACHED_THREAD = "attached_thread_exists"
     GUARDIAN_ASSOCIATION = "unknown_guardian_association"
 
 
@@ -127,6 +128,7 @@ def select_closed_work(
         if reason is not None:
             retained.setdefault(item, ClosedWorkRetention(item, reason))
     candidates = set(scope - retained.keys())
+    _retain_attached_sources(snapshot, candidates, retained)
     _propagate_retention(snapshot, candidates, retained, physical_inventory)
     deletion_roots = frozenset(item for item in candidates if not (parents[item] & candidates))
     return ClosedWorkSelection(
@@ -140,6 +142,23 @@ def select_closed_work(
         (),
         tuple(associations[item] for item in sorted(candidates) if item in associations),
     )
+
+
+def _retain_attached_sources(
+    snapshot: GraphSnapshot,
+    candidates: set[ThreadId],
+    retained: dict[ThreadId, ClosedWorkRetention],
+) -> None:
+    for attachment in sorted(
+        snapshot.attachments, key=lambda item: (item.source_thread_id, item.child_thread_id)
+    ):
+        if attachment.source_thread_id in candidates:
+            candidates.remove(attachment.source_thread_id)
+            retained[attachment.source_thread_id] = ClosedWorkRetention(
+                attachment.source_thread_id,
+                ClosedWorkReason.ATTACHED_THREAD,
+                attachment.child_thread_id,
+            )
 
 
 def _spawn_relations(

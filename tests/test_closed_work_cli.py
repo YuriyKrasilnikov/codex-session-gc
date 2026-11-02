@@ -112,6 +112,6 @@ def test_public_root_origin_requires_positive_sql_source(
     report = json.loads(capsys.readouterr().out)
     assert (_MAIN in report["deletions"]) is (source == "cli")
     if source != "cli":
-        assert {"id": _MAIN, "reason": "unknown_origin"} in report["retained"]
+        assert {"id": _MAIN, "reason": "unknown_origin", "witness": None} in report["retained"]
     assert report["incomingReferencesComplete"]
     assert _source(tmp_path) == before

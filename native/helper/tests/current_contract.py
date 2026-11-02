@@ -23,7 +23,7 @@ s = b.s
 def admission_case(name):
     with tempfile.TemporaryDirectory(prefix="gc-current-admission-") as temporary:
         manifest, unrelated, request, aid, uid, payload = b.prepare(
-            pathlib.Path(temporary), schema_version=59 if name == "schema59" else 61)
+            pathlib.Path(temporary), schema_version=59 if name == "schema59" else 61 if name == "schema61" else 62)
         home = pathlib.Path(manifest["home"])
         b.refresh(request)
         if name == "expanded-ownership":
@@ -61,7 +61,7 @@ def admission_case(name):
                 db.execute("INSERT INTO thread_read_receipts VALUES(?,?,?,?)", (manifest["main"], None, "preserve", None))
         elif name == "migration-success":
             with s.sqlite_context(home / "state_5.sqlite") as db:
-                db.execute("UPDATE _sqlx_migrations SET success=2 WHERE version=61")
+                db.execute("UPDATE _sqlx_migrations SET success=2 WHERE version=62")
         elif name == "archive-integer":
             child = manifest["target"]
             original = pathlib.Path(manifest["target_path"])
@@ -72,8 +72,8 @@ def admission_case(name):
             b.refresh(request)
         elif name == "migration-checksum":
             with s.sqlite_context(home / "state_5.sqlite") as db:
-                db.execute("UPDATE _sqlx_migrations SET checksum=? WHERE version=61", (b"invalid",))
-        elif name == "schema62":
+                db.execute("UPDATE _sqlx_migrations SET checksum=? WHERE version=62", (b"invalid",))
+        elif name == "schema63":
             with s.sqlite_context(home / "state_5.sqlite") as db:
                 db.execute("CREATE TABLE unqualified(id TEXT)")
         before_sql, before_files = s.sql_snapshot(request), s.history_snapshot(home)
@@ -163,7 +163,7 @@ if __name__ == "__main__":
         print(json.dumps(result), flush=True)
     for name in ("wire1", "wire2", "wire3", "wire4", "wire5", "wire7", "unknown-request-field",
                  "unknown-target-field", "missing-identity", "null-header", "schema59",
-                 "schema62", "migration-checksum", "migration-success", "archive-integer", "selected-root-feedback", "selected-root-receipt", "expanded-ownership", "contracted-ownership",
+                 "schema61", "schema63", "migration-checksum", "migration-success", "archive-integer", "selected-root-feedback", "selected-root-receipt", "expanded-ownership", "contracted-ownership",
                  "duplicate-ownership", "wrong-deletion", "missing-root-guard", "leaf-as-root", "root-cycle"):
         result = admission_case(name)
         results.append(result)

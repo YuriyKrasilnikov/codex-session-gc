@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from codex_session_gc.domain import ArchiveState, RolloutId, ThreadId
+    from codex_session_gc.domain import ArchiveState, Attachment, RolloutId, ThreadId
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,3 +27,4 @@ class RolloutObservation:
     metadata_spawn_parent: ThreadId | None
     history_provider_rollout_id: RolloutId | None
     metadata_guardian_parent: ThreadId | None = None
+    attachment: Attachment | None = None

@@ -151,7 +151,6 @@ def _verify_bundle_source(root: Path, wheel: Path, bundle: Path) -> None:
 def main() -> None:
     """Check completed real artifacts after the existing release assembler finishes."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument(
         "--installed-site-packages",
         type=Path,
@@ -160,9 +159,10 @@ def main() -> None:
     for name in ("sdist", "wheel", "bundle", "helper"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     args = parser.parse_args()
+    root = Path(__file__).resolve().parents[1]
     try:
-        ci_native.verify_source(args.root)
-        checked = inspect_release(args.root, args.sdist, args.wheel, args.bundle, args.helper)
+        ci_native.verify_source(root)
+        checked = inspect_release(root, args.sdist, args.wheel, args.bundle, args.helper)
         evidence = checked.evidence
         if args.installed_site_packages is not None:
             generated = source_map.verify_installed(checked.wheel_map, args.installed_site_packages)

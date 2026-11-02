@@ -1,32 +1,22 @@
 # Copyright (c) 2026
 
-"""Artifact-bound reuse checks with tiny synthetic qualification inputs."""
+"""Source-qualified component selection without legacy release anchors."""
 
 from __future__ import annotations
 
 import hashlib
-import io
 import json
-import tarfile
-import zipfile
-from dataclasses import replace
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
-from tools import ci_native
+from tools import ci_native, native_candidate
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-
-_INPUTS = (
-    "native/helper/Cargo.toml",
-    "native/helper/Cargo.lock",
-    "native/helper/rust-toolchain.toml",
-    "native/helper/src/main.rs",
-    "native/patches/cleanup.patch",
-)
+pytest_plugins = ["tools.tests.test_native_candidate"]
 
 
 def _equal(actual: object, expected: object) -> None:
@@ -34,192 +24,162 @@ def _equal(actual: object, expected: object) -> None:
         pytest.fail(f"Expected {expected!r}, observed {actual!r}")
 
 
-def _wheel(profile: bytes) -> bytes:
-    stream = io.BytesIO()
-    with zipfile.ZipFile(stream, "w") as archive:
-        archive.writestr(ci_native.WHEEL_PROFILE, profile)
-    return stream.getvalue()
-
-
-def _bundle(root: Path, helper: bytes, wheel: bytes) -> Path:
-    path = root / "bundle.tar.gz"
-    with tarfile.open(path, "w:gz") as archive:
-        for name, data in (
-            ("release/codex-session-gc-native", helper),
-            ("release/package.whl", wheel),
-        ):
-            item = tarfile.TarInfo(name)
-            item.size = len(data)
-            archive.addfile(item, io.BytesIO(data))
-    return path
-
-
-@pytest.fixture
-def qualified(tmp_path: Path) -> tuple[Path, Path, ci_native.QualifiedRelease]:
-    """Bind synthetic release/source bytes; these fixtures qualify no real artifact."""
-    root = tmp_path / "source"
-    for name in _INPUTS:
-        path = root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"synthetic {name}\n")
-    manifest = {
-        "archive_sha256": "a" * 64,
-        "inputs": [
-            {
-                "path": name,
-                "bytes": (root / name).stat().st_size,
-                "sha256": ci_native.digest(root / name),
-            }
-            for name in _INPUTS
-        ],
-    }
-    manifest_sha = hashlib.sha256(
-        (json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()
-    ).hexdigest()
-    provenance = root / ci_native.PROVENANCE
-    provenance.parent.mkdir(parents=True)
-    provenance.write_text(
-        json.dumps(
-            {
-                "current_delivery_inputs": {
-                    "manifest": manifest,
-                    "manifest_sha256": manifest_sha,
-                }
-            }
-        )
-    )
-    helper = b"synthetic helper, never executed"
-    helper_sha = hashlib.sha256(helper).hexdigest()
-    profile = json.dumps({"binary_sha256": list(bytes.fromhex(helper_sha))}).encode()
-    path = root / ci_native.PROFILE
-    path.parent.mkdir(parents=True)
-    path.write_bytes(profile)
-    wheel = _wheel(profile)
-    bundle = _bundle(tmp_path, helper, wheel)
-    pin = ci_native.QualifiedRelease(
-        "https://example.invalid/fixture",
-        ci_native.digest(bundle),
-        bundle.stat().st_size,
-        helper_sha,
-        hashlib.sha256(profile).hexdigest(),
-        manifest_sha,
-        hashlib.sha256(wheel).hexdigest(),
-        "release",
-        "package.whl",
-    )
-    return root, bundle, pin
-
-
-def test_matching_source_and_full_release_select_only_qualified_helper(
-    qualified: tuple[Path, Path, ci_native.QualifiedRelease],
-    tmp_path: Path,
+def test_current_component_selects_only_qualified_helper(
+    candidate: tuple[Path, Path, Path, Path], tmp_path: Path
 ) -> None:
-    """The selected executable has the trusted helper hash; source and bundle are untouched."""
-    root, bundle, pin = qualified
-    before = ci_native.digest(bundle)
-    output = tmp_path / "helper"
-    evidence = ci_native.select_helper(root, bundle, output, pin)
-    _equal(ci_native.digest(output), pin.helper_sha256)
-    _equal(evidence["profile_sha256"], pin.profile_sha256)
-    _equal(evidence["native_input_files"], len(_INPUTS))
-    _equal(ci_native.digest(bundle), before)
-    _equal(output.stat().st_mode & 0o111 != 0, expected=True)
+    """A matching component selects the exact helper and fixed-repository locator."""
+    root, component, helper, _ = candidate
+    qualification, transport = ci_native.describe(root)
+    output = tmp_path / "selected-helper"
+    evidence = ci_native.select_helper(root, component, output)
+    qualification_evidence = evidence["qualification"]
+    transport_evidence = evidence["transport"]
+    if not isinstance(qualification_evidence, dict) or not isinstance(transport_evidence, dict):
+        pytest.fail("Native component evidence is missing its identity objects")
+    _equal(output.read_bytes(), helper.read_bytes())
+    _equal(qualification_evidence["qualification_identity"], qualification.qualification_identity)
+    _equal(transport_evidence["asset_id"], transport.asset_id)
+    _equal(
+        transport.api_url,
+        "https://api.github.com/repos/YuriyKrasilnikov/codex-session-gc/releases/assets/123",
+    )
 
 
-@pytest.mark.parametrize("name", _INPUTS)
-def test_each_changed_native_input_refuses_reuse(
-    qualified: tuple[Path, Path, ci_native.QualifiedRelease],
-    name: str,
+def test_source_check_does_not_require_or_interpret_transport(
+    candidate: tuple[Path, Path, Path, Path], tmp_path: Path
 ) -> None:
-    """Every bound source input matters independently of Python application changes."""
-    root, _, pin = qualified
+    """Material validation remains available before a locator exists and selection refuses."""
+    root, component, _, _ = candidate
+    path = root / ci_native.PROVENANCE
+    provenance = json.loads(path.read_bytes())
+    native = provenance["build_qualification"]["native_candidate"]
+    del native["transport"]
+    path.write_text(json.dumps(provenance))
+    _equal(ci_native.verify_source(root)["qualification_identity"], "e" * 64)
+    with pytest.raises(ci_native.ReuseError, match="transport is not configured"):
+        ci_native.describe(root)
+    with pytest.raises(native_candidate.CandidateError, match="transport is not configured"):
+        ci_native.select_helper(root, component, tmp_path / "selected-output")
+    _equal((tmp_path / "selected-output").exists(), expected=False)
+    native["transport"] = {"asset_id": None, "sha256": "a" * 64, "bytes": 123}
+    path.write_text(json.dumps(provenance))
+    _equal(ci_native.verify_source(root)["qualification_identity"], "e" * 64)
+    with pytest.raises(native_candidate.CandidateError):
+        ci_native.describe(root)
+    with pytest.raises(native_candidate.CandidateError):
+        ci_native.select_helper(root, component, tmp_path / "unbound-output")
+    _equal((tmp_path / "unbound-output").exists(), expected=False)
+    native["transport"] = {"asset_id": 0, "sha256": "invalid", "bytes": 0}
+    path.write_text(json.dumps(provenance))
+    _equal(ci_native.verify_source(root)["qualification_identity"], "e" * 64)
+    with pytest.raises(native_candidate.CandidateError):
+        ci_native.describe(root)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "native/helper/Cargo.toml",
+        "native/helper/Cargo.lock",
+        "native/helper/rust-toolchain.toml",
+        "native/helper/src/main.rs",
+        "native/patches/test.patch",
+    ],
+)
+def test_each_changed_native_input_refuses(
+    candidate: tuple[Path, Path, Path, Path], name: str
+) -> None:
+    """A modified native build input cannot inherit the source qualification."""
+    root, _, _, _ = candidate
     (root / name).write_bytes(b"changed")
-    with pytest.raises(ci_native.ReuseError, match="Native input differs"):
-        ci_native.verify_source(root, pin)
+    with pytest.raises(native_candidate.CandidateError, match="Native source does not match"):
+        ci_native.verify_source(root)
 
 
 @pytest.mark.parametrize("name", ["native/helper/build.rs", "native/helper/src/extra.rs"])
-def test_new_native_inputs_refuse_reuse(
-    qualified: tuple[Path, Path, ci_native.QualifiedRelease],
-    name: str,
-) -> None:
-    """An unlisted build script or source cannot inherit the old qualification."""
-    root, _, pin = qualified
-    (root / name).write_text("new input")
-    with pytest.raises(ci_native.ReuseError, match="file set"):
-        ci_native.verify_source(root, pin)
+def test_extra_native_input_refuses(candidate: tuple[Path, Path, Path, Path], name: str) -> None:
+    """An unlisted native build script or source is not silently accepted."""
+    root, _, _, _ = candidate
+    (root / name).write_text("new source")
+    with pytest.raises(native_candidate.CandidateError, match="Native source does not match"):
+        ci_native.verify_source(root)
 
 
-def test_rewritten_current_manifest_cannot_bless_changed_source(
-    qualified: tuple[Path, Path, ci_native.QualifiedRelease],
-) -> None:
-    """A self-consistent new source manifest still differs from the reviewed release anchor."""
-    root, _, pin = qualified
-    path = root / ci_native.PROVENANCE
-    value = json.loads(path.read_bytes())
-    manifest = value["current_delivery_inputs"]["manifest"]
-    manifest["archive_sha256"] = "b" * 64
-    value["current_delivery_inputs"]["manifest_sha256"] = hashlib.sha256(
-        (json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()
-    ).hexdigest()
-    path.write_text(json.dumps(value))
-    with pytest.raises(ci_native.ReuseError, match="manifest changed"):
-        ci_native.verify_source(root, pin)
-
-
-def test_raw_profile_edit_requires_separate_qualification(
-    qualified: tuple[Path, Path, ci_native.QualifiedRelease],
-) -> None:
-    """Equivalent JSON with different bytes cannot retain raw-profile identity."""
-    root, _, pin = qualified
+def test_raw_profile_change_refuses(candidate: tuple[Path, Path, Path, Path]) -> None:
+    """Even equivalent edited profile bytes do not match the qualified raw identity."""
+    root, _, _, _ = candidate
     path = root / ci_native.PROFILE
     path.write_bytes(path.read_bytes() + b"\n")
-    with pytest.raises(ci_native.ReuseError, match="Raw profile changed"):
-        ci_native.verify_source(root, pin)
+    with pytest.raises(native_candidate.CandidateError, match="Native source does not match"):
+        ci_native.verify_source(root)
 
 
-def test_transport_hash_checked_before_archive_use(
-    qualified: tuple[Path, Path, ci_native.QualifiedRelease],
+def test_component_and_output_mutation_refuse(
+    candidate: tuple[Path, Path, Path, Path], tmp_path: Path
 ) -> None:
-    """Truncated or altered downloads cannot select an alternate helper."""
-    _, bundle, pin = qualified
-    bundle.write_bytes(b"not an archive")
-    with pytest.raises(ci_native.ReuseError, match="bundle"):
-        ci_native.verify_bundle(bundle, pin)
+    """Changed component bytes and preexisting helper paths are never selected."""
+    root, component, _, _ = candidate
+    existing = tmp_path / "existing-helper"
+    existing.write_bytes(b"keep")
+    with pytest.raises(native_candidate.CandidateError):
+        ci_native.select_helper(root, component, existing)
+    _equal(existing.read_bytes(), b"keep")
+    component.write_bytes(b"changed")
+    with pytest.raises(native_candidate.CandidateError):
+        ci_native.select_helper(root, component, tmp_path / "new-helper")
+    _equal((tmp_path / "new-helper").exists(), expected=False)
 
 
-def test_inner_helper_and_profile_identities_are_checked(
-    qualified: tuple[Path, Path, ci_native.QualifiedRelease],
-    tmp_path: Path,
+def test_rewritten_current_manifest_cannot_replace_profile_bound_source(
+    candidate: tuple[Path, Path, Path, Path],
 ) -> None:
-    """Full transport hashing does not replace the independently bound member identities."""
-    root, _, pin = qualified
-    bundle = _bundle(tmp_path, b"wrong helper", _wheel((root / ci_native.PROFILE).read_bytes()))
-    transport = replace(
-        pin, bundle_sha256=ci_native.digest(bundle), bundle_bytes=bundle.stat().st_size
-    )
-    with pytest.raises(ci_native.ReuseError, match="helper hash"):
-        ci_native.verify_bundle(bundle, transport)
-    wrong_wheel = _wheel(b"different profile")
-    bundle = _bundle(tmp_path, b"synthetic helper, never executed", wrong_wheel)
-    transport = replace(
-        pin,
-        bundle_sha256=ci_native.digest(bundle),
-        bundle_bytes=bundle.stat().st_size,
-        wheel_sha256=hashlib.sha256(wrong_wheel).hexdigest(),
-    )
-    with pytest.raises(ci_native.ReuseError, match="raw profile"):
-        ci_native.verify_bundle(bundle, transport)
+    """A self-consistent replacement manifest cannot change profile-qualified inputs."""
+    root, _, _, _ = candidate
+    source = root / "native/helper/src/main.rs"
+    source.write_text("unqualified replacement")
+    path = root / ci_native.PROVENANCE
+    provenance = json.loads(path.read_bytes())
+    current = provenance["current_delivery_inputs"]
+    manifest = current["manifest"]
+    entry = next(item for item in manifest["inputs"] if item["path"] == "native/helper/src/main.rs")
+    entry.update(bytes=source.stat().st_size, sha256=ci_native.digest(source))
+    current["manifest_sha256"] = hashlib.sha256(
+        (json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()
+    ).hexdigest()
+    path.write_text(json.dumps(provenance))
+    with pytest.raises(native_candidate.CandidateError, match="Profile material identities differ"):
+        ci_native.verify_source(root)
 
 
-def test_existing_helper_output_is_preserved(
-    qualified: tuple[Path, Path, ci_native.QualifiedRelease],
-    tmp_path: Path,
+def test_rewritten_qualification_partitions_cannot_replace_profile_evidence(
+    candidate: tuple[Path, Path, Path, Path],
 ) -> None:
-    """Artifact preparation never overwrites an existing consumer."""
-    root, bundle, pin = qualified
-    output = tmp_path / "helper"
-    output.write_bytes(b"existing consumer")
-    with pytest.raises(ci_native.ReuseError, match="new helper output"):
-        ci_native.select_helper(root, bundle, output, pin)
-    _equal(output.read_bytes(), b"existing consumer")
+    """A matching rewritten public summary cannot replace original profile-bound checks."""
+    root, _, _, summary = candidate
+    profile_digest = ci_native.digest(root / ci_native.PROFILE)
+    path = root / ci_native.PROVENANCE
+    provenance = json.loads(path.read_bytes())
+    build = provenance["build_qualification"]
+    build["partitions"][0]["cases"] += 1
+    checks = [
+        hashlib.sha256(json.dumps(item, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        for item in build["partitions"]
+    ]
+    public_summary = json.loads(summary.read_bytes())
+    public_summary["checks"] = checks
+    summary.write_text(json.dumps(public_summary))
+    build["native_candidate"]["summary_sha256"] = ci_native.digest(summary)
+    path.write_text(json.dumps(provenance))
+    _equal(ci_native.digest(root / ci_native.PROFILE), profile_digest)
+    with pytest.raises(
+        native_candidate.CandidateError, match="Profile qualification checks differ"
+    ):
+        ci_native.verify_source(root)
+
+
+def test_cli_has_no_source_or_digest_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Caller flags cannot replace the checkout's qualified material authority."""
+    monkeypatch.setattr(sys, "argv", ["ci_native", "--root", "/alternate/source"])
+    with pytest.raises(SystemExit) as failure:
+        ci_native.main()
+    _equal(failure.value.code, 2)

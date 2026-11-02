@@ -1,0 +1,26 @@
+--- /dev/null
++++ b/codex-rs/state/migrations/0060_guardian_review_feedback.sql
+@@ -0,0 +1,5 @@
++CREATE TABLE guardian_review_feedback (
++    id TEXT PRIMARY KEY NOT NULL,
++    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
++    record BLOB NOT NULL
++);
+--- /dev/null
++++ b/codex-rs/state/migrations/0061_thread_read_state.sql
+@@ -0,0 +1,8 @@
++-- Independent of rebuildable thread metadata: only actual thread deletion removes receipts.
++-- NULL means read; the empty string means manually unread from the start, even when empty.
++CREATE TABLE thread_read_receipts (
++    thread_id TEXT PRIMARY KEY NOT NULL,
++    first_unread_turn TEXT,
++    revision TEXT NOT NULL,
++    last_published_turn TEXT
++);
+--- /dev/null
++++ b/codex-rs/state/migrations/0062_threads_attached_parent.sql
+@@ -0,0 +1,4 @@
++ALTER TABLE threads ADD COLUMN attached_thread_parent_id TEXT;
++
++CREATE INDEX idx_threads_attached_parent ON threads(attached_thread_parent_id)
++    WHERE attached_thread_parent_id IS NOT NULL;

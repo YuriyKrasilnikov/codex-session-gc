@@ -1,0 +1,272 @@
+--- a/codex-rs/protocol/src/protocol.rs
++++ b/codex-rs/protocol/src/protocol.rs
+@@ -3161,6 +3161,8 @@
+     pub id: ThreadId,
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub forked_from_id: Option<ThreadId>,
++    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
++    pub attached_thread: bool,
+     /// Exclusive ordinal inherited from the logical fork parent, independent of `history_base`.
+     /// Revert may replace the physical history base while retaining this fork boundary.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+@@ -3230,6 +3232,7 @@
+     fn default() -> Self {
+         let id = ThreadId::default();
+         SessionMeta {
++            attached_thread: false,
+             creator_user_id: None,
+             creator_account_id: None,
+             session_id: id.into(),
+--- a/codex-rs/rollout/src/compression_tests.rs
++++ b/codex-rs/rollout/src/compression_tests.rs
+@@ -830,6 +830,7 @@
+     fs::create_dir_all(parent)?;
+     let session_meta_line = SessionMetaLine {
+         meta: SessionMeta {
++            attached_thread: false,
+             creator_user_id: None,
+             creator_account_id: None,
+             session_id: thread_id.into(),
+--- a/codex-rs/rollout/src/metadata_tests.rs
++++ b/codex-rs/rollout/src/metadata_tests.rs
+@@ -89,6 +89,7 @@
+         ),
+     ] {
+         let meta = SessionMeta {
++            attached_thread: false,
+             id: thread_id,
+             forked_from_id: parent,
+             forked_from_ordinal_exclusive: cutoff,
+@@ -117,6 +118,8 @@
+         .join(format!("rollout-2026-01-27T12-34-56-{uuid}.jsonl"));
+ 
+     let session_meta = SessionMeta {
++
++        attached_thread: false,
+         creator_user_id: Some("creator-user".to_string()),
+         creator_account_id: Some("creator-account".to_string()),
+         session_id: id.into(),
+@@ -208,6 +211,7 @@
+         ordinal: None,
+         item: RolloutItem::SessionMeta(SessionMetaLine {
+             meta: SessionMeta {
++                attached_thread: false,
+                 session_id: id.into(),
+                 id,
+                 timestamp: "2026-01-27T12:34:56Z".to_string(),
+@@ -241,6 +245,8 @@
+         .join(format!("rollout-2026-01-27T12-34-56-{uuid}.jsonl"));
+ 
+     let session_meta = SessionMeta {
++
++        attached_thread: false,
+         creator_user_id: None,
+         creator_account_id: None,
+         session_id: id.into(),
+@@ -270,6 +276,7 @@
+         context_window: None,
+     };
+     let polluted_meta = SessionMeta {
++        attached_thread: false,
+         memory_mode: Some("polluted".to_string()),
+         multi_agent_version: None,
+         ..session_meta.clone()
+@@ -590,6 +597,7 @@
+     std::fs::create_dir_all(sessions_dir.as_path()).expect("create sessions dir");
+     let path = sessions_dir.join(format!("rollout-{filename_ts}-{thread_uuid}.jsonl"));
+     let session_meta = SessionMeta {
++        attached_thread: false,
+         creator_user_id: None,
+         creator_account_id: None,
+         session_id: id.into(),
+--- a/codex-rs/rollout/src/recorder.rs
++++ b/codex-rs/rollout/src/recorder.rs
+@@ -947,6 +947,8 @@
+                     .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
+ 
+                 let session_meta = SessionMeta {
++
++                    attached_thread: false,
+                     session_id,
+                     id: conversation_id,
+                     forked_from_id,
+--- a/codex-rs/rollout/src/recorder_tests.rs
++++ b/codex-rs/rollout/src/recorder_tests.rs
+@@ -50,6 +50,7 @@
+ fn paginated_session_meta_item(thread_id: ThreadId, cwd: &Path) -> RolloutItem {
+     RolloutItem::SessionMeta(SessionMetaLine {
+         meta: SessionMeta {
++            attached_thread: false,
+             session_id: thread_id.into(),
+             id: thread_id,
+             timestamp: "2026-07-09T00:00:00Z".to_string(),
+@@ -189,6 +190,7 @@
+ 
+     let session_meta_line = SessionMetaLine {
+         meta: SessionMeta {
++            attached_thread: false,
+             creator_user_id: None,
+             creator_account_id: None,
+             session_id: thread_id.into(),
+--- a/codex-rs/rollout/src/session_index_tests.rs
++++ b/codex-rs/rollout/src/session_index_tests.rs
+@@ -35,6 +35,7 @@
+         ordinal: None,
+         item: RolloutItem::SessionMeta(SessionMetaLine {
+             meta: SessionMeta {
++                attached_thread: false,
+                 creator_user_id: None,
+                 creator_account_id: None,
+                 session_id: thread_id.into(),
+--- a/codex-rs/rollout/src/state_db_tests.rs
++++ b/codex-rs/rollout/src/state_db_tests.rs
+@@ -325,6 +325,7 @@
+             ordinal: None,
+             item: RolloutItem::SessionMeta(SessionMetaLine {
+                 meta: SessionMeta {
++                    attached_thread: false,
+                     creator_user_id: None,
+                     creator_account_id: None,
+                     session_id: thread_id.into(),
+--- a/codex-rs/rollout/src/tests.rs
++++ b/codex-rs/rollout/src/tests.rs
+@@ -1553,6 +1553,7 @@
+         ordinal: None,
+         item: RolloutItem::SessionMeta(SessionMetaLine {
+             meta: SessionMeta {
++                attached_thread: false,
+                 creator_user_id: None,
+                 creator_account_id: None,
+                 session_id: conversation_id.into(),
+--- a/codex-rs/state/src/extract.rs
++++ b/codex-rs/state/src/extract.rs
+@@ -365,6 +365,7 @@
+                 .build("test-provider");
+         let session_meta = RolloutItem::SessionMeta(SessionMetaLine {
+             meta: SessionMeta {
++                attached_thread: false,
+                 session_id: thread_id.into(),
+                 id: thread_id,
+                 source,
+@@ -525,6 +526,7 @@
+             &mut metadata,
+             &RolloutItem::SessionMeta(SessionMetaLine {
+                 meta: SessionMeta {
++                    attached_thread: false,
+                     creator_user_id: None,
+                     creator_account_id: None,
+                     session_id: thread_id.into(),
+@@ -775,6 +777,7 @@
+             &mut metadata,
+             &RolloutItem::SessionMeta(SessionMetaLine {
+                 meta: SessionMeta {
++                    attached_thread: false,
+                     creator_user_id: None,
+                     creator_account_id: None,
+                     session_id: thread_id.into(),
+--- a/codex-rs/state/src/runtime/threads.rs
++++ b/codex-rs/state/src/runtime/threads.rs
+@@ -2802,6 +2802,7 @@
+         );
+         let items = vec![RolloutItem::SessionMeta(SessionMetaLine {
+             meta: SessionMeta {
++                attached_thread: false,
+                 creator_user_id: None,
+                 creator_account_id: None,
+                 session_id: thread_id.into(),
+@@ -2876,6 +2877,7 @@
+         );
+         let items = vec![RolloutItem::SessionMeta(SessionMetaLine {
+             meta: SessionMeta {
++                attached_thread: false,
+                 creator_user_id: None,
+                 creator_account_id: None,
+                 session_id: thread_id.into(),
+--- a/codex-rs/thread-store/src/in_memory.rs
++++ b/codex-rs/thread-store/src/in_memory.rs
+@@ -576,6 +576,7 @@
+         let mut state = self.state.lock().await;
+         state.calls.create_thread += 1;
+         let session_meta = SessionMeta {
++            attached_thread: false,
+             session_id: params.session_id,
+             id: params.thread_id,
+             forked_from_id: params.forked_from_id,
+--- a/codex-rs/thread-store/src/local/read_thread_tests.rs
++++ b/codex-rs/thread-store/src/local/read_thread_tests.rs
+@@ -36,6 +36,7 @@
+         ordinal: None,
+         item: RolloutItem::SessionMeta(SessionMetaLine {
+             meta: SessionMeta {
++                attached_thread: false,
+                 id: thread_id,
+                 session_id: thread_id.into(),
+                 timestamp: timestamp.to_string(),
+--- a/codex-rs/thread-store/src/local/rollout_lineage_tests.rs
++++ b/codex-rs/thread-store/src/local/rollout_lineage_tests.rs
+@@ -279,6 +279,7 @@
+         initial_ordinal,
+         RolloutItem::SessionMeta(SessionMetaLine {
+             meta: SessionMeta {
++                attached_thread: false,
+                 session_id: thread_id.into(),
+                 id: thread_id,
+                 history_mode: ThreadHistoryMode::Paginated,
+--- a/codex-rs/thread-store/src/local/rollout_migration/startup_tests.rs
++++ b/codex-rs/thread-store/src/local/rollout_migration/startup_tests.rs
+@@ -33,6 +33,7 @@
+     let mut file = fs::File::create(&path).expect("create legacy rollout");
+     let paginated = history_mode == ThreadHistoryMode::Paginated;
+     let metadata = SessionMeta {
++        attached_thread: false,
+         session_id: thread_id.into(),
+         id: thread_id,
+         timestamp: TIMESTAMP.to_string(),
+--- a/codex-rs/thread-store/src/local/rollout_migration_tests.rs
++++ b/codex-rs/thread-store/src/local/rollout_migration_tests.rs
+@@ -103,6 +103,7 @@
+     let path = directory.join(format!("rollout-2025-01-03T12-00-00-{thread_id}.jsonl"));
+     let mut file = fs::File::create(&path).expect("create legacy rollout");
+     let metadata = SessionMeta {
++        attached_thread: false,
+         session_id: thread_id.into(),
+         id: thread_id,
+         forked_from_id,
+@@ -1977,6 +1978,7 @@
+     let thread_id = ThreadId::new();
+     let parent_id = ThreadId::new();
+     let copied_metadata = SessionMeta {
++        attached_thread: false,
+         session_id: parent_id.into(),
+         id: parent_id,
+         timestamp: TIMESTAMP.to_string(),
+--- a/codex-rs/thread-store/src/local/thread_history/read_tests.rs
++++ b/codex-rs/thread-store/src/local/thread_history/read_tests.rs
+@@ -1553,6 +1553,7 @@
+         ordinal: Some(initial_ordinal),
+         item: RolloutItem::SessionMeta(SessionMetaLine {
+             meta: SessionMeta {
++                attached_thread: false,
+                 session_id: thread_id.into(),
+                 id: thread_id,
+                 history_mode: ThreadHistoryMode::Paginated,
+--- a/codex-rs/thread-store/src/thread_metadata_sync.rs
++++ b/codex-rs/thread-store/src/thread_metadata_sync.rs
+@@ -910,6 +910,7 @@
+     fn session_meta(thread_id: ThreadId) -> SessionMetaLine {
+         SessionMetaLine {
+             meta: SessionMeta {
++                attached_thread: false,
+                 session_id: thread_id.into(),
+                 id: thread_id,
+                 timestamp: "2025-01-03T12:00:00Z".to_string(),
+--- a/codex-rs/thread-store/src/types.rs
++++ b/codex-rs/thread-store/src/types.rs
+@@ -1143,6 +1143,7 @@
+     fn session_meta(history_mode: ThreadHistoryMode) -> RolloutItem {
+         RolloutItem::SessionMeta(codex_protocol::protocol::SessionMetaLine {
+             meta: codex_protocol::protocol::SessionMeta {
++                attached_thread: false,
+                 history_mode,
+                 ..Default::default()
+             },

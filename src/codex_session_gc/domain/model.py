@@ -210,6 +210,24 @@ class GuardianAssociation:
 
 
 @dataclass(frozen=True, slots=True)
+class Attachment:
+    """A persisted attached child and its distinct logical fork source."""
+
+    child_thread_id: ThreadId
+    source_thread_id: ThreadId
+
+    def __post_init__(self) -> None:
+        """Require distinct typed thread identities; either record may be absent."""
+        if (
+            type(self.child_thread_id) is not ThreadId
+            or type(self.source_thread_id) is not ThreadId
+            or self.child_thread_id == self.source_thread_id
+        ):
+            msg = "An attachment requires distinct thread identifiers."
+            raise InvalidRecordError(msg)
+
+
+@dataclass(frozen=True, slots=True)
 class OwnershipEdge:
     """A typed relation from a thread to its physical rollout."""
 
@@ -250,6 +268,7 @@ class GraphSnapshot:
     ownership_edges: tuple[OwnershipEdge, ...] = ()
     history_provider_references: tuple[HistoryProviderReference, ...] = ()
     guardian_associations: tuple[GuardianAssociation, ...] = ()
+    attachments: tuple[Attachment, ...] = ()
 
     @classmethod
     def from_records(
@@ -284,6 +303,11 @@ class GraphSnapshot:
             "history_provider_references",
             _freeze_history_references(self.history_provider_references),
         )
+        try:
+            object.__setattr__(self, "attachments", tuple(self.attachments))
+        except TypeError as exc:
+            msg = "Attachments must be iterable."
+            raise InvalidGraphError(msg) from exc
         _validate_snapshot(self)
 
 
@@ -366,9 +390,15 @@ def _validate_snapshot(snapshot: GraphSnapshot) -> None:
     _validate_ownership_edges(snapshot.ownership_edges, thread_ids, rollout_ids)
     _validate_history_references(snapshot.history_provider_references, rollout_ids)
     _validate_guardian_associations(snapshot.guardian_associations, snapshot.threads)
+    if len(set(snapshot.attachments)) != len(snapshot.attachments):
+        msg = "A snapshot cannot contain duplicate attachments."
+        raise InvalidGraphError(msg)
 
 
 def _require_record_types(snapshot: GraphSnapshot) -> None:
+    if not all(isinstance(item, Attachment) for item in snapshot.attachments):
+        msg = "A snapshot must contain typed attachments."
+        raise InvalidGraphError(msg)
     if not all(isinstance(item, GuardianAssociation) for item in snapshot.guardian_associations):
         msg = "A snapshot must contain typed Guardian associations."
         raise InvalidGraphError(msg)

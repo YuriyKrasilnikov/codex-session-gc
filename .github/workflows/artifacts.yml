@@ -19,14 +19,115 @@ env:
   PYTHONDONTWRITEBYTECODE: '1'
 
 jobs:
+  acquire-native:
+    name: Acquire the declared native component
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'YuriyKrasilnikov/codex-session-gc'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps: &native_acquisition_steps
+      - name: Allocate isolated acquisition storage
+        run: |
+          set -eu
+          gc_acquire_root="$(mktemp -d "$RUNNER_TEMP/codex-session-gc-native.XXXXXX")"
+          echo "GC_ACQUIRE_ROOT=$gc_acquire_root" >> "$GITHUB_ENV"
+      - name: Read and verify the declared native component
+        env:
+          GC_ACQUIRE_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          case "$GC_ACQUIRE_TOKEN" in ''|*$'\n'*|*$'\r'*) echo 'Invalid acquisition token' >&2; exit 1 ;; esac
+          command -v curl
+          command -v python3
+          gc_acquire_curl="$(curl --version | head -1 | cut -d' ' -f2)"
+          python3 -c 'import sys; v=tuple(int(x) for x in sys.argv[1].split(".")[:3]); assert v >= (8, 4, 0)' "$gc_acquire_curl"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          printf 'Authorization: Bearer %s\n' "$GC_ACQUIRE_TOKEN" | curl --header @- --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-redirs 5 --max-time 60 --max-filesize 1048576 --header 'Accept: application/vnd.github.raw+json' --output "$GC_ACQUIRE_ROOT/provenance.json" -- "https://api.github.com/repos/YuriyKrasilnikov/codex-session-gc/contents/native/build-inputs/provenance.json?ref=$GITHUB_SHA"
+          python3 - "$GC_ACQUIRE_ROOT/provenance.json" > "$GC_ACQUIRE_ROOT/locator.txt" <<'PY'
+          import json, re, sys
+
+          def unique(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise ValueError('duplicate key')
+                  result[key] = value
+              return result
+
+          with open(sys.argv[1], 'rb') as source:
+              raw = source.read(1048577)
+          if not 0 < len(raw) <= 1048576:
+              raise ValueError('invalid provenance size')
+          value = json.loads(raw, object_pairs_hook=unique)
+          locator = value['build_qualification']['native_candidate']['transport']
+          if not isinstance(locator, dict) or set(locator) != {'asset_id', 'sha256', 'bytes'}:
+              raise ValueError('invalid native locator')
+          asset, digest, size = locator['asset_id'], locator['sha256'], locator['bytes']
+          if type(asset) is not int or asset <= 0 or type(size) is not int or size <= 0:
+              raise ValueError('unbound or invalid native locator')
+          if not isinstance(digest, str) or re.fullmatch(r'[0-9a-f]{64}', digest) is None:
+              raise ValueError('invalid native digest')
+          print(asset, size, digest)
+          PY
+          read -r gc_asset gc_bytes gc_sha < "$GC_ACQUIRE_ROOT/locator.txt"
+          printf 'Authorization: Bearer %s\n' "$GC_ACQUIRE_TOKEN" | curl --header @- --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-redirs 5 --max-time 180 --max-filesize "$gc_bytes" --header 'Accept: application/octet-stream' --output "$GC_ACQUIRE_ROOT/native-component.tar.gz" -- "https://api.github.com/repos/YuriyKrasilnikov/codex-session-gc/releases/assets/$gc_asset"
+          test -f "$GC_ACQUIRE_ROOT/native-component.tar.gz" && test ! -L "$GC_ACQUIRE_ROOT/native-component.tar.gz"
+          test "$(wc -c < "$GC_ACQUIRE_ROOT/native-component.tar.gz")" -eq "$gc_bytes"
+          test "$(sha256sum "$GC_ACQUIRE_ROOT/native-component.tar.gz" | cut -d' ' -f1)" = "$gc_sha"
+      - name: Transfer the verified component within this run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-component-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.GC_ACQUIRE_ROOT }}/native-component.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+      - name: Remove acquisition storage
+        if: always()
+        run: |
+          set -eu
+          if [ -n "${GC_ACQUIRE_ROOT:-}" ]; then
+            case "$GC_ACQUIRE_ROOT" in
+              "$RUNNER_TEMP"/codex-session-gc-native.*) rm -rf -- "$GC_ACQUIRE_ROOT" ;;
+              *) echo 'Unexpected acquisition path' >&2; exit 1 ;;
+            esac
+          fi
+
+  acquire-native-readonly:
+    name: Acquire the declared public native component
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps: *native_acquisition_steps
+
   matched-artifacts:
     name: Qualified native and installed artifacts
+    needs: [acquire-native, acquire-native-readonly]
+    if: ${{ always() && github.event_name != 'workflow_dispatch' }}
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
     timeout-minutes: 30
     defaults:
       run:
         shell: bash
     steps:
+      - name: Require qualified native acquisition
+        if: >-
+          (github.event_name == 'push' && needs.acquire-native.result != 'success') ||
+          (github.event_name == 'pull_request' && needs.acquire-native-readonly.result != 'success')
+        run: |
+          echo 'Qualified native material is unavailable for this event or acquisition failed.' >&2
+          exit 1
       - name: Require the selected hosted runner and acquisition tools
         run: |
           set -eu
@@ -38,8 +139,11 @@ jobs:
           command -v git
           command -v curl
           command -v node
+          command -v python3
           git --version
           curl --version
+          gc_ci_curl="$(curl --version | head -1 | cut -d' ' -f2)"
+          python3 -c 'import sys; v=tuple(int(x) for x in sys.argv[1].split(".")[:3]); assert v >= (8, 4, 0)' "$gc_ci_curl"
           uname -a
       - name: Allocate isolated job resources
         run: |
@@ -83,15 +187,17 @@ jobs:
           export GC_CI_IMAGE_VERSION="$ImageVersion"
           "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_runtime > "$GC_CI_ROOT/runtime.json"
           cat "$GC_CI_ROOT/runtime.json"
-      - name: Verify native inputs and acquire only the pinned qualified helper
+      - name: Retrieve the same-run native component
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-component-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.GC_CI_ROOT }}/native-incoming
+      - name: Verify native inputs and select the qualified helper
         run: |
           set -eu
           "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_native > "$GC_CI_ROOT/native-source.json"
           "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_native --describe > "$GC_CI_ROOT/anchors.json"
-          gc_ci_url="$("$UV_PROJECT_ENVIRONMENT/bin/python" -c 'from tools.ci_native import QUALIFIED; print(QUALIFIED.url)')"
-          gc_ci_bytes="$("$UV_PROJECT_ENVIRONMENT/bin/python" -c 'from tools.ci_native import QUALIFIED; print(QUALIFIED.bundle_bytes)')"
-          curl --fail --location --proto '=https' --max-time 180 --max-filesize "$gc_ci_bytes" --output "$GC_CI_ROOT/qualified.tar.gz" -- "$gc_ci_url"
-          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_native --bundle "$GC_CI_ROOT/qualified.tar.gz" --helper "$GC_CI_ROOT/helper" > "$GC_CI_ROOT/native-reuse.json"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_native --component "$GC_CI_ROOT/native-incoming/native-component.tar.gz" --helper "$GC_CI_ROOT/helper" > "$GC_CI_ROOT/native-reuse.json"
       - name: Evaluate the required real native interface cases
         env:
           GC_MCP_NATIVE_HELPER: ${{ env.GC_CI_ROOT }}/helper
@@ -107,6 +213,8 @@ jobs:
           uv build --wheel "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version.tar.gz" --no-config --no-python-downloads --no-build-isolation --python "$UV_PROJECT_ENVIRONMENT/bin/python" --out-dir "$GC_CI_ROOT/release"
           "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.build_release --wheel "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version-py3-none-any.whl" --helper "$GC_CI_ROOT/helper" --output "$GC_CI_ROOT/release/codex-session-gc-$gc_ci_version-linux-x86_64"
           "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_release --sdist "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version.tar.gz" --wheel "$GC_CI_ROOT/release/codex_session_gc-$gc_ci_version-py3-none-any.whl" --bundle "$GC_CI_ROOT/release/codex-session-gc-$gc_ci_version-linux-x86_64" --helper "$GC_CI_ROOT/helper" > "$GC_CI_ROOT/structure.json"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.build_installer --output "$GC_CI_ROOT/release/codex-session-gc-installer-$gc_ci_version.pyz"
+          "$GC_CI_PYTHON" -I "$GC_CI_ROOT/release/codex-session-gc-installer-$gc_ci_version.pyz" --help > "$GC_CI_ROOT/installer-help.txt"
       - name: Install the actual bundle outside the checkout
         run: |
           set -eu
@@ -123,7 +231,7 @@ jobs:
         run: |
           set -eu
           gc_ci_site="$("$GC_CI_ROOT/installed-venv/bin/python" -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
-          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_release --root "$GITHUB_WORKSPACE" --sdist "$GC_CI_ROOT/release/codex_session_gc-$GC_CI_VERSION.tar.gz" --wheel "$GC_CI_ROOT/release/codex_session_gc-$GC_CI_VERSION-py3-none-any.whl" --bundle "$GC_CI_ROOT/release/codex-session-gc-$GC_CI_VERSION-linux-x86_64" --helper "$GC_CI_ROOT/helper" --installed-site-packages "$gc_ci_site" > "$GC_CI_ROOT/installed-structure.json"
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_release --sdist "$GC_CI_ROOT/release/codex_session_gc-$GC_CI_VERSION.tar.gz" --wheel "$GC_CI_ROOT/release/codex_session_gc-$GC_CI_VERSION-py3-none-any.whl" --bundle "$GC_CI_ROOT/release/codex-session-gc-$GC_CI_VERSION-linux-x86_64" --helper "$GC_CI_ROOT/helper" --installed-site-packages "$gc_ci_site" > "$GC_CI_ROOT/installed-structure.json"
       - name: Evaluate installed doctor, CLI, Textual and MCP
         env:
           GC_MCP_NATIVE_HELPER: ${{ env.GC_CI_ROOT }}/release/codex-session-gc-${{ env.GC_CI_VERSION }}-linux-x86_64/codex-session-gc-native
@@ -138,8 +246,8 @@ jobs:
           set -eu
           "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.build_release --archive "$GC_CI_ROOT/release/codex-session-gc-$GC_CI_VERSION-linux-x86_64" --output "$GC_CI_ROOT/release/codex-session-gc-$GC_CI_VERSION-linux-x86_64.tar.gz"
           cd "$GC_CI_ROOT/release"
-          sha256sum "codex-session-gc-$GC_CI_VERSION-linux-x86_64.tar.gz" "codex_session_gc-$GC_CI_VERSION-py3-none-any.whl" "codex_session_gc-$GC_CI_VERSION.tar.gz" > SHA256SUMS
-          echo 'Matched source, native and installed-artifact gates passed on this workflow source. No release publication was performed.' >> "$GITHUB_STEP_SUMMARY"
+          sha256sum "codex-session-gc-$GC_CI_VERSION-linux-x86_64.tar.gz" "codex_session_gc-$GC_CI_VERSION-py3-none-any.whl" "codex_session_gc-$GC_CI_VERSION.tar.gz" "codex-session-gc-installer-$GC_CI_VERSION.pyz" > SHA256SUMS
+          echo 'Matched source, native and installed-artifact gates passed on this workflow source. The helper was selected from separately qualified native material; this workflow did not compile it. No release publication was performed.' >> "$GITHUB_STEP_SUMMARY"
       - name: Retain verified artifacts and receipts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -148,12 +256,13 @@ jobs:
             ${{ env.GC_CI_ROOT }}/release/codex-session-gc-${{ env.GC_CI_VERSION }}-linux-x86_64.tar.gz
             ${{ env.GC_CI_ROOT }}/release/codex_session_gc-${{ env.GC_CI_VERSION }}-py3-none-any.whl
             ${{ env.GC_CI_ROOT }}/release/codex_session_gc-${{ env.GC_CI_VERSION }}.tar.gz
+            ${{ env.GC_CI_ROOT }}/release/codex-session-gc-installer-${{ env.GC_CI_VERSION }}.pyz
             ${{ env.GC_CI_ROOT }}/release/SHA256SUMS
           if-no-files-found: error
           retention-days: 3
           compression-level: 0
       - name: Retain bounded native and installed test receipts
-        if: always()
+        if: ${{ always() && env.GC_CI_ROOT != '' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: artifact-results-${{ github.run_id }}-${{ github.run_attempt }}

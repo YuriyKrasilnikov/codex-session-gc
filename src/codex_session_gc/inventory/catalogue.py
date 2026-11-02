@@ -72,6 +72,10 @@ _THREAD_SCHEMA_WITH_CREATORS = (
     ("creator_user_id", "TEXT", False, 0, None),
     ("creator_account_id", "TEXT", False, 0, None),
 )
+_THREAD_SCHEMA_62 = (
+    *_THREAD_SCHEMA_WITH_CREATORS,
+    ("attached_thread_parent_id", "TEXT", False, 0, None),
+)
 _SPAWN_SCHEMA = (
     ("parent_thread_id", "TEXT", True, 0, None),
     ("child_thread_id", "TEXT", True, 1, None),
@@ -88,7 +92,7 @@ _THREAD_FOREIGN_KEYS = frozenset(
 def _supported_schema(connection: sqlite3.Connection) -> bool:
     """Compare the declared profile through SQLite's structured schema metadata."""
     return (
-        _table_signature(connection, "threads") in {_THREAD_SCHEMA, _THREAD_SCHEMA_WITH_CREATORS}
+        _table_signature(connection, "threads") == _THREAD_SCHEMA_62
         and _table_signature(connection, "thread_spawn_edges") == _SPAWN_SCHEMA
         and _foreign_keys(connection, "threads") == _THREAD_FOREIGN_KEYS
         and not _foreign_keys(connection, "thread_spawn_edges")

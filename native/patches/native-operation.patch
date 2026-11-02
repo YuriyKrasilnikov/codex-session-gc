@@ -1,6 +1,6 @@
 --- /dev/null
 +++ b/codex-rs/thread-store/src/local/bounded_cleanup.rs
-@@ -0,0 +1,1837 @@
+@@ -0,0 +1,1882 @@
 +#![deny(unsafe_op_in_unsafe_fn, clippy::unwrap_used, clippy::as_conversions)]
 +//! A single guarded physical-manifest cleanup operation for independently qualified callers.
 +
@@ -401,7 +401,16 @@
 +        .await?;
 +        validate_retained_guardians(&mut state.transaction, &request, &retained_guardians).await?;
 +        for target in &request.targets {
-+            validate_state_identity(&mut state.transaction, target).await?;
++            let current = physical_targets
++                .iter()
++                .zip(&bounded_targets)
++                .find(|((owner, rollout), _)| {
++                    owner.thread_id == target.thread_id
++                        && rollout.rollout_id == target.current_rollout_id
++                })
++                .ok_or("current selected metadata is absent")?;
++            validate_state_identity(&mut state.transaction, target, &current.1.metadata.meta)
++                .await?;
 +            validate_selected_parent_relation(&mut state.transaction, &request, target).await?;
 +        }
 +        let selected_json = serde_json::to_string(
@@ -419,6 +428,13 @@
 +                .collect::<Vec<_>>(),
 +        )
 +        .map_err(error)?;
++        let attached_child: bool = sqlx::query_scalar(
++            "SELECT EXISTS(SELECT 1 FROM threads WHERE attached_thread_parent_id IN (SELECT value FROM json_each(?)))",
++        ).bind(&selected_json).fetch_one(&mut *state.transaction).await.map_err(error)?;
++        require(
++            !attached_child,
++            "attached child protects the selected parent",
++        )?;
 +        let retained_child: bool = sqlx::query_scalar(
 +            "SELECT EXISTS(SELECT 1 FROM thread_spawn_edges WHERE parent_thread_id IN (SELECT value FROM json_each(?)) AND child_thread_id NOT IN (SELECT value FROM json_each(?)))",
 +        ).bind(&selected_json).bind(&selected_json).fetch_one(&mut *state.transaction).await.map_err(error)?;
@@ -1312,10 +1328,28 @@
 +async fn validate_state_identity(
 +    connection: &mut sqlx::SqliteConnection,
 +    request: &ClosedWorkTarget,
++    metadata: &codex_protocol::protocol::SessionMeta,
 +) -> Result<()> {
-+    let row = sqlx::query("SELECT rollout_path, updated_at_ms, source, model_provider, agent_role, history_mode, archived FROM threads WHERE id=?")
++    let row = sqlx::query("SELECT rollout_path, updated_at_ms, source, model_provider, agent_role, history_mode, archived, attached_thread_parent_id FROM threads WHERE id=?")
 +        .bind(request.thread_id.to_string()).fetch_optional(&mut *connection).await.map_err(error)?
 +        .ok_or_else(|| "target state is absent".to_owned())?;
++    let header_parent = if metadata.attached_thread {
++        Some(
++            metadata
++                .forked_from_id
++                .filter(|id| *id != metadata.id)
++                .ok_or("attached metadata has no distinct fork source")?
++                .to_string(),
++        )
++    } else {
++        None
++    };
++    require(
++        row.try_get::<Option<String>, _>("attached_thread_parent_id")
++            .map_err(error)?
++            == header_parent,
++        "current attachment metadata and SQL projection disagree",
++    )?;
 +    let raw_source = row.try_get::<&str, _>("source").map_err(error)?;
 +    // Native enum_to_string stores scalar variants as raw text and structured
 +    // variants as JSON objects. These are the two representations of one schema.
@@ -1505,6 +1539,17 @@
 +                codex_rollout::rollout_owner_from_path(&path) == Some(meta.meta.id),
 +                "filename and header logical ownership disagree",
 +            )?;
++            if meta.meta.attached_thread {
++                let parent = meta
++                    .meta
++                    .forked_from_id
++                    .filter(|parent| *parent != meta.meta.id)
++                    .ok_or("attached metadata has no distinct fork source")?;
++                require(
++                    !selected.contains(&parent),
++                    "attached child protects the selected parent",
++                )?;
++            }
 +            if let Some(base) = meta.meta.history_base {
 +                providers.insert(base.thread_id);
 +            }

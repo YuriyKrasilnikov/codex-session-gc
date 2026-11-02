@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from codex_session_gc.domain import (
+    Attachment,
     CurrentRolloutPointer,
     FileStatIdentity,
     HistoryMode,
@@ -94,6 +95,17 @@ def _metadata(header: HeaderObservation, representation: PhysicalRepresentation)
     if coordinate is not None and type(coordinate) is not int:
         message = "The logical fork coordinate must be an explicit u64 or absent."
         raise PreparationRefused(message)
+    attached = metadata.get("attached_thread", False)
+    if type(attached) is not bool:
+        message = "Attachment flag must be boolean or absent."
+        raise PreparationRefused(message)
+    attachment = None
+    if attached:
+        try:
+            attachment = Attachment(ownership.thread_id, ThreadId.parse(fork))
+        except (TypeError, ValueError) as error:
+            message = "An attached thread requires a distinct fork source."
+            raise PreparationRefused(message) from error
     return RolloutMetadata(
         ownership=ownership,
         history_mode=HistoryMode(str(metadata.get("history_mode", "legacy"))),
@@ -107,6 +119,7 @@ def _metadata(header: HeaderObservation, representation: PhysicalRepresentation)
         logical_fork=None
         if fork is None
         else LogicalForkBoundary(ThreadId.parse(fork), coordinate),
+        attachment=attachment,
     )
 
 

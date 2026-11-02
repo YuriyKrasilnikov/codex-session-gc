@@ -1,0 +1,124 @@
+{
+  "format": "codex-session-gc-compatibility-boundaries-v1",
+  "baseline_commit": "360319d8dee62d87e2d59fc0c21805d79519cfed",
+  "baseline_profile_sha256": "17d36bd25ed15ca5a28e02ef0adee8ce8cfc3af4e8ec98463629e9fda94ca38b",
+  "baseline_native_inputs_sha256": "34a4efb11d12a2f630047952b7ada0c0a5781e6201ca4490e396b31431ec5a86",
+  "boundaries": [
+    {
+      "name": "state-schema",
+      "paths": [
+        "codex-rs/state/migrations/0062_threads_attached_parent.sql",
+        "codex-rs/state/src/runtime/threads.rs"
+      ],
+      "witnesses": [
+        "native-contract:schema59",
+        "native-contract:schema61",
+        "native-contract:schema63",
+        "native-contract:migration-checksum",
+        "native-contract:migration-success"
+      ]
+    },
+    {
+      "name": "attachment-publication",
+      "paths": [
+        "codex-rs/protocol/src/protocol.rs",
+        "codex-rs/rollout/src/recorder.rs",
+        "codex-rs/state/src/extract.rs",
+        "codex-rs/state/src/runtime/threads.rs",
+        "codex-rs/rollout/src/rollout_reference_index.rs",
+        "codex-rs/thread-store/src/local/live_writer.rs"
+      ],
+      "witnesses": [
+        "attached-retention:all13",
+        "stock0166-writer-coordination:one observed installed binary"
+      ]
+    },
+    {
+      "name": "writer-ownership",
+      "paths": [
+        "codex-rs/rollout/src/writer_lock.rs",
+        "codex-rs/rollout/src/maintenance.rs",
+        "codex-rs/thread-store/src/local/live_writer.rs",
+        "codex-rs/thread-store/src/local/archive_thread.rs",
+        "codex-rs/thread-store/src/local/unarchive_thread.rs",
+        "codex-rs/thread-store/src/local/revert_thread.rs"
+      ],
+      "witnesses": [
+        "native-contract:busy-root",
+        "native-contract:busy-child",
+        "native-contract:busy-sibling",
+        "native-contract:maintenance-busy",
+        "stock0166-writer-coordination"
+      ]
+    },
+    {
+      "name": "physical-lineage",
+      "paths": [
+        "codex-rs/thread-store/src/local/rollout_lineage.rs",
+        "codex-rs/thread-store/src/local/unarchive_thread.rs",
+        "codex-rs/thread-store/src/local/thread_history.rs",
+        "codex-rs/rollout/src/metadata.rs",
+        "codex-rs/thread-store/src/local/paginated_fork.rs",
+        "codex-rs/thread-store/src/local/rollout_migration.rs",
+        "codex-rs/thread-store/src/local/rollout_migration/startup.rs",
+        "codex-rs/cli/src/migrate_rollouts.rs"
+      ],
+      "witnesses": [
+        "physical-storage:actual-reverted",
+        "physical-storage:retained-independent-paginated-fork",
+        "physical-storage:retained-original-provider",
+        "physical-storage:history-effect-overrun",
+        "guardian-retention:all20",
+        "direct-closed-work:retained-provider"
+      ]
+    },
+    {
+      "name": "companion-sql",
+      "paths": [
+        "codex-rs/state/src/runtime/thread_attachments.rs",
+        "codex-rs/message-board/src/local/pool.rs",
+        "codex-rs/message-board/src/local.rs",
+        "codex-rs/message-board/src/local/queries.rs",
+        "codex-rs/thread-store/src/local/thread_history.rs",
+        "codex-rs/message-board/src/local/lifecycle.rs",
+        "codex-rs/message-board/src/local/setup.rs"
+      ],
+      "witnesses": [
+        "native-contract:board-root",
+        "native-contract:board-late-template",
+        "native-contract:board-missing-template-bound",
+        "native-contract:board-wrong-template-bound",
+        "native-contract:board-extra-trigger",
+        "native-contract:sqlite-busy",
+        "physical-storage:history-effect-overrun"
+      ]
+    },
+    {
+      "name": "local-filesystem",
+      "paths": [
+        "codex-rs/state/src/sqlite.rs",
+        "codex-rs/file-system/src/nfs.rs",
+        "codex-rs/state/src/sqlite/nfs.rs",
+        "codex-rs/state/src/nfs_migration.rs",
+        "codex-rs/state/src/nfs_migration/replacement.rs",
+        "codex-rs/cli/src/migrate_nfs_db.rs",
+        "codex-rs/state/src/sqlite/connection.rs"
+      ],
+      "witnesses": [
+        "native-contract:sqlite-busy"
+      ]
+    },
+    {
+      "name": "selected-metadata-publication",
+      "paths": [
+        "codex-rs/app-server/src/request_processors/thread_processor.rs",
+        "codex-rs/thread-store/src/local/update_thread_metadata.rs",
+        "codex-rs/state/src/runtime/threads.rs"
+      ],
+      "witnesses": [
+        "scoped-support-acceptance:sha256:684e5a419173db9ce4f864532791c17aefc31f52583fd6024d9465401e1a2ad6"
+      ]
+    }
+  ],
+  "outside": []
+}

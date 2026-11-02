@@ -15,6 +15,7 @@ from codex_session_gc.domain.cutoff import (
 from codex_session_gc.domain.model import (
     ActivityState,
     ArchiveState,
+    Attachment,
     DomainValidationError,
     GraphSnapshot,
     GuardianAssociation,
@@ -50,6 +51,7 @@ from codex_session_gc.domain.physical import (
 __all__ = [
     "ActivityState",
     "ArchiveState",
+    "Attachment",
     "CurrentRolloutPointer",
     "CutoffError",
     "DomainValidationError",

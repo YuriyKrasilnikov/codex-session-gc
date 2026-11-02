@@ -219,7 +219,12 @@ def preview_selection(
         "deletions": [str(x.value) for x in candidates],
         "sizes": [sizes.get(x) for x in candidates],
         "retained": [
-            {"id": str(x.thread_id.value), "reason": x.reason.value} for x in selection.retained
+            {
+                "id": str(x.thread_id.value),
+                "reason": x.reason.value,
+                "witness": str(x.witness.value) if x.witness else None,
+            }
+            for x in selection.retained
         ],
         "errors": list(selection.errors),
         "conditional": True,

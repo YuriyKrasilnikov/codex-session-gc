@@ -807,3 +807,23 @@ def test_mutator_final_close_error_is_not_a_preflight_refusal(
     assert len(closed) == 1
     assert observed.read_text().splitlines() == [str(_id(1).value)]
     assert inspect(options["journal"])[0].units[0].terminal_kind is TerminalKind.CONFIRMED
+
+
+def test_terminal_includes_retention_witness() -> None:
+    report = {
+        "kind": "closed_work",
+        "outcome": "partial",
+        "receipt": "receipt",
+        "roots": [
+            {
+                "root": "parent",
+                "status": "not_dispatched",
+                "originalNativeOutcome": None,
+                "finalObservedState": None,
+                "retained": [
+                    {"threadId": "parent", "reason": "attached_thread_exists", "witness": "child"}
+                ],
+            }
+        ],
+    }
+    assert "retained parent: attached_thread_exists; witness: child" in terminal(report)
