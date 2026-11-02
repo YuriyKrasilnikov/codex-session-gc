@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, DataTable, Footer, Input, RichLog, Select, Static
 
 from codex_session_gc.cli.console_display import (
@@ -106,7 +106,8 @@ class SessionApp(App[tuple[str, int]]):
         ("escape", "cancel_preview", "Cancel preview"),
     ]
     CSS = """
-    Screen { layout: vertical; }
+    Screen { layout: vertical; overflow: hidden hidden; }
+    #content { height: 1fr; min-height: 0; }
     #heading, #notice { height: 2; }
     #progress { height: 3; display: none; }
     #root-results { height: 4; display: none; }
@@ -114,16 +115,15 @@ class SessionApp(App[tuple[str, int]]):
     .filters Input { width: 1fr; }
     .filters Select { width: 1fr; }
     #sessions { height: 1fr; min-height: 3; }
-    #details-panel { height: 3; }
+    #details-panel { height: auto; min-height: 3; }
     #details { height: auto; }
     #actions { height: 6; layout: grid; grid-size: 4 2; grid-columns: 1fr; }
     #actions Button { width: 100%; min-width: 8; }
-    #review { height: 1fr; display: none; }
+    #review { height: auto; display: none; }
     #review-text { height: auto; }
     #confirm { height: 3; display: none; }
     #execute { display: none; }
-    .reviewing .filters, .reviewing #sessions, .reviewing #details-panel,
-    .reviewing #heading { display: none; }
+    .reviewing .filters, .reviewing #sessions, .reviewing #details-panel { display: none; }
     """
 
     def __init__(self, home: Path, cutoff: UtcCutoff, helper: Path | None, receipts: Path) -> None:
@@ -164,83 +164,85 @@ class SessionApp(App[tuple[str, int]]):
             id="heading",
             markup=False,
         )
-        with Horizontal(classes="filters"):
-            yield Input(placeholder="Search full title / directory / ID", id="search")
-            yield Input(
-                self.cutoff.timestamp.isoformat(),
-                placeholder="Activity strictly before UTC",
-                id="before",
-            )
-            yield Select[str | None](
-                [(Text("All directories"), None)], value=None, allow_blank=False, id="cwd"
-            )
-            yield Select(
-                [
-                    ("All histories", CatalogueScope.ALL),
-                    ("Main histories", CatalogueScope.MAIN),
-                    ("Agents (all)", CatalogueScope.AGENTS),
-                    ("Ordinary agents", CatalogueScope.ORDINARY_AGENTS),
-                    ("Guardians", CatalogueScope.GUARDIANS),
-                ],
-                value=CatalogueScope.ALL,
-                allow_blank=False,
-                id="scope",
-            )
-        with Horizontal(classes="filters"):
-            yield Input(placeholder="Minimum stored bytes", id="minimum")
-            yield Input(placeholder="Maximum stored bytes", id="maximum")
-            yield Select[ArchiveState | None](
-                [
-                    ("All archive states", None),
-                    ("Archived", ArchiveState.ARCHIVED),
-                    ("Not archived", ArchiveState.NOT_ARCHIVED),
-                    ("Archive unknown", ArchiveState.UNKNOWN),
-                ],
-                value=None,
-                allow_blank=False,
-                id="archive",
-            )
-            yield Select(
-                [
-                    ("Work total bytes", "total"),
-                    ("Work own bytes", "own"),
-                    ("Work agent bytes", "agents"),
-                    ("Activity", "activity"),
-                ],
-                value="total",
-                allow_blank=False,
-                id="sort",
-            )
-            yield Select([("All works", "all")], value="all", allow_blank=False, id="work")
-        with Horizontal(classes="filters"):
-            yield Select(
-                [("Works", "work"), ("Histories", "history")],
-                value="work",
-                allow_blank=False,
-                id="order-target",
-            )
-            yield Select(
-                [("Descending", "desc"), ("Ascending", "asc")],
-                value="desc",
-                allow_blank=False,
-                id="direction",
-            )
-        yield DataTable(id="sessions", cursor_type="row")
-        with VerticalScroll(id="details-panel"):
-            yield Static(
-                "Enter expands a work. Space selects matching histories; exact bytes appear here.",
-                id="details",
-                markup=False,
-            )
+        with VerticalScroll(id="content"):
+            with Horizontal(classes="filters"):
+                yield Input(placeholder="Search full title / directory / ID", id="search")
+                yield Input(
+                    self.cutoff.timestamp.isoformat(),
+                    placeholder="Activity strictly before UTC",
+                    id="before",
+                )
+                yield Select[str | None](
+                    [(Text("All directories"), None)], value=None, allow_blank=False, id="cwd"
+                )
+                yield Select(
+                    [
+                        ("All histories", CatalogueScope.ALL),
+                        ("Main histories", CatalogueScope.MAIN),
+                        ("Agents (all)", CatalogueScope.AGENTS),
+                        ("Ordinary agents", CatalogueScope.ORDINARY_AGENTS),
+                        ("Guardians", CatalogueScope.GUARDIANS),
+                    ],
+                    value=CatalogueScope.ALL,
+                    allow_blank=False,
+                    id="scope",
+                )
+            with Horizontal(classes="filters"):
+                yield Input(placeholder="Minimum stored bytes", id="minimum")
+                yield Input(placeholder="Maximum stored bytes", id="maximum")
+                yield Select[ArchiveState | None](
+                    [
+                        ("All archive states", None),
+                        ("Archived", ArchiveState.ARCHIVED),
+                        ("Not archived", ArchiveState.NOT_ARCHIVED),
+                        ("Archive unknown", ArchiveState.UNKNOWN),
+                    ],
+                    value=None,
+                    allow_blank=False,
+                    id="archive",
+                )
+                yield Select(
+                    [
+                        ("Work total bytes", "total"),
+                        ("Work own bytes", "own"),
+                        ("Work agent bytes", "agents"),
+                        ("Activity", "activity"),
+                    ],
+                    value="total",
+                    allow_blank=False,
+                    id="sort",
+                )
+                yield Select([("All works", "all")], value="all", allow_blank=False, id="work")
+            with Horizontal(classes="filters"):
+                yield Select(
+                    [("Works", "work"), ("Histories", "history")],
+                    value="work",
+                    allow_blank=False,
+                    id="order-target",
+                )
+                yield Select(
+                    [("Descending", "desc"), ("Ascending", "asc")],
+                    value="desc",
+                    allow_blank=False,
+                    id="direction",
+                )
+            yield DataTable(id="sessions", cursor_type="row")
+            with Vertical(id="details-panel"):
+                yield Static(
+                    "Enter expands a work. Space selects matching histories; "
+                    "exact bytes appear here.",
+                    id="details",
+                    markup=False,
+                )
+            yield Static("", id="progress", markup=False)
+            yield RichLog(id="root-results", markup=False, highlight=False, wrap=True)
+            with Vertical(id="review"):
+                yield Static("", id="review-text", markup=False)
         yield Static(
             "No histories selected. Stored bytes are not guaranteed reclaimed space.",
             id="notice",
             markup=False,
         )
-        yield Static("", id="progress", markup=False)
-        yield RichLog(id="root-results", markup=False, highlight=False, wrap=True)
-        with VerticalScroll(id="review"):
-            yield Static("", id="review-text", markup=False)
         yield Input(placeholder="Type literal DELETE after reviewing exact selection", id="confirm")
         with Horizontal(id="actions"):
             yield Button("Select matches", id="select")

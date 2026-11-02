@@ -14,7 +14,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ParamSpec
 from uuid import UUID, uuid4
 
 import pytest
@@ -22,6 +22,7 @@ from textual.widgets import DataTable, Input, Select, Static
 
 from codex_session_gc.cli import mcp_server
 from codex_session_gc.cli import textual_console as ui
+from codex_session_gc.cli.console_tasks import PreviewMode
 from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.domain import ArchiveState, ThreadId, UtcCutoff
 from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
@@ -36,11 +37,21 @@ from tests.current_storage_fixture import _review_manifest, _stored_rollout
 from tests.test_catalogue_query import _A, _B, _C, _CWD, _E, _mixed_index
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+    from typing import Literal
+
     from codex_session_gc.cli.console_tasks import Intent
 
 ROOT = ThreadId.parse("00000000-0000-7000-8000-000000000001")
 AGENT = ThreadId.parse("00000000-0000-7000-8000-000000000002")
 CUTOFF = UtcCutoff(datetime(2030, 1, 1, tzinfo=UTC))
+P = ParamSpec("P")
+_INVALID_SORT_PAIRS: tuple[
+    tuple[Literal["work", "history"], Literal["stored_bytes", "total"]], ...
+] = (
+    ("work", "stored_bytes"),
+    ("history", "total"),
+)
 
 
 def catalogue() -> SessionCatalogue:
@@ -114,8 +125,8 @@ def test_filters_groups_and_exact_bulk_selection(
         browser = app(tmp_path, monkeypatch)
         captured = []
 
-        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
-            assert mode is ui.PreviewMode.CONFIRM
+        async def preview(intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
+            assert mode is PreviewMode.CONFIRM
             captured.append(intent)
             return report(intent)
 
@@ -240,8 +251,8 @@ def test_preview_cancel_waits_for_owned_cleanup(
         browser = app(tmp_path, monkeypatch)
         started, cleaned = asyncio.Event(), asyncio.Event()
 
-        async def preview(_intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
-            assert mode is ui.PreviewMode.CONFIRM
+        async def preview(_intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
+            assert mode is PreviewMode.CONFIRM
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -274,8 +285,8 @@ def test_dispatch_cannot_quit_or_dispatch_twice(
         entered, release = asyncio.Event(), asyncio.Event()
         calls = []
 
-        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
-            assert mode is ui.PreviewMode.CONFIRM
+        async def preview(intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
+            assert mode is PreviewMode.CONFIRM
             return report(intent)
 
         def execute(
@@ -346,7 +357,7 @@ def test_async_preview_public_report_and_cancellation_cleanup(
         assert "declaration" not in result
         assert list(temporary.iterdir()) == []
         leaf = console_tasks.Intent(home, CUTOFF, (identifier,), (ThreadId.parse(_GRANDCHILD),))
-        bound = await console_tasks.async_preview(leaf, mode=ui.PreviewMode.CONFIRM)
+        bound = await console_tasks.async_preview(leaf, mode=PreviewMode.CONFIRM)
         reviewed = console_tasks.confirmed_intent(leaf, bound)
         assert reviewed.declaration is not None
         metadata = home.stat()
@@ -356,7 +367,7 @@ def test_async_preview_public_report_and_cancellation_cleanup(
         )
         assert reviewed.declaration.model_dump(mode="json") == bound["declaration"]
         assert list(temporary.iterdir()) == []
-        task = asyncio.create_task(console_tasks.async_preview(leaf, mode=ui.PreviewMode.CONFIRM))
+        task = asyncio.create_task(console_tasks.async_preview(leaf, mode=PreviewMode.CONFIRM))
         await asyncio.sleep(0)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -380,6 +391,63 @@ def test_narrow_terminal_contains_essential_controls(
                 assert region.right <= browser.size.width
                 assert region.y >= 0
                 assert region.bottom <= footer
+
+    asyncio.run(scenario())
+
+
+def test_viewport_keeps_chrome_visible_while_content_scrolls_and_resizes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fixed controls remain reachable while the content owns vertical scrolling."""
+
+    async def scenario() -> None:
+        browser = app(tmp_path, monkeypatch)
+
+        def check_chrome() -> None:
+            footer = browser.query_one("Footer").region
+            assert footer.y >= 0
+            assert footer.bottom <= browser.size.height
+            for identifier in (
+                "heading",
+                "notice",
+                "select",
+                "clear",
+                "preview",
+                "cancel",
+                "refresh",
+                "quit",
+            ):
+                region = browser.query_one("#" + identifier).region
+                assert region.x >= 0
+                assert region.right <= browser.size.width
+                assert region.y >= 0
+                assert region.bottom <= footer.y
+            assert browser.screen.scroll_y == 0
+
+        async with browser.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            content = browser.query_one("#content")
+            assert content.max_scroll_y > 0
+            for offset in (0, content.max_scroll_y):
+                content.scroll_to(y=offset, animate=False, immediate=True)
+                await pilot.pause()
+                check_chrome()
+            details = browser.query_one("#details").region
+            assert details.bottom <= content.region.bottom
+            assert details.bottom > content.region.y
+            browser.query_one("#search").focus()
+            await pilot.pause()
+            search = browser.query_one("#search").region
+            assert search.y >= content.region.y
+            assert search.bottom <= content.region.bottom
+            check_chrome()
+            browser.query_one("#quit").focus()
+            await pilot.pause()
+            check_chrome()
+            for width, height in ((120, 40), (80, 24)):
+                await pilot.resize_terminal(width, height)
+                await pilot.pause()
+                check_chrome()
 
     asyncio.run(scenario())
 
@@ -441,8 +509,8 @@ def test_review_locks_selection_and_resets_confirmation(
     async def scenario() -> None:
         browser = app(tmp_path, monkeypatch)
 
-        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
-            assert mode is ui.PreviewMode.CONFIRM
+        async def preview(intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
+            assert mode is PreviewMode.CONFIRM
             return report(intent)
 
         monkeypatch.setattr(ui, "async_preview", preview)
@@ -459,10 +527,11 @@ def test_review_locks_selection_and_resets_confirmation(
             await pilot.click("#clear")
             assert browser.selected == before
             footer = browser.query_one("Footer").region.y
-            for identifier in ("confirm", "execute", "cancel", "quit"):
+            for identifier in ("heading", "notice", "confirm", "execute", "cancel", "quit"):
                 region = browser.query_one("#" + identifier).region
                 assert region.x >= 0
                 assert region.right <= browser.size.width
+                assert region.y >= 0
                 assert region.bottom <= footer
             await pilot.click("#cancel")
             await pilot.click("#preview")
@@ -479,8 +548,8 @@ def test_retention_and_errors_visible_without_executable_candidates(
     async def scenario() -> None:
         browser = app(tmp_path, monkeypatch)
 
-        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
-            assert mode is ui.PreviewMode.CONFIRM
+        async def preview(intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
+            assert mode is PreviewMode.CONFIRM
             return {
                 **report(intent),
                 "deletions": [],
@@ -511,8 +580,8 @@ def test_forced_teardown_joins_dispatched_backend(
         entered, release = asyncio.Event(), asyncio.Event()
         loop = asyncio.get_running_loop()
 
-        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
-            assert mode is ui.PreviewMode.CONFIRM
+        async def preview(intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
+            assert mode is PreviewMode.CONFIRM
             return report(intent)
 
         def execute(
@@ -623,8 +692,8 @@ def test_dispatch_requires_literal_confirmation(
         browser = app(tmp_path, monkeypatch)
         calls = []
 
-        async def preview(intent: Intent, *, mode: ui.PreviewMode) -> dict[str, Any]:
-            assert mode is ui.PreviewMode.CONFIRM
+        async def preview(intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
+            assert mode is PreviewMode.CONFIRM
             return report(intent)
 
         def execute(*_args: object, progress: ProgressChannel | None) -> tuple[dict[str, Any], int]:
@@ -658,13 +727,18 @@ def test_preview_cancellation_reaps_actual_owned_worker(
         processes = []
         original = asyncio.create_subprocess_exec
 
-        async def launch(*_args: object, **kwargs: object) -> asyncio.subprocess.Process:
-            process = await original(sys.executable, "-c", "import time;time.sleep(60)", **kwargs)
-            processes.append(process)
-            launched.set()
-            return process
+        def observe_launch(
+            call: Callable[P, Awaitable[asyncio.subprocess.Process]],
+        ) -> Callable[P, Awaitable[asyncio.subprocess.Process]]:
+            async def launch(*args: P.args, **kwargs: P.kwargs) -> asyncio.subprocess.Process:
+                process = await call(*args, **kwargs)
+                processes.append(process)
+                launched.set()
+                return process
 
-        monkeypatch.setattr(asyncio, "create_subprocess_exec", launch)
+            return launch
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", observe_launch(original))
         monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
         intent = console_tasks.Intent(tmp_path / "home", CUTOFF, (ROOT,), (ROOT,))
         task = asyncio.create_task(console_tasks.async_preview(intent))
@@ -673,10 +747,15 @@ def test_preview_cancellation_reaps_actual_owned_worker(
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        assert processes[0].returncode is not None
+        assert await asyncio.to_thread(lambda: processes[0].returncode) is not None
         assert await asyncio.to_thread(lambda: list(tmp_path.iterdir())) == []
 
-    asyncio.run(scenario())
+    with tempfile.TemporaryDirectory(prefix="gc-preview-worker-", dir=tmp_path.parent) as directory:
+        (Path(directory) / "gc_preview_sleep_worker.py").write_text("import time\ntime.sleep(60)\n")
+        search_path = os.pathsep.join(filter(None, (directory, os.environ.get("PYTHONPATH", ""))))
+        monkeypatch.setenv("PYTHONPATH", search_path)
+        monkeypatch.setattr(console_tasks, "__name__", "gc_preview_sleep_worker")
+        asyncio.run(scenario())
 
 
 def test_orphan_guardian_and_unknown_sources_are_visible(
@@ -873,11 +952,15 @@ def test_global_history_order_matches_mcp_pages_and_preserves_exact_selection(
     async def scenario() -> None:
         service = mcp_server.CatalogueService(tmp_path)
         first = await service.query_catalogue(
-            scope="agents", order_target="history", sort="stored_bytes", direction="desc", limit=1
+            scope=CatalogueScope.AGENTS,
+            order_target="history",
+            sort="stored_bytes",
+            direction="desc",
+            limit=1,
         )
         second = await service.query_catalogue(
             snapshot_id=first["snapshot_id"],
-            scope="agents",
+            scope=CatalogueScope.AGENTS,
             order_target="history",
             sort="stored_bytes",
             direction="desc",
@@ -895,14 +978,14 @@ def test_global_history_order_matches_mcp_pages_and_preserves_exact_selection(
         ) == work_totals
         oldest = await service.query_catalogue(
             snapshot_id=first["snapshot_id"],
-            scope="agents",
+            scope=CatalogueScope.AGENTS,
             roots=[str(_C.value)],
             order_target="history",
             sort="activity",
             direction="asc",
         )
         assert [row["id"] for row in oldest["histories"]] == [str(_E.value)]
-        for target, field in (("work", "stored_bytes"), ("history", "total")):
+        for target, field in _INVALID_SORT_PAIRS:
             with pytest.raises(ValueError, match=r"(?i)(order|sort)"):
                 await service.query_catalogue(order_target=target, sort=field)
         browser = ui.SessionApp(
