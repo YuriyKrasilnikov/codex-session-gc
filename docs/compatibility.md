@@ -148,6 +148,156 @@ Follow the qualification procedure below when an execution contract changes.
 6. Keep validation of an unchanged execution contract outside its raw JSON profile.
    Follow the byte-identity and receipt transition below whenever the profile changes.
 
+### Compare source and prepare a scoped assessment
+
+The comparison tool reads Git objects from an existing local repository; it does
+not fetch source or authenticate an installed Codex executable. Obtain the
+baseline and target commits independently, and choose boundaries that describe
+the contract and its witnesses. `tools/compatibility/current-boundaries.json`
+is bound to the baseline, raw profile and native-input identities it declares;
+it is not a general set of exclusions for other baselines. Review and update a
+separate declaration when those identities or the consumed boundaries differ.
+
+From this checkout, set `SOURCE_REPOSITORY` and `TRUSTED_GIT` to absolute paths,
+`BASELINE_COMMIT` and `TARGET_COMMIT` to full commit IDs, and `BOUNDARIES` to an
+absolute declaration path. Set `PROFILE_SHA256`, `NATIVE_INPUTS_SHA256` and
+`HELPER_SHA256` to the exact qualified execution identities. The following
+example uses the current six source roots and explicit finite limits; revisit
+the roots and bounds for the source being assessed:
+
+```sh
+compare_source() {
+  PYTHONPATH=src .venv/bin/python -m tools.compatibility \
+    --git "$TRUSTED_GIT" --repository "$SOURCE_REPOSITORY" \
+    --baseline "$BASELINE_COMMIT" --target "$TARGET_COMMIT" \
+    --boundaries "$BOUNDARIES" --profile-sha256 "$PROFILE_SHA256" \
+    --native-inputs-sha256 "$NATIVE_INPUTS_SHA256" --helper-sha256 "$HELPER_SHA256" \
+    --workspace codex-rs/Cargo.toml \
+    --cargo-root codex-rs/state/Cargo.toml \
+    --cargo-root codex-rs/thread-store/Cargo.toml \
+    --cargo-root codex-rs/rollout/Cargo.toml \
+    --cargo-root codex-rs/protocol/Cargo.toml \
+    --cargo-root codex-rs/message-board/Cargo.toml \
+    --cargo-root codex-rs/core/Cargo.toml \
+    --max-cargo-nodes 12000 --max-cargo-edges 30000 --max-cargo-reads 12000 \
+    --max-cargo-bytes 268435456 --cargo-seconds 180 \
+    --max-objects 12000 --max-object-bytes 268435456 --object-seconds 180 \
+    "$@"
+}
+compare_source > "$REPORT"
+sha256sum "$REPORT"
+```
+
+Use a new, controlled output path for `REPORT`. The report records exact changed
+objects and observed Cargo inputs, and remains conservative when a bound, input,
+caller, generated source or dependency cannot be established. Review the actual
+consumers and effects, including creation, fork, resume, publication and database
+ownership. Give every changed object and each reported gap an evidence-backed
+disposition within the stated scope; do not infer irrelevance solely from a path,
+file type or a missing search hit. Keep the report, evidence and their identities
+together. A successful comparison does not prove an installed binary's source.
+
+Prepare the strict `codex-session-gc-impact-assessment-v1` JSON described by
+`tools/compatibility/decision.py`, binding the exact report, commit pair, observed
+source closures, helper, profile and native-input identities. Its scope, review
+source, changed-object and boundary dispositions, gap dispositions and evidence
+are supplied claims. Evaluate it using the same inputs and limits:
+
+```sh
+compare_source --assessment "$ASSESSMENT" > "$DECISION"
+```
+
+Use a new controlled path for `DECISION` and retain both outputs. The tool
+reobserves the source and returns `unknown` if bindings or required coverage do
+not match. `reviewed_same_execution` means the supplied scoped assessment says
+the existing execution contract remains applicable; it does not authenticate
+that review, verify the running producer, or authorize cleanup. The raw source
+report can remain `UNKNOWN` while a separately reviewed scoped assessment
+reaches that result. An unresolved relevant effect remains unknown or requires
+review; an execution change requires the corresponding implementation and new
+qualification.
+
+### Run a bounded witness
+
+There is no witness command-line wrapper. The maintainer API in
+`tools/compatibility/witness.py` accepts a strict `WitnessSpec` and an explicit
+helper and optional fixture. Declare the selected cases and report format, the
+exact source-file envelope with digest and size, helper/profile/native-input
+identities, script arguments, and finite `seconds`, `output_bytes`,
+`scratch_bytes` and `free_floor_bytes`. The parser checks the declaration and
+the runner checks its declared inputs before and after execution. The source
+envelope describes the supplied files; it does not prove complete dependency
+coverage or authenticate the supplied review. See
+`tools/tests/test_compatibility_witness.py` for the declaration shape.
+
+The following invokes one already prepared declaration. Set all paths to absolute
+paths, `HELPER_BYTES` to the qualified helper size, and `FIXTURE` to the declared
+fixture path or `-` when the declaration has no fixture. `RECEIPT` must not exist.
+`SOURCE_ROOT` is this project's checkout, and `TRUSTED_PYTHON` is the Python
+executable for its prepared environment:
+
+```sh
+PYTHONPATH=src .venv/bin/python - "$SPEC" "$SOURCE_ROOT" "$HELPER" \
+  "$HELPER_BYTES" "$FIXTURE" "$TRUSTED_PYTHON" "$RECEIPT" <<'PY'
+import asyncio
+from dataclasses import asdict
+import json
+from pathlib import Path
+import sys
+
+from codex_session_gc.artifacts import ArtifactIdentity
+from tools.compatibility.witness import WitnessInputs, parse_spec, run_witness
+
+spec_path, root, helper, helper_bytes, fixture, python, receipt = sys.argv[1:]
+with Path(spec_path).open("rb") as source:
+    spec = parse_spec(source.read(1024 * 1024 + 1))
+inputs = WitnessInputs(
+    Path(helper), ArtifactIdentity(spec.execution.helper_sha256, int(helper_bytes)),
+    None if fixture == "-" else Path(fixture),
+)
+result = asyncio.run(run_witness(spec, Path(root), inputs, Path(python)))
+with Path(receipt).open("x", encoding="utf-8") as output:
+    json.dump(asdict(result), output, sort_keys=True)
+    output.write("\n")
+PY
+```
+
+The runner uses an owned disposable home and checks the expected terminal cases;
+failed, missing, skipped, truncated or over-budget cases do not become positive
+evidence. A receipt records the observed input and report identities, not an
+authenticated source review or permission to delete. Resource and deadline
+limits are cooperative around filesystem and process operations.
+
+### Prepare a support record
+
+Once the source assessment and relevant witnesses justify a scoped decision,
+maintainers author `src/codex_session_gc/compatibility/support.json` with the
+exact target source, report digest, execution identities, evidence, conditions
+and any remaining gaps. The record is a separate claim: unchanged consumed
+contracts can use a new support record with the existing qualified helper and
+unchanged profile bytes. A changed execution contract instead needs the affected
+implementation, qualification and, when necessary, a new matched release.
+
+Validate and copy the exact source record to a new absolute output path:
+
+```sh
+PYTHONPATH=src .venv/bin/python -m tools.support_record --output "$RECORD"
+```
+
+Retain its reported SHA-256 and size. The support-only workflow can attest those
+exact bytes from the trusted GC repository's `artifacts.yml` workflow on
+`refs/heads/main`; its assembly commit is separate from the upstream Codex target
+commit. Promote the same bytes and verify
+the resulting asset before import as described above. An offline receipt records
+the earlier verification; it does not reauthenticate a signature or prove that an
+installed Codex binary came from the stated upstream commit.
+
+The scope requires the actual producer and helper to use the qualified matching
+storage locations and selected related fork, resume and publication to have
+finished. Unknown source variants stay protected. In particular, an Internal
+Guardian source is not the qualified `SubAgentSource::Other("guardian")` case and
+remains unknown/protected; this does not claim a complete Guardian lifecycle.
+
 ## Current validation boundaries
 
 Native storage qualification tests use disposable LocalThreadStore producers and
