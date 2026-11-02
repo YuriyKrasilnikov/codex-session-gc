@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 OWNED_MARKER_ENV: Final = "CODEX_SESSION_GC_OWNED_MARKER"
 _PROC: Final = Path("/proc")
+_FIRST_PIPE_DESCRIPTOR: Final = 3
 
 
 class Presence(StrEnum):
@@ -210,18 +211,20 @@ def child_presence(identity: ChildIdentity) -> Presence:  # noqa: C901, PLR0911
     return Presence.AMBIGUOUS
 
 
-def owned_launcher_command(command: ChildCommand) -> ChildCommand:
+def owned_launcher_command(command: ChildCommand, ready_descriptor: int) -> ChildCommand:
     """Wrap one native command in the installed resource that waits for a grant."""
     launcher = Path(str(files("codex_session_gc.execution").joinpath("owned_launch.py"))).resolve()
     if not launcher.is_file():
         raise GatedLaunchError("The installed launcher resource is unavailable.")
     if not command.environment.get(OWNED_MARKER_ENV):
         raise GatedLaunchError("The complete child environment lacks an owned marker.")
+    if type(ready_descriptor) is not int or ready_descriptor < _FIRST_PIPE_DESCRIPTOR:
+        raise GatedLaunchError("The launcher readiness descriptor is invalid.")
     return ChildCommand(
         Path(sys.executable).resolve(),
-        ("-I", str(launcher), str(command.executable), *command.arguments),
+        ("-I", str(launcher), str(ready_descriptor), str(command.executable), *command.arguments),
         command.environment,
-        command.inherited_descriptors,
+        (*command.inherited_descriptors, ready_descriptor),
     )
 
 

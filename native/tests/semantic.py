@@ -1,12 +1,12 @@
 """Shared current-native fixture oracles and exact schema-2 journal dispatch."""
 from __future__ import annotations
 from contextlib import contextmanager
-import atexit, hashlib, json, os, pathlib, sqlite3, subprocess, sys, time, uuid
+import atexit, hashlib, json, os, pathlib, sqlite3, subprocess, sys, uuid
 sys.dont_write_bytecode=True
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'src'))
 from codex_session_gc.recovery import journal as j
-from codex_session_gc.execution.process_identity import OWNED_MARKER_ENV, observe_owned_child
+from codex_session_gc.execution import launch, one_shot, transport
 BIN=pathlib.Path(os.environ.get('GC_NATIVE_BINARY',str(ROOT/'native/build/debug/codex-session-gc-native')))
 FIXTURE=pathlib.Path(os.environ.get('GC_NATIVE_FIXTURE',str(ROOT/'native/build/debug/gc-native-fixture')))
 with BIN.open('rb') as binary: NATIVE_DIGEST=hashlib.file_digest(binary,'sha256').hexdigest()
@@ -76,25 +76,27 @@ def owner_snapshot(req,identity):
 def dispatch(req,aid,uid,payload):
  raw=json.dumps(req,separators=(',',':')).encode(); request=j.Payload('application/vnd.codex-session-gc.legacy-native-request+json',1,raw)
  receipt=pathlib.Path(req['journal'])
- launch=j.LaunchId(uuid.uuid4())
- j.record_launch_intent(receipt,aid,j.LaunchIntent(launch,1,j.LaunchPurpose.APPLY,request))
- env=dict(os.environ,PYTHONPATH=str(ROOT/'src'),PYTHONDONTWRITEBYTECODE='1'); env[OWNED_MARKER_ENV]=str(uuid.uuid4())
- process=spawn([sys.executable,'-m','codex_session_gc.execution.owned_launch',str(BIN)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env)
- identity=None
- for _ in range(100):
-  identity=observe_owned_child(process.pid,env)
-  if identity is not None: break
-  time.sleep(.005)
- assert identity is not None,'owned launcher incarnation unavailable'
- j.register_launch(receipt,aid,j.LaunchRegistration(launch,1,identity.incarnation()))
- j.record_dispatch_intent(receipt,aid,uid,request,payload,identity.incarnation())
- stdout,stderr=process.communicate(b'codex-session-gc:grant-v1\n'+raw,timeout=30)
- j.record_launch_closure(receipt,aid,launch,1,j.TerminalKind.CONFIRMED,j.Payload('fixture/native-process-exit',1,str(process.returncode).encode()))
- outcome=json.loads(stdout); assert not stderr,stderr.decode()
- assert process.returncode=={'confirmed':0,'refused':1,'partial':2,'unknown':3}[outcome['status']],(process.returncode,outcome)
+ binding=launch.LaunchBinding(receipt,aid,j.LaunchId(uuid.uuid4()),1,j.LaunchPurpose.APPLY)
+ env=dict(os.environ,PYTHONPATH=str(ROOT/'src'),PYTHONDONTWRITEBYTECODE='1')
+ result=one_shot.dispatch_once(binding,transport.ChildCommand(BIN,(),env),uid,request,payload,deadline_seconds=30)
+ if result.reply is None:
+  raise AssertionError((result.detail,result.returncode,result.stderr,result.stdout))
+ if not (result.reaped and result.closure_recorded and result.terminal_recorded):
+  raise AssertionError(result)
+ if result.stderr:
+  raise AssertionError((result.returncode,result.stderr))
+ outcome=json.loads(result.reply.data)
+ expected_exit={'confirmed':0,'refused':1,'partial':2,'unknown':3}[outcome['status']]
+ assert result.returncode==expected_exit,(result.returncode,outcome)
+ if result.status!=j.TerminalKind(outcome['status']) or result.request_digest!=request.digest:
+  raise AssertionError(result)
  assert outcome['request_sha256']==list(hashlib.sha256(raw).digest()),outcome
- evidence=stdout
- j.record_terminal_evidence(receipt,aid,uid,request.digest,j.TerminalKind(outcome['status']),j.Payload('fixture/native-outcome',1,evidence))
+ (attempt,)=j.inspect(receipt)
+ unit=next(unit for unit in attempt.units if unit.unit.unit_id==uid)
+ if unit.request!=request or unit.terminal_kind!=result.status or unit.terminal!=result.reply:
+  raise AssertionError(unit)
+ if attempt.launches[-1].status!=j.LaunchStatus.CLOSED:
+  raise AssertionError(attempt.launches[-1])
  try: j.record_dispatch_intent(receipt,aid,uid,request,payload,payload)
  except j.TransitionError: pass
  else: raise AssertionError('dispatch journal admitted a repeat')

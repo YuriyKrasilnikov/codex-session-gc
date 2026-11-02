@@ -82,8 +82,12 @@ lifetime is independent of the owned backend; the existing result and join remai
 authoritative if observation stops.
 
 The native command is launched through the packaged `owned_launch.py` gate. It
-requires an exact grant within five seconds before replacing its own process.
-The parent records the blocked child's observed incarnation before granting exec.
+first sends an exact versioned readiness frame and EOF on a dedicated pipe. The
+parent bounds that wait by the operation deadline before observing the blocked
+child's incarnation; readiness is neither identity nor a grant. The launcher
+closes the readiness descriptor and then requires an exact grant within five
+seconds before replacing its own process. The parent records the observed
+incarnation before granting exec.
 Identity includes marker, start ticks, namespaces, boot/procfs coordinate and UID.
 Unreadable or changed observation coordinates are ambiguous, never proof of absence.
 The launcher itself has no receipt access. The parent owns registration, fencing,

@@ -16,12 +16,14 @@ import os
 import selectors
 import subprocess
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from hashlib import sha256
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from codex_session_gc.execution.owned_launch import READY_FRAME
 from codex_session_gc.execution.process_identity import (
     OWNED_MARKER_ENV,
     IdentityObservationError,
@@ -43,6 +45,9 @@ from codex_session_gc.recovery import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from typing import BinaryIO
+
     from codex_session_gc.execution.launch import LaunchBinding
     from codex_session_gc.execution.transport import ChildCommand
 
@@ -76,6 +81,7 @@ class OneShotError(Exception):
 
 class _PreGrantStage(StrEnum):
     SPAWN = "spawn"
+    READINESS = "readiness"
     IDENTITY = "identity"
     REGISTRATION = "registration"
     DISPATCH_INTENT = "dispatch_intent"
@@ -121,17 +127,71 @@ def dispatch_once(
     deadline = time.monotonic() + deadline_seconds
     environment = dict(command.environment)
     environment[OWNED_MARKER_ENV] = str(uuid4())
-    launcher = owned_launcher_command(replace(command, environment=environment))
-    try:
-        record_launch_intent(
-            binding.receipt,
-            binding.attempt_id,
-            LaunchIntent(binding.launch_id, binding.generation, binding.purpose, request),
+    with _readiness_pipe() as (ready_read, ready_write):
+        launcher = owned_launcher_command(
+            replace(command, environment=environment), ready_write.fileno()
         )
-    except Exception as error:
-        raise OneShotError(
-            "Launch intent was refused; no child was started.", cleanup=PreGrantCleanup.NOT_STARTED
-        ) from error
+        try:
+            record_launch_intent(
+                binding.receipt,
+                binding.attempt_id,
+                LaunchIntent(binding.launch_id, binding.generation, binding.purpose, request),
+            )
+        except Exception as error:
+            raise OneShotError(
+                "Launch intent was refused; no child was started.",
+                cleanup=PreGrantCleanup.NOT_STARTED,
+            ) from error
+        return _dispatch_started(
+            binding,
+            launcher,
+            unit_id,
+            request,
+            evidence,
+            deadline,
+            maximum_output_bytes,
+            cleanup_seconds,
+            ready_read,
+            ready_write,
+        )
+
+
+@contextmanager
+def _readiness_pipe() -> Iterator[tuple[BinaryIO, BinaryIO]]:
+    read_fd, write_fd = os.pipe2(os.O_CLOEXEC)
+    try:
+        reader = os.fdopen(read_fd, "rb", buffering=0)
+    except BaseException:
+        os.close(read_fd)
+        os.close(write_fd)
+        raise
+    try:
+        writer = os.fdopen(write_fd, "wb", buffering=0)
+    except BaseException:
+        reader.close()
+        os.close(write_fd)
+        raise
+    try:
+        yield reader, writer
+    finally:
+        try:
+            reader.close()
+        finally:
+            writer.close()
+
+
+def _dispatch_started(
+    binding: LaunchBinding,
+    launcher: ChildCommand,
+    unit_id: UnitId,
+    request: Payload,
+    evidence: Payload,
+    deadline: float,
+    maximum_output_bytes: int,
+    cleanup_seconds: float,
+    ready_read: BinaryIO,
+    ready_write: BinaryIO,
+) -> OneShotResult:
     process = None
     registered = False
     stage = _PreGrantStage.SPAWN
@@ -145,8 +205,14 @@ def dispatch_once(
             pass_fds=launcher.inherited_descriptors,
             bufsize=0,
         )
+        ready_write.close()
+        stage = _PreGrantStage.READINESS
+        _await_readiness(ready_read.fileno(), deadline)
+        ready_read.close()
+        _require_alive(process, deadline)
         stage = _PreGrantStage.IDENTITY
-        identity = observe_owned_child(process.pid, environment)
+        identity = observe_owned_child(process.pid, launcher.environment)
+        _require_alive(process, deadline)
         stage = _PreGrantStage.REGISTRATION
         register_launch(
             binding.receipt,
@@ -155,43 +221,89 @@ def dispatch_once(
         )
         registered = True
         stage = _PreGrantStage.DISPATCH_INTENT
+        _require_alive(process, deadline)
         record_dispatch_intent(
             binding.receipt, binding.attempt_id, unit_id, request, evidence, identity.incarnation()
         )
     except BaseException as error:
-        cleanup_status = _pre_grant_cleanup(process, cleanup_seconds)
-        cleanup = _pre_grant_evidence(error, stage, process, cleanup=cleanup_status)
-        detail = (
-            f"Pre-grant refusal: stage={stage.value}; cleanup={cleanup_status.value}; "
-            f"returncode={process.returncode if process is not None else None}: {error}"
+        detail, cleanup_status = _refuse_pre_grant(
+            binding, error, stage, process, cleanup_seconds, registered=registered
         )
-        try:
-            if registered and cleanup_status is PreGrantCleanup.REAPED:
-                record_launch_closure(
-                    binding.receipt,
-                    binding.attempt_id,
-                    binding.launch_id,
-                    binding.generation,
-                    TerminalKind.REFUSED,
-                    cleanup,
-                )
-            elif not registered:
-                fence_launch(
-                    binding.receipt,
-                    binding.attempt_id,
-                    binding.launch_id,
-                    binding.generation,
-                    cleanup,
-                )
-        except Exception as cleanup_error:  # noqa: BLE001
-            message = f"{detail}; journal cleanup failed: {cleanup_error}"
-            raise OneShotError(message, cleanup=cleanup_status) from error
         if not isinstance(error, Exception):
             raise
         raise OneShotError(detail, cleanup=cleanup_status) from error
     return _finish(
         binding, process, unit_id, request, deadline, maximum_output_bytes, cleanup_seconds
     )
+
+
+def _require_alive(process: subprocess.Popen[bytes], deadline: float) -> None:
+    if time.monotonic() >= deadline:
+        raise TimeoutError("The launcher readiness deadline expired.")
+    if process.poll() is not None:
+        raise ValueError("The launcher exited before the grant.")
+    if time.monotonic() >= deadline:
+        raise TimeoutError("The launcher readiness deadline expired.")
+
+
+def _refuse_pre_grant(
+    binding: LaunchBinding,
+    error: BaseException,
+    stage: _PreGrantStage,
+    process: subprocess.Popen[bytes] | None,
+    cleanup_seconds: float,
+    *,
+    registered: bool,
+) -> tuple[str, PreGrantCleanup]:
+    cleanup_status = _pre_grant_cleanup(process, cleanup_seconds)
+    cleanup = _pre_grant_evidence(error, stage, process, cleanup=cleanup_status)
+    detail = (
+        f"Pre-grant refusal: stage={stage.value}; cleanup={cleanup_status.value}; "
+        f"returncode={process.returncode if process is not None else None}: {error}"
+    )
+    try:
+        if registered and cleanup_status is PreGrantCleanup.REAPED:
+            record_launch_closure(
+                binding.receipt,
+                binding.attempt_id,
+                binding.launch_id,
+                binding.generation,
+                TerminalKind.REFUSED,
+                cleanup,
+            )
+        elif not registered:
+            fence_launch(
+                binding.receipt,
+                binding.attempt_id,
+                binding.launch_id,
+                binding.generation,
+                cleanup,
+            )
+    except Exception as cleanup_error:  # noqa: BLE001
+        message = f"{detail}; journal cleanup failed: {cleanup_error}"
+        raise OneShotError(message, cleanup=cleanup_status) from error
+    return detail, cleanup_status
+
+
+def _await_readiness(descriptor: int, deadline: float) -> None:
+    """Require one exact bootstrap frame and EOF before observing process identity."""
+    received = bytearray()
+    with selectors.DefaultSelector() as selector:
+        selector.register(descriptor, selectors.EVENT_READ)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                raise TimeoutError("The launcher readiness deadline expired.")
+            chunk = os.read(descriptor, len(READY_FRAME) - len(received) + 1)
+            if not chunk:
+                if bytes(received) != READY_FRAME:
+                    raise ValueError("The launcher readiness frame is incomplete.")
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("The launcher readiness deadline expired.")
+                return
+            received.extend(chunk)
+            if not READY_FRAME.startswith(received):
+                raise ValueError("The launcher readiness frame is invalid.")
 
 
 def _finish(

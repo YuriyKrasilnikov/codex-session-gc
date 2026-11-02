@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from dataclasses import replace
 from importlib import import_module
@@ -19,6 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from codex_session_gc.execution import process_identity
+from codex_session_gc.execution.one_shot import _await_readiness
 from codex_session_gc.execution.process_identity import (
     OWNED_MARKER_ENV,
     Presence,
@@ -39,15 +41,48 @@ def _launcher() -> Path:
     return Path(owned_launch.__file__).resolve()
 
 
+def _start_ready(target: str, environment: dict[str, str]) -> subprocess.Popen[bytes]:
+    ready_read, ready_write = os.pipe2(os.O_CLOEXEC)
+    try:
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                "-I",
+                str(_launcher()),
+                str(ready_write),
+                sys.executable,
+                "-c",
+                target,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=environment,
+            pass_fds=(ready_write,),
+        )
+    except BaseException:
+        os.close(ready_read)
+        raise
+    finally:
+        os.close(ready_write)
+    try:
+        _await_readiness(ready_read, time.monotonic() + 2)
+    except BaseException:
+        try:
+            _reap_child(child)
+        finally:
+            for stream in (child.stdout, child.stderr):
+                if stream is not None:
+                    stream.close()
+        raise
+    finally:
+        os.close(ready_read)
+    return child
+
+
 @contextmanager
 def _child(target: str, environment: dict[str, str]) -> Iterator[subprocess.Popen[bytes]]:
-    child = subprocess.Popen(
-        [sys.executable, "-I", str(_launcher()), sys.executable, "-c", target],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=environment,
-    )
+    child = _start_ready(target, environment)
     failure: BaseException | None = None
     try:
         yield child
@@ -133,6 +168,65 @@ def test_grant_runs_target_and_preserves_the_first_request_bytes(tmp_path: Path)
         child.stdin.close()
         assert child.wait(timeout=2) == 0
         assert observed.read_bytes() == b'{"id":1}\n'
+
+
+def test_readiness_descriptor_does_not_reach_native_command(tmp_path: Path) -> None:
+    """The bootstrap descriptor is closed before the target receives its payload."""
+    reader, writer = os.pipe2(os.O_CLOEXEC)
+    observed = tmp_path / "descriptor"
+    target = (
+        "import os,sys; "
+        f"p='/proc/self/fd/{writer}'; "
+        f"open({str(observed)!r},'w').write('open' if os.path.exists(p) else 'closed'); "
+        "sys.stdin.buffer.read()"
+    )
+    child: subprocess.Popen[bytes] | None = None
+    try:
+        child = subprocess.Popen(
+            [sys.executable, "-I", str(_launcher()), str(writer), sys.executable, "-c", target],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            pass_fds=(writer,),
+        )
+        os.close(writer)
+        writer = -1
+        _await_readiness(reader, time.monotonic() + 2)
+        assert child.stdin is not None
+        child.stdin.write(b"codex-session-gc:grant-v1\nrequest")
+        child.stdin.close()
+        assert child.wait(timeout=2) == 0
+        assert observed.read_text() == "closed"
+    finally:
+        os.close(reader)
+        if writer >= 0:
+            os.close(writer)
+        if child is not None:
+            try:
+                _reap_child(child)
+            finally:
+                for stream in (child.stdout, child.stderr):
+                    if stream is not None:
+                        stream.close()
+
+
+@pytest.mark.parametrize("descriptor", ["0", "not-a-descriptor", "999999", "99999999999999999999"])
+def test_invalid_bootstrap_descriptor_never_executes_target(
+    tmp_path: Path, descriptor: str
+) -> None:
+    """Invalid bootstrap arguments cannot reach the grant or execute the target."""
+    observed = tmp_path / "ran"
+    target = f"from pathlib import Path; Path({str(observed)!r}).write_text('ran')"
+    result = subprocess.run(
+        [sys.executable, "-I", str(_launcher()), descriptor, sys.executable, "-c", target],
+        input=b"codex-session-gc:grant-v1\n",
+        capture_output=True,
+        timeout=2,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert result.stdout == b""
+    assert not observed.exists()
 
 
 def test_eof_and_invalid_grant_never_run_target(tmp_path: Path) -> None:
