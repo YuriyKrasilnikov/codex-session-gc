@@ -21,6 +21,15 @@ this page identifies the owners of that behavior in the source tree.
 | Installation and provenance | `installation/` | Trusted external verifier, held artifact descriptor, staged release and explicit activation |
 | Source support | `compatibility/` | Scoped support claim and separate local identity observations; recorded verification is not fresh authentication |
 
+An imported support selection contains one installation ID and exact record and
+verification-context digests. The store checks the selected installation and
+reads the record under the same per-file bound and cooperative deadline as the
+diagnostic observation. `diagnostics.py` compares the record with the current
+profile and helper facts; it reports the saved verification context separately.
+An unavailable selection stays unavailable and does not change the local facts
+or select another record. Neither the saved context nor a matching comparison
+authorizes cleanup.
+
 ## Catalogue resources
 
 A catalogue observation owns at most eight metadata workers. Workers borrow parent
@@ -57,6 +66,11 @@ MCP startup selects an explicit observation-only or cleanup capability. The same
 capability governs tool registration and apply/reconciliation service entry points.
 Observation-only preparation uses the plain preview path without allocating an
 operation or creating receipt evidence; saved status remains readable.
+For imported support, startup also fixes the application directory and
+installation ID. `compatibility_status` accepts only the record and context
+digests within that scope; omitting both uses bundled support. Each call reads
+the selected evidence afresh, so changing those digests does not require a
+server restart or create a latest-record pointer.
 
 Execution accepts only the concrete local progress channel before effects. The
 native request, profile and receipt formats carry no progress observer. Python

@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib.resources import files
+from uuid import UUID
 
 from codex_session_gc.compatibility.record import (
     MAX_RECORD_BYTES,
@@ -23,9 +24,41 @@ from codex_session_gc.compatibility.record import (
     observe_bindings,
     parse_record,
 )
+from codex_session_gc.installation.model import InstallLayout
 
 _RECORD_READ = MAX_RECORD_BYTES + 1
 _PROFILE_READ = 16 * 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class BundledSupport:
+    """Explicitly select the running application's bundled support record."""
+
+
+@dataclass(frozen=True, slots=True)
+class ImportedSupport:
+    """Select exact stored support bytes within one operator-owned installation."""
+
+    layout: InstallLayout
+    installation_id: UUID
+    record_sha256: str
+    context_sha256: str
+
+    def __post_init__(self) -> None:
+        """Reject ambiguous or malformed content and verification identities."""
+        if (
+            type(self.layout) is not InstallLayout
+            or type(self.installation_id) is not UUID
+            or any(
+                not isinstance(value, str) or re.fullmatch(r"[a-f0-9]{64}", value) is None
+                for value in (self.record_sha256, self.context_sha256)
+            )
+        ):
+            message = "Imported support requires an installation and two exact SHA-256 identities."
+            raise ValueError(message)
+
+
+type SupportSelection = BundledSupport | ImportedSupport
 
 
 class RecordOrigin(StrEnum):
@@ -121,6 +154,30 @@ def observe_record(
         raw,
         RecordOrigin.CALLER,
         _Inputs(profile_raw, helper_sha256, producer),
+    )
+
+
+def observe_unavailable_record(
+    selection: ImportedSupport,
+    *,
+    profile_raw: bytes | None,
+    producer: ProducerObservation | None = None,
+) -> SourceSupportObservation:
+    """Keep an unavailable explicit selection distinct from the bundled record."""
+    declared = _profile_native_inputs(profile_raw)
+    return SourceSupportObservation(
+        origin=RecordOrigin.CALLER,
+        availability=RecordAvailability.UNKNOWN,
+        detail="The selected support record or its saved verification context is unavailable.",
+        record_sha256=selection.record_sha256,
+        record=None,
+        bindings=None,
+        producer_observation=producer,
+        producer_origin="not_observed" if producer is None else "caller_supplied_unverified",
+        profile_declared_native_inputs_sha256=declared,
+        profile_native_inputs_origin=(
+            "unavailable" if declared is None else "profile_declaration_not_independent_observation"
+        ),
     )
 
 

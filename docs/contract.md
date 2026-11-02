@@ -85,6 +85,14 @@ both tools available. This capability prevents application data and evidence
 mutations; it does not exclude SQLite's read coordination through locks or
 sidecars.
 
+Compatibility diagnosis can compare an explicitly selected imported support
+record with the currently observed profile and helper. The saved installation
+receipt records where verification was performed; it is not fresh signature
+verification, a proof of the running producer, or authority to delete. An
+unavailable selected record is not replaced by the bundled record. MCP clients
+may select only record and context digests within the installation fixed by the
+local server operator.
+
 ## Native execution
 
 Selected related fork, resume and publication operations, including metadata

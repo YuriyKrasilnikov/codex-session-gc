@@ -31,7 +31,9 @@ from codex_session_gc.installation.transaction import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from codex_session_gc.installation.helper_observation import HelperObservation
     from codex_session_gc.installation.model import InstallLayout
+    from codex_session_gc.installation.read_budget import ReadBudget
 
 
 class ActivationError(Exception):
@@ -83,22 +85,37 @@ def _fingerprint(info: os.stat_result) -> tuple[int, int, int, int, int]:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
-def _digest(fd: int) -> str:
+def _digest(fd: int, budget: ReadBudget | None = None) -> str:
     digest = hashlib.sha256()
     offset = 0
-    while data := os.pread(fd, 1024 * 1024, offset):
+    expected_size = os.fstat(fd).st_size
+    if budget is not None:
+        budget.check(expected_size)
+    while data := os.pread(fd, min(1024 * 1024, expected_size - offset + 1), offset):
         digest.update(data)
         offset += len(data)
+        if budget is not None:
+            budget.check(offset)
+        if offset > expected_size:
+            _fail("Installed file grew during validation.")
+    if offset != expected_size:
+        _fail("Installed file changed during validation.")
+    if budget is not None:
+        budget.check()
     return digest.hexdigest()
 
 
-def _read_manifest(path: Path) -> bytes:
+def _read_manifest(path: Path, budget: ReadBudget | None = None) -> bytes:
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         info = os.fstat(fd)
+        if budget is not None:
+            budget.check(info.st_size)
         if not stat.S_ISREG(info.st_mode) or info.st_size > MANIFEST_MAX_BYTES:
             _fail("Installed manifest is not bounded regular data.")
         data = os.pread(fd, info.st_size + 1, 0)
+        if budget is not None:
+            budget.check()
         if len(data) != info.st_size or _fingerprint(info) != _fingerprint(os.fstat(fd)):
             _fail("Installed manifest changed during validation.")
         return data
@@ -106,9 +123,12 @@ def _read_manifest(path: Path) -> bytes:
         os.close(fd)
 
 
-def _receipt(layout: InstallLayout, installation_id: UUID) -> dict[str, object]:
+def _receipt(
+    layout: InstallLayout, installation_id: UUID, *, data: object | None = None
+) -> dict[str, object]:
     _owned_directory(layout.receipts)
-    data = _read_receipt(layout.receipts / f"{installation_id}.json")
+    if data is None:
+        data = _read_receipt(layout.receipts / f"{installation_id}.json")
     if (
         not isinstance(data, dict)
         or set(data)
@@ -128,14 +148,47 @@ def _receipt(layout: InstallLayout, installation_id: UUID) -> dict[str, object]:
     return data
 
 
-def _checked_release(layout: InstallLayout, data: dict[str, object], resources: ExitStack) -> Path:
+def _release_helper_digest(
+    path: Path,
+    descriptor: int,
+    resources: ExitStack,
+    budget: ReadBudget | None,
+    observation: HelperObservation | None,
+) -> str:
+    if observation is None:
+        return _digest(descriptor, budget)
+    if budget is None:
+        _fail("A helper observation requires the shared read budget.")
+    initial = _fingerprint(os.fstat(descriptor))
+    reused = observation.digest_for(path, descriptor, budget)
+
+    @contextmanager
+    def recheck_helper() -> Iterator[None]:
+        yield
+        current = observation.digest_for(path, descriptor, budget)
+        if _fingerprint(os.fstat(descriptor)) != initial or (
+            reused is not None and current != reused
+        ):
+            _fail("Installed helper changed during observation.")
+
+    resources.enter_context(recheck_helper())
+    return reused if reused is not None else _digest(descriptor, budget)
+
+
+def _checked_release(
+    layout: InstallLayout,
+    data: dict[str, object],
+    resources: ExitStack,
+    budget: ReadBudget | None = None,
+    helper_observation: HelperObservation | None = None,
+) -> Path:
     version = data["version"]
     if not isinstance(version, str):
         _fail("Installation version is invalid.")
     root = layout.releases / version
     _owned_directory(layout.releases)
     _owned_directory(root)
-    raw = _read_manifest(root / "manifest.json")
+    raw = _read_manifest(root / "manifest.json", budget)
     binding = data.get("binding")
     if (
         not isinstance(binding, dict)
@@ -167,7 +220,9 @@ def _checked_release(layout: InstallLayout, data: dict[str, object], resources: 
         or os.fstat(cli).st_size != binding["launcher_size"]
     ):
         _fail("Installed executable or wheel size differs from its receipt.")
-    wheel_hash, helper_hash, cli_hash = _digest(wheel_fd), _digest(helper), _digest(cli)
+    wheel_hash = _digest(wheel_fd, budget)
+    helper_hash = _release_helper_digest(helper_path, helper, resources, budget, helper_observation)
+    cli_hash = _digest(cli, budget)
     if (
         wheel_hash != manifest.files[wheel].sha256
         or helper_hash != manifest.files["codex-session-gc-native"].sha256
@@ -179,6 +234,7 @@ def _checked_release(layout: InstallLayout, data: dict[str, object], resources: 
         version,
         manifest.raw,
         {wheel: {"sha256": wheel_hash}, "codex-session-gc-native": {"sha256": helper_hash}},
+        budget=budget,
     )
     for (path, fd), identity in zip(paths, before, strict=True):
         if _fingerprint(os.fstat(fd)) != identity or _fingerprint(path.lstat()) != identity:
@@ -188,16 +244,27 @@ def _checked_release(layout: InstallLayout, data: dict[str, object], resources: 
 
 @contextmanager
 def completed_installation(
-    layout: InstallLayout, installation_id: UUID
+    layout: InstallLayout,
+    installation_id: UUID,
+    *,
+    budget: ReadBudget | None = None,
+    helper_observation: HelperObservation | None = None,
 ) -> Iterator[CompletedInstallation]:
     """Hold verified completed-release descriptors; callers lock separately for mutation."""
+    if helper_observation is not None and budget is None:
+        _fail("A helper observation requires the shared read budget.")
+    if budget is not None:
+        budget.check()
     _owned_directory(layout.base)
     if layout.base.resolve(strict=True) != layout.base:
         _fail("Installation base must not traverse aliases.")
-    _validate_receipt(layout, layout.receipts / f"{installation_id}.json")
-    data = _receipt(layout, installation_id)
+    receipt_path = layout.receipts / f"{installation_id}.json"
+    before = _fingerprint(receipt_path.stat(follow_symlinks=False))
+    data = _receipt(layout, installation_id, data=_validate_receipt(layout, receipt_path, budget))
     with ExitStack() as resources:
-        root = _checked_release(layout, data, resources)
+        root = _checked_release(layout, data, resources, budget, helper_observation)
+        if _fingerprint(receipt_path.stat(follow_symlinks=False)) != before:
+            _fail("Installation receipt changed during validation.")
         binding = data.get("binding")
         if not isinstance(binding, dict):
             _fail("Installation receipt binding is unavailable.")
@@ -208,6 +275,10 @@ def completed_installation(
                 binding["manifest_sha256"], binding["launcher_sha256"], binding["launcher_size"]
             ),
         )
+        if budget is not None:
+            budget.check()
+        if _fingerprint(receipt_path.stat(follow_symlinks=False)) != before:
+            _fail("Installation receipt changed during observation.")
 
 
 def _link_identity(parent_fd: int, name: str) -> LinkIdentity | None:
@@ -508,4 +579,8 @@ def mcp_argv(
             str(release / "codex-session-gc-native"),
             "--receipt-dir",
             str(receipt_dir),
+            "--support-install-dir",
+            str(layout.base),
+            "--support-installation-id",
+            str(installation_id),
         )

@@ -79,6 +79,10 @@ def test_absent_link_activation_and_versioned_mcp_argv(tmp_path: Path) -> None:
             str(root / "codex-session-gc-native"),
             "--receipt-dir",
             str(tmp_path / "receipts"),
+            "--support-install-dir",
+            str(layout.base),
+            "--support-installation-id",
+            str(identifier),
         ),
         "MCP arguments differ",
     )

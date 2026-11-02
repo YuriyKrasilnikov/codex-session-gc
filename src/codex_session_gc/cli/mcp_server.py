@@ -11,7 +11,7 @@ import hashlib
 import json
 import os
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,9 +22,11 @@ from codex_session_gc import diagnostics
 from codex_session_gc.cli.console_display import discover_helper
 from codex_session_gc.cli.console_tasks import Intent, async_preview, parse_cutoff
 from codex_session_gc.cli.mcp_capability import McpCapability
+from codex_session_gc.compatibility.observation import ImportedSupport
 from codex_session_gc.domain import ArchiveState, ThreadId
 from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
 from codex_session_gc.execution.selection_provenance import reviewed_associations
+from codex_session_gc.installation.model import InstallLayout
 from codex_session_gc.inventory.catalogue import SessionEntry, read_session_catalogue
 from codex_session_gc.inventory.query import CatalogueIndex, CatalogueQuery, CatalogueScope
 
@@ -32,6 +34,19 @@ _PAGE = 100
 _TEXT = 500
 _SELECTION = 200
 _REPORT_BYTES = 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class SupportScope:
+    """Locally selected installation bounds for support record observations."""
+
+    layout: InstallLayout
+    installation_id: uuid.UUID
+
+    def __post_init__(self) -> None:
+        """Require an absolute application layout and one installation identity."""
+        if type(self.layout) is not InstallLayout or type(self.installation_id) is not uuid.UUID:
+            raise ValueError("A support scope requires an installation layout and UUID.")
 
 
 def _text(value: str) -> str:
@@ -85,10 +100,12 @@ class CatalogueService:
         receipts: Path | None = None,
         *,
         capability: McpCapability = McpCapability.CLEANUP,
+        support_scope: SupportScope | None = None,
     ) -> None:
         """Bind all tools to the startup home, never client-supplied paths."""
         self.home = home.resolve()
         self.capability = McpCapability(capability)
+        self.support_scope = support_scope
         state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
         self.operations = ConfirmedOperations(
             self.home, helper, receipts or state / "codex-session-gc/receipts"
@@ -97,11 +114,35 @@ class CatalogueService:
         self.index: CatalogueIndex | None = None
         self._lock = asyncio.Lock()
 
-    async def compatibility_status(self) -> dict[str, Any]:
-        """Observe the startup home and helper without granting cleanup authority."""
-        report = await asyncio.to_thread(
-            diagnostics.inspect_compatibility, self.home, self.operations.helper
-        )
+    async def compatibility_status(
+        self, record_sha256: str | None = None, context_sha256: str | None = None
+    ) -> dict[str, Any]:
+        """Observe compatibility; omit both digests for the bundled support record.
+
+        Imported records require both digests and a locally configured startup scope.
+        The result does not grant cleanup authority.
+        """
+        if record_sha256 is None and context_sha256 is None:
+            report = await asyncio.to_thread(
+                diagnostics.inspect_compatibility, self.home, self.operations.helper
+            )
+        else:
+            if record_sha256 is None or context_sha256 is None or self.support_scope is None:
+                raise ValueError(
+                    "Both support identities and a startup support scope are required."
+                )
+            selection = ImportedSupport(
+                self.support_scope.layout,
+                self.support_scope.installation_id,
+                record_sha256,
+                context_sha256,
+            )
+            report = await asyncio.to_thread(
+                diagnostics.inspect_selected_compatibility,
+                self.home,
+                self.operations.helper,
+                selection,
+            )
         return asdict(report)
 
     async def _snapshot(
@@ -310,9 +351,12 @@ def create_server(
     receipts: Path | None = None,
     *,
     capability: McpCapability = McpCapability.CLEANUP,
+    support_scope: SupportScope | None = None,
 ) -> MCPServer[Any]:
     """Expose browsing and the shared confirmed operation over official SDK stdio."""
-    service = CatalogueService(home, helper, receipts, capability=capability)
+    service = CatalogueService(
+        home, helper, receipts, capability=capability, support_scope=support_scope
+    )
     server = MCPServer(
         "codex-session-gc",
         instructions=(
@@ -360,12 +404,15 @@ def run(
     receipts: Path | None = None,
     *,
     capability: McpCapability = McpCapability.CLEANUP,
+    support_scope: SupportScope | None = None,
 ) -> int:
     """Serve MCP on stdio; stdout is reserved for protocol messages."""
     capability = McpCapability(capability)
     if capability is McpCapability.CLEANUP and helper is None:
         helper = discover_helper()
-    create_server(home, helper, receipts, capability=capability).run("stdio")
+    create_server(home, helper, receipts, capability=capability, support_scope=support_scope).run(
+        "stdio"
+    )
     return 0
 
 
@@ -374,6 +421,8 @@ if __name__ == "__main__":
     parser.add_argument("--home", required=True, type=Path)
     parser.add_argument("--helper", type=Path)
     parser.add_argument("--receipt-dir", type=Path)
+    parser.add_argument("--support-install-dir", type=Path)
+    parser.add_argument("--support-installation-id", type=uuid.UUID)
     parser.add_argument(
         "--read-only",
         action="store_const",
@@ -382,8 +431,24 @@ if __name__ == "__main__":
         dest="capability",
     )
     arguments = parser.parse_args()
+    if (arguments.support_install_dir is None) != (arguments.support_installation_id is None):
+        parser.error(
+            "--support-install-dir and --support-installation-id must be supplied together"
+        )
+    scope = (
+        SupportScope(
+            InstallLayout(arguments.support_install_dir.expanduser().absolute()),
+            arguments.support_installation_id,
+        )
+        if arguments.support_install_dir is not None
+        else None
+    )
     raise SystemExit(
         run(
-            arguments.home, arguments.helper, arguments.receipt_dir, capability=arguments.capability
+            arguments.home,
+            arguments.helper,
+            arguments.receipt_dir,
+            capability=arguments.capability,
+            support_scope=scope,
         )
     )

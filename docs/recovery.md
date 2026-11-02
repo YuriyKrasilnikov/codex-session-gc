@@ -3,6 +3,11 @@
 Keep the original receipt after cancellation, disconnect, partial/unknown result
 or a lost reply. Do not repeat the original delete command to discover its result.
 
+Imported support verification records are separate from cleanup receipts. Losing
+or replacing a support record cannot resolve a cleanup outcome, and an unavailable
+record does not select the bundled record automatically. Use the same explicit
+installation, record digest and context digest when observing it again.
+
 ```console
 codex-session-gc reconcile --online --receipt /absolute/cleanup.sqlite --json
 ```
@@ -99,6 +104,9 @@ There is no fallback to a retired wire format or automatic journal migration.
    [installation](../README.md#download-and-install).
    Open its UI or run a read-only `plan` to check observation of the chosen home.
 
+   Obtain the published 0.5.0 installer and independently verify it before
+   running the following commands.
+
    ```sh
    python3.14 -I /absolute/verified/codex-session-gc-installer-0.5.0.pyz --release v0.5.0 --action stage \
      --gh /absolute/path/to/gh --uv /absolute/path/to/uv \
@@ -118,11 +126,14 @@ There is no fallback to a retired wire format or automatic journal migration.
    resume an incomplete installation. Use the same explicit `--install-dir` and
    `--bin-dir` throughout if defaults are not appropriate. An installed consumer
    that provides `update` can run the same arguments through that command; 0.4.0
-   does not provide it, so use the independently verified 0.5.0 zipapp above.
+   does not provide it, so use the independently verified 0.5.0 installer.
 5. Before replacing an MCP registration, confirm the old client has no outstanding
    cleanup calls and retain all unresolved UUIDs/receipts. Use the README registration
    command with the new Python/helper paths and the same chosen home/receipt roots;
    then reconnect the client. Re-registering does not resolve an unknown operation.
+   A managed installation's reported command also fixes the support application
+   directory and installation ID. Later support records can be selected by digest
+   per `compatibility_status` call without another registration.
 6. Remove the old installation only after no receipt depends on its qualified
    consumer. A missing configured receipt directory does not prove there are no
    receipts elsewhere.

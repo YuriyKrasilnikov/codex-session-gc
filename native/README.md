@@ -241,6 +241,11 @@ Core/GuardianPool/app-server lifecycle guarantee.
 Producer witnesses retain their actual source/binary attribution. Reuse requires
 checking that the consumed APIs and serialized fields are unchanged. A fixture
 producer is a test executable and never a production delivery artifact.
+An imported support record can be compared with the helper and profile currently
+observed by doctor or MCP, but its saved verification receipt is not a native
+qualification or proof that a running Codex binary came from a claimed source.
+The recorded installation and the running helper may differ; a mismatch remains
+visible and does not authorize cleanup.
 
 Use disposable homes only. Native Python test oracles require Python 3.14's
 standard `compression.zstd`. Set `GC_NATIVE_BINARY` and `GC_NATIVE_FIXTURE` to

@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from codex_session_gc.installation.provenance import VerifiedArtifact
+    from codex_session_gc.installation.read_budget import ReadBudget
 
 
 class InstallationError(Exception):
@@ -106,23 +107,45 @@ def _require_settled_receipts(layout: InstallLayout) -> None:
         _validate_receipt(layout, path)
 
 
-def _read_receipt(path: Path) -> object:
+def _read_receipt(path: Path, budget: ReadBudget | None = None) -> object:
     max_receipt_bytes = 65536
     try:
         fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, "rb") as stream:
             info = os.fstat(stream.fileno())
+            if budget is not None:
+                budget.check(info.st_size)
             if (
                 not stat.S_ISREG(info.st_mode)
                 or info.st_uid != os.geteuid()
                 or info.st_size > max_receipt_bytes
             ):
                 _fail("Installation receipt is not a bounded owned regular file.")
-            data = json.load(stream, object_pairs_hook=_unique_receipt)
+            limit = min(max_receipt_bytes, budget.maximum_bytes) if budget else max_receipt_bytes
+            data = stream.read(limit + 1)
+            if len(data) != info.st_size:
+                _fail("Installation receipt changed or exceeded its bound.")
+            if budget is not None:
+                budget.check()
+            current = path.stat(follow_symlinks=False)
+            after = os.fstat(stream.fileno())
+
+            def identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
+                return (
+                    value.st_dev,
+                    value.st_ino,
+                    value.st_size,
+                    value.st_mtime_ns,
+                    value.st_ctime_ns,
+                )
+
+            if identity(info) != identity(after) or identity(info) != identity(current):
+                _fail("Installation receipt changed during reading.")
+            parsed: object = json.loads(data, object_pairs_hook=_unique_receipt)
     except (OSError, ValueError) as error:
         message = "Installation receipt is unresolved."
         raise InstallationError(message) from error
-    return data
+    return parsed
 
 
 def _valid_link_record(value: object, *, optional: bool) -> bool:
@@ -187,26 +210,7 @@ def _validate_binding_and_activation(data: dict[str, object]) -> None:
         _fail("An activation intent is unresolved.")
 
 
-def _validate_receipt(layout: InstallLayout, path: Path) -> None:
-    if path.suffix != ".json":
-        _fail("Unresolved installation receipt path.")
-    data = _read_receipt(path)
-    if not isinstance(data, dict) or set(data) not in (
-        {"installation_id", "state", "version", "release", "binding"},
-        {"installation_id", "state", "version", "release", "binding", "activation"},
-    ):
-        _fail("Installation receipt is unresolved.")
-    _validate_binding_and_activation(data)
-    try:
-        identifier = UUID(data["installation_id"])
-    except (ValueError, TypeError, AttributeError) as error:
-        message = "Installation receipt identity is invalid."
-        raise InstallationError(message) from error
-    if str(identifier) != path.stem or data["state"] not in {
-        InstallState.COMPLETED.value,
-        InstallState.FAILED.value,
-    }:
-        _fail("An earlier installation receipt is unresolved.")
+def _validate_receipt_release(layout: InstallLayout, data: dict[str, object]) -> None:
     version, release = data["version"], data["release"]
     if release is None and data["state"] == InstallState.FAILED.value:
         if version is not None and (
@@ -229,6 +233,34 @@ def _validate_receipt(layout: InstallLayout, path: Path) -> None:
         _fail("Installation receipt release state is unresolved.")
     if path_exists:
         _owned_directory(release_path)
+
+
+def _validate_receipt(
+    layout: InstallLayout, path: Path, budget: ReadBudget | None = None
+) -> dict[str, object]:
+    if path.suffix != ".json":
+        _fail("Unresolved installation receipt path.")
+    data = _read_receipt(path, budget)
+    if not isinstance(data, dict) or set(data) not in (
+        {"installation_id", "state", "version", "release", "binding"},
+        {"installation_id", "state", "version", "release", "binding", "activation"},
+    ):
+        _fail("Installation receipt is unresolved.")
+    _validate_binding_and_activation(data)
+    try:
+        identifier = UUID(data["installation_id"])
+    except (ValueError, TypeError, AttributeError) as error:
+        message = "Installation receipt identity is invalid."
+        raise InstallationError(message) from error
+    if str(identifier) != path.stem or data["state"] not in {
+        InstallState.COMPLETED.value,
+        InstallState.FAILED.value,
+    }:
+        _fail("An earlier installation receipt is unresolved.")
+    _validate_receipt_release(layout, data)
+    if budget is not None:
+        budget.check()
+    return data
 
 
 def _trusted_executable(path: Path) -> None:

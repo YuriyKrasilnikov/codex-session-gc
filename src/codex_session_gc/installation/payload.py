@@ -35,6 +35,8 @@ from codex_session_gc.installation.provenance import VerifiedArtifact
 if TYPE_CHECKING:
     from collections.abc import Buffer, Callable
 
+    from codex_session_gc.installation.read_budget import ReadBudget
+
 
 class PayloadRefusalError(ValueError):
     """An attested archive is outside the installable bundle contract."""
@@ -149,15 +151,19 @@ def _read_control(path: Path) -> bytes:
     return value
 
 
-def _check_zip_directory(path: Path) -> None:
+def _check_zip_directory(path: Path, budget: ReadBudget | None = None) -> None:
     """Bound ZipFile central-directory allocation before constructing ZipFile."""
     with path.open("rb") as source:
         source.seek(0, os.SEEK_END)
         size = source.tell()
+        if budget is not None:
+            budget.check(size)
         # Include the 20-byte ZIP64 locator even when the classic comment is maximal.
         tail_size = min(size, 65577)
         source.seek(size - tail_size)
         tail = source.read(tail_size)
+        if budget is not None:
+            budget.check()
     offset = tail.rfind(b"PK\x05\x06")
     trailer_length = 22
     _require(offset >= 0 and len(tail) - offset >= trailer_length, "Wheel ZIP trailer is missing.")
@@ -185,17 +191,27 @@ def _check_zip_directory(path: Path) -> None:
 
 
 def _wheel_binding(
-    root: Path, version: str, manifest: dict[str, object], hashes: dict[str, dict[str, object]]
+    root: Path,
+    version: str,
+    manifest: dict[str, object],
+    hashes: dict[str, dict[str, object]],
+    *,
+    budget: ReadBudget | None = None,
 ) -> str:
     wheel = f"codex_session_gc-{version}-py3-none-any.whl"
     _require(wheel in hashes and "codex-session-gc-native" in hashes, "Missing wheel or helper.")
     try:
-        _check_zip_directory(root / wheel)
+        _check_zip_directory(root / wheel, budget)
         with zipfile.ZipFile(root / wheel) as archive:
+            if budget is not None:
+                budget.check()
             names = archive.namelist()
             meta = [name for name in names if name.endswith(".dist-info/METADATA")]
             contract_name = "codex_session_gc/execution/closed_work_contract.json"
             _require(len(meta) == 1 and names.count(contract_name) == 1, "Invalid wheel metadata.")
+            if budget is not None:
+                budget.check(archive.getinfo(meta[0]).file_size)
+                budget.check(archive.getinfo(contract_name).file_size)
             _require(
                 archive.getinfo(meta[0]).file_size <= WHEEL_METADATA_MAX_BYTES,
                 "Wheel metadata too large.",
@@ -205,7 +221,11 @@ def _wheel_binding(
                 "Wheel contract too large.",
             )
             fields = BytesParser().parsebytes(archive.read(meta[0]))
+            if budget is not None:
+                budget.check()
             raw = archive.read(contract_name)
+            if budget is not None:
+                budget.check()
     except (OSError, zipfile.BadZipFile, KeyError) as error:
         message = "Wheel cannot be inspected."
         raise PayloadRefusalError(message) from error

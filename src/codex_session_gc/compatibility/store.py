@@ -13,7 +13,7 @@ import stat
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from enum import StrEnum
-from typing import Literal, NoReturn
+from typing import TYPE_CHECKING, Literal, NoReturn
 from uuid import UUID
 
 from codex_session_gc.artifacts import ArtifactIdentity, SourceIdentity
@@ -22,6 +22,11 @@ from codex_session_gc.installation.activation import completed_installation
 from codex_session_gc.installation.model import InstallBinding, InstallLayout
 from codex_session_gc.installation.provenance import REPOSITORY, SIGNER_WORKFLOW, VerifiedArtifact
 from codex_session_gc.installation.transaction import installation_lock
+
+if TYPE_CHECKING:
+    from codex_session_gc.compatibility.observation import ImportedSupport
+    from codex_session_gc.installation.helper_observation import HelperObservation
+    from codex_session_gc.installation.read_budget import ReadBudget
 
 _RECEIPT_FORMAT = "codex-session-gc-support-intake-v1"
 _RECEIPT_MAX_BYTES = 16384
@@ -70,6 +75,22 @@ class StoredSupport:
 
     raw: bytes
     receipt: SupportIntakeReceipt
+
+
+def recorded_origin(receipt: SupportIntakeReceipt) -> dict[str, object]:
+    """Project the saved context without claiming fresh authentication."""
+    return {
+        "origin": receipt.origin.value,
+        "installation_id": str(receipt.installation_id),
+        "record_sha256": receipt.artifact.sha256,
+        "record_size": receipt.artifact.size,
+        "asset_id": receipt.asset_id,
+        "gc_source": asdict(receipt.gc_source),
+        "context_sha256": receipt.context_sha256,
+        "installation_binding": asdict(receipt.installation_binding),
+        "claim_verified": receipt.claim_verified,
+        "authorizes_operation": receipt.authorizes_operation,
+    }
 
 
 def _fail(message: str) -> NoReturn:
@@ -145,10 +166,12 @@ def _open_store(layout: InstallLayout, installation_id: UUID, *, create: bool) -
     return parent
 
 
-def _read_owned(directory: int, name: str, limit: int) -> bytes:
+def _read_owned(directory: int, name: str, limit: int, budget: ReadBudget | None = None) -> bytes:
     fd = os.open(name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
     try:
         before = os.fstat(fd)
+        if budget is not None:
+            budget.check(before.st_size)
         if (
             not stat.S_ISREG(before.st_mode)
             or before.st_uid != os.geteuid()
@@ -158,6 +181,8 @@ def _read_owned(directory: int, name: str, limit: int) -> bytes:
             _fail("Stored support file is not a bounded private regular file.")
         chunks = bytearray()
         while len(chunks) < before.st_size:
+            if budget is not None:
+                budget.check()
             block = os.read(fd, min(65536, before.st_size - len(chunks)))
             if not block:
                 _fail("Stored support file is truncated.")
@@ -170,6 +195,8 @@ def _read_owned(directory: int, name: str, limit: int) -> bytes:
 
         if identity(before) != identity(after) or identity(before) != identity(current):
             _fail("Stored support file changed during observation.")
+        if budget is not None:
+            budget.check()
         return bytes(chunks)
     finally:
         os.close(fd)
@@ -237,21 +264,63 @@ def promote_support(
     return receipt
 
 
+@dataclass(frozen=True, slots=True)
+class _SupportRead:
+    budget: ReadBudget | None
+    helper: HelperObservation | None = None
+
+
 def read_support(
-    layout: InstallLayout, installation_id: UUID, record_sha256: str, context_sha256: str
+    layout: InstallLayout,
+    installation_id: UUID,
+    record_sha256: str,
+    context_sha256: str,
+    *,
+    budget: ReadBudget | None = None,
 ) -> StoredSupport:
     """Read one explicitly selected local record and receipt without network access."""
+    return _read_support(
+        layout, installation_id, record_sha256, context_sha256, _SupportRead(budget)
+    )
+
+
+def read_selected_support(
+    selection: ImportedSupport, budget: ReadBudget, helper: HelperObservation | None
+) -> StoredSupport:
+    """Read a selected record while retaining the caller's helper observation."""
+    return _read_support(
+        selection.layout,
+        selection.installation_id,
+        selection.record_sha256,
+        selection.context_sha256,
+        _SupportRead(budget, helper),
+    )
+
+
+def _read_support(
+    layout: InstallLayout,
+    installation_id: UUID,
+    record_sha256: str,
+    context_sha256: str,
+    options: _SupportRead,
+) -> StoredSupport:
+    budget = options.budget
     if type(installation_id) is not UUID or any(
         not isinstance(value, str) or re.fullmatch(r"[a-f0-9]{64}", value) is None
         for value in (record_sha256, context_sha256)
     ):
         _fail("Support selection requires exact SHA-256 identities.")
-    with completed_installation(layout, installation_id) as installation:
+    with completed_installation(
+        layout, installation_id, budget=budget, helper_observation=options.helper
+    ) as installation:
         directory = _open_store(layout, installation_id, create=False)
         try:
-            raw = _read_owned(directory, f"{record_sha256}.json", MAX_RECORD_BYTES)
+            raw = _read_owned(directory, f"{record_sha256}.json", MAX_RECORD_BYTES, budget)
             receipt_bytes = _read_owned(
-                directory, f"{record_sha256}.{context_sha256}.receipt.json", _RECEIPT_MAX_BYTES
+                directory,
+                f"{record_sha256}.{context_sha256}.receipt.json",
+                _RECEIPT_MAX_BYTES,
+                budget,
             )
         finally:
             os.close(directory)

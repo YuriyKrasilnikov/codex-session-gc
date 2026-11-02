@@ -22,12 +22,12 @@ from codex_session_gc.cli.console_display import preview_lines
 from codex_session_gc.cli.console_tasks import preview_selection
 from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.compatibility.intake import SupportIntakeRequest, intake_support
-from codex_session_gc.compatibility.observation import observe_record
+from codex_session_gc.compatibility.observation import ImportedSupport, observe_record
 from codex_session_gc.compatibility.record import ProducerObservation
 from codex_session_gc.compatibility.store import (
-    SupportIntakeReceipt,
     SupportStoreError,
     read_support,
+    recorded_origin,
 )
 from codex_session_gc.domain import ThreadId, UtcCutoff
 from codex_session_gc.execution.resource_policy import READ_BYTES, TIMEOUT_SECONDS
@@ -100,22 +100,6 @@ def _support_arguments(parser: argparse.ArgumentParser) -> None:
             command.add_argument("--context-sha256", required=True)
 
 
-def _recorded_origin(receipt: SupportIntakeReceipt) -> dict[str, object]:
-    """Describe recorded verification without claiming fresh authentication."""
-    return {
-        "origin": receipt.origin.value,
-        "installation_id": str(receipt.installation_id),
-        "record_sha256": receipt.artifact.sha256,
-        "record_size": receipt.artifact.size,
-        "asset_id": receipt.asset_id,
-        "gc_source": asdict(receipt.gc_source),
-        "context_sha256": receipt.context_sha256,
-        "installation_binding": asdict(receipt.installation_binding),
-        "claim_verified": receipt.claim_verified,
-        "authorizes_operation": receipt.authorizes_operation,
-    }
-
-
 def _support(arguments: argparse.Namespace) -> int:
     """Import explicitly or inspect a previously recorded verification offline."""
     try:
@@ -131,7 +115,7 @@ def _support(arguments: argparse.Namespace) -> int:
                 arguments.network_seconds,
             )
             receipt = asyncio.run(intake_support(request, HttpsTransport()))
-            result: dict[str, object] = {"recorded_verification": _recorded_origin(receipt)}
+            result: dict[str, object] = {"recorded_verification": recorded_origin(receipt)}
         else:
             stored = read_support(
                 layout, arguments.installation_id, arguments.sha256, arguments.context_sha256
@@ -139,7 +123,7 @@ def _support(arguments: argparse.Namespace) -> int:
             observation = observe_record(stored.raw, profile_raw=None, helper_sha256=None)
             result = {
                 "source_support": asdict(observation),
-                "recorded_verification": _recorded_origin(stored.receipt),
+                "recorded_verification": recorded_origin(stored.receipt),
             }
     except (
         SupportStoreError,
@@ -180,6 +164,10 @@ def _parser() -> argparse.ArgumentParser:
     doctor.add_argument("--producer-commit", help="Caller-observed full producer commit ID.")
     doctor.add_argument("--producer-ref", help="Caller-observed fully qualified producer ref.")
     doctor.add_argument("--producer-binary-sha256", help="Caller-observed producer binary digest.")
+    doctor.add_argument("--support-install-dir", type=Path)
+    doctor.add_argument("--support-installation-id", type=UUID)
+    doctor.add_argument("--support-record-sha256")
+    doctor.add_argument("--support-context-sha256")
     doctor.add_argument("--json", action="store_true")
     ui = commands.add_parser("ui", help="Browse and select histories with Textual")
     ui.add_argument("--home", type=Path)
@@ -190,6 +178,8 @@ def _parser() -> argparse.ArgumentParser:
     mcp.add_argument("--home", type=Path, required=True)
     mcp.add_argument("--helper", type=Path)
     mcp.add_argument("--receipt-dir", type=Path)
+    mcp.add_argument("--support-install-dir", type=Path)
+    mcp.add_argument("--support-installation-id", type=UUID)
     mcp.add_argument(
         "--read-only",
         action="store_const",
@@ -239,6 +229,94 @@ def _print_preview(report: dict[str, Any]) -> str:
     return "\n".join(preview_lines(report))
 
 
+def _doctor(arguments: argparse.Namespace) -> int:
+    """Observe the selected support record and local compatibility."""
+    try:
+        observed = (
+            arguments.producer_repository,
+            arguments.producer_commit,
+            arguments.producer_ref,
+            arguments.producer_binary_sha256,
+        )
+        producer = (
+            ProducerObservation(*observed) if any(value is not None for value in observed) else None
+        )
+        values = (
+            arguments.support_install_dir,
+            arguments.support_installation_id,
+            arguments.support_record_sha256,
+            arguments.support_context_sha256,
+        )
+        if any(value is not None for value in values) and any(value is None for value in values):
+            _parser().error("All four support selection options must be supplied together.")
+        home = arguments.home.expanduser().absolute()
+        helper = arguments.helper.expanduser().absolute() if arguments.helper is not None else None
+        if arguments.support_install_dir is None:
+            doctor_report = diagnostics.inspect_compatibility(
+                home,
+                helper,
+                maximum_read_bytes=arguments.max_read_bytes,
+                timeout_seconds=arguments.timeout_seconds,
+                producer=producer,
+            )
+        else:
+            selection = ImportedSupport(
+                InstallLayout(arguments.support_install_dir.expanduser().absolute()),
+                arguments.support_installation_id,
+                arguments.support_record_sha256,
+                arguments.support_context_sha256,
+            )
+            doctor_report = diagnostics.inspect_selected_compatibility(
+                home,
+                helper,
+                selection,
+                options=diagnostics.DiagnosticOptions(
+                    arguments.max_read_bytes, arguments.timeout_seconds, producer
+                ),
+            )
+    except ValueError as error:
+        _parser().error(str(error))
+    output = (
+        json.dumps(asdict(doctor_report), sort_keys=True)
+        if arguments.json
+        else diagnostics.terminal(doctor_report)
+    )
+    sys.stdout.write(output + "\n")
+    return doctor_report.exit_code
+
+
+def _mcp(arguments: argparse.Namespace) -> int:
+    """Start one MCP server with locally fixed storage authority."""
+    from codex_session_gc.cli import mcp_server  # noqa: PLC0415
+
+    home = arguments.home.expanduser().resolve()
+    if not home.is_dir():
+        _parser().error("--home must name an existing directory")
+    if (arguments.support_install_dir is None) != (arguments.support_installation_id is None):
+        _parser().error(
+            "--support-install-dir and --support-installation-id must be supplied together"
+        )
+    scope = (
+        mcp_server.SupportScope(
+            InstallLayout(arguments.support_install_dir.expanduser().absolute()),
+            arguments.support_installation_id,
+        )
+        if arguments.support_install_dir is not None
+        else None
+    )
+    if scope is None:
+        return mcp_server.run(
+            home, arguments.helper, arguments.receipt_dir, capability=arguments.capability
+        )
+    return mcp_server.run(
+        home,
+        arguments.helper,
+        arguments.receipt_dir,
+        capability=arguments.capability,
+        support_scope=scope,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one current command; unsupported commands fail during argument parsing."""
     values = list(sys.argv[1:] if argv is None else argv)
@@ -248,47 +326,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.command == "support":
         return _support(arguments)
     if arguments.command == "doctor":
-        try:
-            observed = (
-                arguments.producer_repository,
-                arguments.producer_commit,
-                arguments.producer_ref,
-                arguments.producer_binary_sha256,
-            )
-            producer = (
-                ProducerObservation(*observed)
-                if any(value is not None for value in observed)
-                else None
-            )
-            doctor_report = diagnostics.inspect_compatibility(
-                arguments.home.expanduser().absolute(),
-                arguments.helper.expanduser().absolute() if arguments.helper is not None else None,
-                maximum_read_bytes=arguments.max_read_bytes,
-                timeout_seconds=arguments.timeout_seconds,
-                producer=producer,
-            )
-        except ValueError as error:
-            _parser().error(str(error))
-        output = (
-            json.dumps(asdict(doctor_report), sort_keys=True)
-            if arguments.json
-            else diagnostics.terminal(doctor_report)
-        )
-        sys.stdout.write(output + "\n")
-        return doctor_report.exit_code
+        return _doctor(arguments)
     if arguments.command == "ui":
         from codex_session_gc.cli import textual_console  # noqa: PLC0415
 
         return textual_console.run(arguments)
     if arguments.command == "mcp":
-        from codex_session_gc.cli import mcp_server  # noqa: PLC0415
-
-        home = arguments.home.expanduser().resolve()
-        if not home.is_dir():
-            _parser().error("--home must name an existing directory")
-        return mcp_server.run(
-            home, arguments.helper, arguments.receipt_dir, capability=arguments.capability
-        )
+        return _mcp(arguments)
     if arguments.command == "plan":
         report, status = _preview(arguments)
         output = json.dumps(report, sort_keys=True) if arguments.json else _print_preview(report)

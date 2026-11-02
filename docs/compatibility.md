@@ -11,9 +11,9 @@ The pinned native source is OpenAI Codex commit
 current request format. Qualification does not turn the helper into the installed
 Codex executable or establish a complete live Core/app-server lifecycle guarantee.
 
-## Current release
+## 0.5.0 contract
 
-Release 0.5.0 uses wire 6 and exact state/companion schemas through state
+The 0.5.0 contract uses wire 6 and exact state/companion schemas through state
 migration 62. Its native source is pinned above with tracked storage changes:
 board templates, nullable channel descriptions and attachment metadata are
 included in the qualified schema. The
@@ -29,7 +29,7 @@ Download a matched bundle; changing only the helper or only a profile JSON file
 is not an upgrade. Existing receipt consumers must be retained while their
 outcomes remain unresolved.
 
-The scoped source assessment covers Codex 0.166.0 commit
+The bundled scoped support claim addresses Codex 0.166.0 commit
 `6ff1e1ca3b30fc8b914720681fcf5fe62e95f856` for selected closed work under the
 conditions in [the cleanup contract](contract.md). The underlying automated
 source comparison remains UNKNOWN; the scoped assessment is a supplied review
@@ -84,12 +84,44 @@ codex-session-gc support show --installation-id INSTALLATION_UUID \
 `CONTEXT_SHA256` is returned by import. Pass the same explicit `--install-dir`
 to both commands when the installation uses a non-default directory.
 
+To compare the imported record with the profile and helper observed by doctor,
+select it explicitly using the same installation and both digests:
+
+```sh
+codex-session-gc doctor --home /absolute/codex-home \
+  --helper /absolute/release/codex-session-gc-native --json \
+  --support-install-dir /absolute/application-directory \
+  --support-installation-id INSTALLATION_UUID \
+  --support-record-sha256 RECORD_SHA256 --support-context-sha256 CONTEXT_SHA256
+```
+
+The four support options are all required; without them doctor uses the bundled
+record. If the selected record, its receipt or its installation cannot be read
+and checked within the bounds, the selected record is unavailable. There is no
+fallback to another record, and local compatibility observations remain visible.
+The selected installation identifies where verification was recorded; the
+profile and helper compared are those observed by the current doctor call. A
+different running package or helper can therefore produce an identity mismatch.
+
+For MCP, set `--support-install-dir` and `--support-installation-id` together
+at server startup. Managed installation activation includes them in its
+reported `mcp_argv`. Call `compatibility_status` with no arguments for bundled
+support, or with both `record_sha256` and `context_sha256` for an imported
+record in that fixed installation. A later call may select another imported
+record without restarting. Clients cannot supply a path or installation ID to
+the tool. Saved verification remains an origin record, not fresh authentication;
+no record or binding comparison grants cleanup authority.
+
 Doctor opens separate ordinary read-only SQLite transactions. It does not
-change user tables or histories, copy storage, create receipts, launch the helper,
+change user tables or histories, copy storage, create cleanup receipts, launch the helper,
 or acquire application maintenance/writer ownership. SQLite may create or update
 WAL/SHM files and take normal coordination locks. Concurrent storage may change
 after or between observations. Even a matching report does not validate selected
 row/file effects, acquire native ownership, certify closure or authorize deletion.
+An imported observation also reads the selected installation receipt, manifest,
+wheel and executables. The per-file byte bound and shared cooperative deadline
+apply to those reads; an interrupted wait does not guarantee that an already
+running filesystem operation has stopped immediately.
 Follow the qualification procedure below when an execution contract changes.
 
 ## Maintaining compatibility after a Codex change

@@ -9,9 +9,11 @@ not a fixed retention policy.
 
 ## Download and install
 
-Release 0.5.0 supplies a matched Linux x86_64 bundle and a standard-library
-installer. Python 3.14 or newer, `uv` and a separately trusted GitHub CLI (`gh`)
-are prerequisites. The qualified deployment is Ubuntu 26.04 LTS, glibc 2.43;
+The 0.5.0 installation workflow uses a matched Linux x86_64 bundle and a
+standard-library installer. Obtain the published assets and independently
+verify their attestations before using them. Python 3.14 or newer, `uv` and a
+separately trusted GitHub CLI (`gh`) are prerequisites. The qualified deployment
+is Ubuntu 26.04 LTS, glibc 2.43;
 other environments require qualification. The native contract uses wire 6, the
 exact state schema through migration 62 and the bundled companion schemas.
 
@@ -68,9 +70,9 @@ installer and its local executables must be trusted independently. Installation
 requires network access and does not require a Rust toolchain.
 
 For an existing installation, retain old receipt consumers and follow
-[recovery and upgrades](docs/recovery.md). The historical
+[recovery and upgrades](docs/recovery.md). Consumers of the
 [0.4.0 release](https://github.com/YuriyKrasilnikov/codex-session-gc/releases/tag/v0.4.0)
-remains available for its existing consumers.
+must retain it while their unresolved receipts require it.
 
 ## Source checkout
 
@@ -113,7 +115,7 @@ helper and present databases match, 1 for a known mismatch or missing state, and
 leaves that observation unknown. `--max-read-bytes` and `--timeout-seconds`
 control observation bounds using the existing execution defaults.
 
-Doctor does not change user tables or histories, copy storage, create receipts,
+Doctor does not change user tables or histories, copy storage, create cleanup receipts,
 launch the helper, or acquire application maintenance/writer ownership. Ordinary
 SQLite read transactions can create or update WAL/SHM coordination files and use
 SQLite locks. Results are separate observations, not a global snapshot or
@@ -121,6 +123,22 @@ permission to delete; execution still requires native ownership and fresh checks
 The source-support claim is separate from these local observations. Producer
 identity supplied on the command line remains an unverified caller observation;
 an unknown running binary origin is not inferred from a version string.
+By default, doctor observes the bundled support record. After an explicit
+`support import`, use the returned record and context digests to compare that
+record against the current profile and helper:
+
+```sh
+codex-session-gc doctor --home /absolute/codex-home \
+  --helper /absolute/release/codex-session-gc-native \
+  --support-install-dir /absolute/application-directory \
+  --support-installation-id INSTALLATION_UUID \
+  --support-record-sha256 RECORD_SHA256 --support-context-sha256 CONTEXT_SHA256 --json
+```
+
+All four support options are required together. A missing or changed selection
+is reported unavailable; doctor does not substitute the bundled record. The
+saved receipt records a past verification and is not fresh authentication or
+cleanup authority. Local profile, helper and database observations stay separate.
 See [compatibility](docs/compatibility.md) for the supported boundary.
 
 ## Browse and select
@@ -310,8 +328,13 @@ The stdio server exposes `compatibility_status`, `query_catalogue`, `session_det
 `apply_cleanup`, `cleanup_status` and `reconcile_cleanup`. Register it with absolute paths:
 
 Use the exact `mcp_argv` returned by activation when registering the server
-with `codex mcp add`. It binds the installed release, chosen home and receipt
-location; registration changes the client configuration.
+with `codex mcp add`. It binds the installed release, chosen home, receipt
+location, application directory and installation ID; registration changes the
+client configuration. `compatibility_status` uses bundled support when called
+without arguments. To compare an imported record, pass both `record_sha256` and
+`context_sha256` to that tool. It reads within the startup installation scope;
+clients cannot choose a filesystem path or a different installation. Selecting
+another imported record takes effect on the next call without restarting.
 
 For observation only, add `--read-only` to the server arguments. This mode exposes
 `compatibility_status`, `query_catalogue`, `session_details`, `prepare_cleanup` and `cleanup_status`.
