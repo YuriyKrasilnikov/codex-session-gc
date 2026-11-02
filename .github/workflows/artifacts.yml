@@ -4,6 +4,15 @@ on:
   pull_request:
   push:
     branches: [main]
+    paths-ignore:
+      - src/codex_session_gc/compatibility/support.json
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Attest the exact source support record
+        required: true
+        type: choice
+        options: [support]
 
 permissions:
   contents: read
@@ -287,3 +296,74 @@ jobs:
               *) echo 'Unexpected cleanup path' >&2; exit 1 ;;
             esac
           fi
+
+  attest-artifacts:
+    name: Attest qualified assembly
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.matched-artifacts.result == 'success' }}
+    needs: matched-artifacts
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [bundle, wheel, sdist, installer]
+    steps:
+      - name: Download this run's qualified assembly
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: matched-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/qualified-assembly
+      - name: Verify the assembled output and select one subject
+        id: subject
+        env:
+          GC_CI_SUBJECT_KIND: ${{ matrix.kind }}
+        run: |
+          set -eu
+          cd "$RUNNER_TEMP/qualified-assembly"
+          sha256sum --check SHA256SUMS
+          case "$GC_CI_SUBJECT_KIND" in
+            bundle) set -- codex-session-gc-*-linux-x86_64.tar.gz ;;
+            wheel) set -- codex_session_gc-*-py3-none-any.whl ;;
+            sdist) set -- codex_session_gc-*.tar.gz ;;
+            installer) set -- codex-session-gc-installer-*.pyz ;;
+            *) exit 1 ;;
+          esac
+          test "$#" -eq 1 && test -f "$1"
+          printf 'path=%s/%s\n' "$PWD" "$1" >> "$GITHUB_OUTPUT"
+      - name: Attest this exact qualified assembly output
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.subject.outputs.path }}
+
+  attest-support:
+    name: Attest selected source support record
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'support'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate and prepare exact source bytes
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          set -eu
+          python3 -m tools.support_record --output "$RUNNER_TEMP/codex-session-gc-support.json"
+      - name: Attest the exact support record
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/codex-session-gc-support.json
+      - name: Retain the attested record
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: support-record-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codex-session-gc-support.json
+          if-no-files-found: error
+          retention-days: 3

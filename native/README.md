@@ -267,14 +267,13 @@ obtained again from its pinned URL and verified before reconstruction.
 ## Installation boundary
 
 The Python wheel does not contain this executable. A qualified release supplies
-it separately with its SHA-256 in the same manifest as the Python wheel and
-runtime requirements. Keep it in the unpacked versioned release directory and
-pass its absolute path through `ui --helper`, `mcp --helper` or
-`apply --online --helper`. Preserve executable permissions. Verify both the
-release manifest and the Python contract identity before use; arbitrary rebuilt
-bytes are refused. Source reconstruction above is for maintainers, not a user
-installation prerequisite. Update the qualified resource and release manifest
-together whenever an artifact identity changes.
+it with its SHA-256 in the same manifest as the Python wheel and runtime
+requirements. The installer verifies the release and stages the matched helper;
+activation reports the paths used by the installed CLI and MCP server. Direct
+source-checkout use must supply the matching helper's absolute path. Arbitrary
+rebuilt bytes are refused. Source reconstruction above is for maintainers, not
+a user installation prerequisite. Update the qualified resource and release
+manifest together whenever an artifact identity changes.
 
 ## Validate a changed native helper
 
@@ -294,6 +293,11 @@ The scripts create disposable homes and compare exact effects, retained data and
 refusals. They do not authorize or edit a new profile automatically. A changed
 storage contract requires corresponding observation/native-bound changes and
 artifact-bound qualification evidence before the Python resource is updated.
+For a new producer version, use the bounded source comparison, scoped assessment
+and witness procedure in [compatibility](../docs/compatibility.md#maintaining-compatibility-after-a-codex-change)
+before deciding whether the existing execution identity can be reused. The
+witness API records the exact declared source and case identities; it does not
+authenticate the assessment or prove an installed producer's source.
 Then run the Python suite against the coherent source/profile/helper combination.
 Prepare the full Python suite with `uv sync --locked --group build` and ensure
 Node is on PATH for the JavaScript confirmation regression. Node is not an
@@ -319,7 +323,7 @@ source is intended for maintainers changing or validating the native contract.
 A digest mismatch remains a refusal, even after a successful build.
 
 Run these commands from the source checkout after the candidate helper and exact
-bundled profile have been qualified. Synchronize the Python development environment
+bundled profile have been qualified and the package version is set to 0.5.0. Synchronize the Python development environment
 and build the source distribution first. The
 commands below assume the already-qualified release helper has been retained at
 `/absolute/qualified/codex-session-gc-native` and the output directories are absent:
@@ -327,17 +331,19 @@ commands below assume the already-qualified release helper has been retained at
 ```sh
 set -eu
 uv sync --locked --group build --no-install-project --no-build --no-python-downloads
-test ! -e build/release-0.4.0
-mkdir -p build/release-0.4.0
-uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.4.0
-uv build --wheel build/release-0.4.0/codex_session_gc-0.4.0.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.4.0
-.venv/bin/python -m tools.build_release --wheel build/release-0.4.0/codex_session_gc-0.4.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.4.0/codex-session-gc-0.4.0-linux-x86_64
-.venv/bin/python -m tools.ci_release --sdist build/release-0.4.0/codex_session_gc-0.4.0.tar.gz --wheel build/release-0.4.0/codex_session_gc-0.4.0-py3-none-any.whl --bundle build/release-0.4.0/codex-session-gc-0.4.0-linux-x86_64 --helper /absolute/qualified/codex-session-gc-native
+test ! -e build/release-0.5.0
+mkdir -p build/release-0.5.0
+uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.5.0
+uv build --wheel build/release-0.5.0/codex_session_gc-0.5.0.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.5.0
+PYTHONPATH=src .venv/bin/python -m tools.build_release --wheel build/release-0.5.0/codex_session_gc-0.5.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.5.0/codex-session-gc-0.5.0-linux-x86_64
+PYTHONPATH=src .venv/bin/python -m tools.ci_release --sdist build/release-0.5.0/codex_session_gc-0.5.0.tar.gz --wheel build/release-0.5.0/codex_session_gc-0.5.0-py3-none-any.whl --bundle build/release-0.5.0/codex-session-gc-0.5.0-linux-x86_64 --helper /absolute/qualified/codex-session-gc-native
+PYTHONPATH=src .venv/bin/python -m tools.build_installer --output "$PWD/build/release-0.5.0/codex-session-gc-installer-0.5.0.pyz"
 ```
 
 The build group pins the existing Hatchling backend in `pyproject.toml`; its
 transitive dependencies are fixed in `uv.lock`. Synchronizing without installing
-the project prepares that environment before either package build.
+the project prepares that environment before either package build. The explicit
+`PYTHONPATH=src` supplies the current application modules to checkout tools.
 `--no-build-isolation` uses this locked environment instead of resolving a
 separate backend environment. A fresh synchronization may download locked wheels;
 add `--offline` only when they are cached. The bundle assembler exports runtime
@@ -362,15 +368,44 @@ shared archiver writes the v2 manifest before the payload and checks the archive
 against it; use the same archiver for local and CI releases:
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m tools.build_release --archive build/release-0.4.0/codex-session-gc-0.4.0-linux-x86_64 --output build/release-0.4.0/codex-session-gc-0.4.0-linux-x86_64.tar.gz
-cd build/release-0.4.0
-sha256sum codex-session-gc-0.4.0-linux-x86_64.tar.gz codex_session_gc-0.4.0-py3-none-any.whl codex_session_gc-0.4.0.tar.gz > SHA256SUMS
+PYTHONPATH=src .venv/bin/python -m tools.build_release --archive build/release-0.5.0/codex-session-gc-0.5.0-linux-x86_64 --output build/release-0.5.0/codex-session-gc-0.5.0-linux-x86_64.tar.gz
+cd build/release-0.5.0
+sha256sum codex-session-gc-0.5.0-linux-x86_64.tar.gz codex_session_gc-0.5.0-py3-none-any.whl codex_session_gc-0.5.0.tar.gz codex-session-gc-installer-0.5.0.pyz > SHA256SUMS
 ```
 
-Ship those three assets and `SHA256SUMS` together with the same version/tag.
+Ship those four assets and `SHA256SUMS` together with the same version/tag.
 The source archive contains helper sources, patches, provenance and tests; it
 contains no reconstructed upstream tree, dependency caches or production binary.
 The wheel is generic Python; the matched bundle supplies the Linux helper.
+The separately qualified native component carries the exact helper, raw profile,
+qualification summary and required notices. Its release-asset ID, compressed
+size and digest are recorded in `build-inputs/provenance.json`. CI uses that
+locator only to obtain the component; it independently checks the component,
+helper, profile and native inputs before executing the helper. CI assembles the
+release from those bytes and does not compile the helper.
+
+On a trusted main-branch push, a dedicated acquisition job reads the declared
+locator as data at the source commit and fetches that asset with a short-lived
+write-capable repository token. That job does not check out or execute project
+code, helper or tests. A separate read-only job receives the component and
+performs the qualification checks and tests. The token's write capability applies
+to repository contents; the acquisition job uses it only to read provenance and
+the declared asset.
+
+Pull requests use a read-only token for acquisition. An inaccessible private
+asset fails qualification rather than producing a successful qualified result.
+After the final release asset is public, verify that a pull request can acquire
+and qualify the component with read-only access; public availability must be
+observed, not inferred from an asset ID. The component can also be checked in a
+source checkout without running it; the output helper path must be absent:
+
+```sh
+PYTHONPATH=src .venv/bin/python -m tools.ci_native --describe
+PYTHONPATH=src .venv/bin/python -m tools.ci_native --component /absolute/qualified/native-material.tar.gz --helper /absolute/new/codex-session-gc-native
+```
+
+The resulting assembly attestation records assembly origin, not native source
+recompilation or the correctness of cleanup effects.
 Keep [Apache-2.0](../LICENSE), [attribution](../NOTICE) and the dependency notices
 with the artifacts that contain their code. Installing the final bundle outside
 the checkout and exercising disposable CLI/UI/MCP inputs checks the actual

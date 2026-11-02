@@ -18,6 +18,8 @@ this page identifies the owners of that behavior in the source tree.
 | Recovery | `recovery/journal.py`, `execution/closed_work_reconcile.py` | Append-only evidence; independent owned-process and selected-effect observation without replay |
 | Effective operation state | `execution/operation_status.py` | One pure outcome projection over saved delivery, skipped work and current ownership settlement |
 | Execution progress | `execution/progress.py` | Volatile operation/root events; producer never invokes or waits for the observer |
+| Installation and provenance | `installation/` | Trusted external verifier, held artifact descriptor, staged release and explicit activation |
+| Source support | `compatibility/` | Scoped support claim and separate local identity observations; recorded verification is not fresh authentication |
 
 ## Catalogue resources
 
@@ -80,6 +82,14 @@ emulate native deletion. [Native build documentation](../native/README.md) descr
 source reconstruction and the separate qualification boundary.
 
 ## Change boundaries
+
+The release assembly consumes a separately qualified native component whose
+helper, profile, native inputs and public qualification summary match pinned
+identities. The component was built and qualified separately; the artifact workflow
+assembles and attests release materials and does not compile the helper. Its
+attestation describes assembly origin, not cleanup correctness or native rebuild
+reproducibility. Bootstrap verification requires a separately trusted `gh` before
+the downloaded installer is run.
 
 Replace a module through its typed inputs/results and observable invariants.
 A schema or helper change requires exact profile/effect and recovery validation;

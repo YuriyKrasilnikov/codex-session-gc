@@ -13,9 +13,10 @@ Codex executable or establish a complete live Core/app-server lifecycle guarante
 
 ## Current release
 
-Release 0.4.0 uses wire 6 and exact state/companion schemas. Its native source is
-pinned above with the official 0.164 board SQL changes backported: board templates
-and nullable channel descriptions are included in the qualified schema. The
+Release 0.5.0 uses wire 6 and exact state/companion schemas through state
+migration 62. Its native source is pinned above with tracked storage changes:
+board templates, nullable channel descriptions and attachment metadata are
+included in the qualified schema. The
 qualified cleanup host is Linux x86_64 on Ubuntu 26.04 LTS with glibc 2.43 and
 Python 3.14.7 test oracles. This is a tested deployment, not a minimum-libc or
 cross-platform guarantee. The authoritative artifact identities are in the release
@@ -27,6 +28,13 @@ Use [the side-by-side upgrade procedure](recovery.md#upgrade-an-installed-releas
 Download a matched bundle; changing only the helper or only a profile JSON file
 is not an upgrade. Existing receipt consumers must be retained while their
 outcomes remain unresolved.
+
+The scoped source assessment covers Codex 0.166.0 commit
+`6ff1e1ca3b30fc8b914720681fcf5fe62e95f856` for selected closed work under the
+conditions in [the cleanup contract](contract.md). The underlying automated
+source comparison remains UNKNOWN; the scoped assessment is a supplied review
+claim, not a general Rust or whole-Core equivalence proof. The installed Codex
+binary has not been independently bound to that source commit.
 
 ## Read-only compatibility observations
 
@@ -46,7 +54,37 @@ exceeded observation bounds and a missing helper are unknown, not compatibility
 proof. Use `--max-read-bytes` and `--timeout-seconds` for the existing resource
 bounds; these do not establish a whole-home snapshot.
 
-The command opens separate ordinary read-only SQLite transactions. It does not
+Doctor also reports the bundled source-support claim separately from observed
+local helper/profile/schema facts. Optional `--producer-repository`,
+`--producer-commit`, `--producer-ref` and `--producer-binary-sha256` values are
+caller-supplied observations; they do not prove the running binary's origin.
+The profile's declared native-input digest is not an independent observation of
+the source tree. MCP exposes the same read-only information through
+`compatibility_status`, using the home and helper fixed at server startup.
+
+An explicit `support import` can retrieve a specified GitHub release asset and
+verify its exact bytes with the trusted installed `gh`. Supply its asset ID,
+SHA-256, size and the GC assembly's full source commit. The returned record and
+verification-context digests select an explicit later `support show`. A stored
+receipt says verification was recorded at import time; offline display does not
+reauthenticate the signature or prove the source-support claim. Neither a record
+nor a matching observation authorizes cleanup. No lookup happens automatically.
+
+For a completed installation, an explicitly selected asset can be imported and
+then inspected offline. Substitute independently obtained exact identities:
+
+```sh
+codex-session-gc support import --installation-id INSTALLATION_UUID \
+  --asset-id ASSET_ID --sha256 RECORD_SHA256 --size RECORD_BYTES \
+  --gc-commit ASSEMBLY_COMMIT --gh /absolute/path/to/gh
+codex-session-gc support show --installation-id INSTALLATION_UUID \
+  --sha256 RECORD_SHA256 --context-sha256 CONTEXT_SHA256
+```
+
+`CONTEXT_SHA256` is returned by import. Pass the same explicit `--install-dir`
+to both commands when the installation uses a non-default directory.
+
+Doctor opens separate ordinary read-only SQLite transactions. It does not
 change user tables or histories, copy storage, create receipts, launch the helper,
 or acquire application maintenance/writer ownership. SQLite may create or update
 WAL/SHM files and take normal coordination locks. Concurrent storage may change

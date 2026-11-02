@@ -25,6 +25,10 @@ providers, including pre-revert immutable rollout IDs. A removed consumer does
 not implicitly select its provider. Logical fork provenance alone is not a
 provider dependency. Unknown or conflicting relations are never repaired in storage.
 
+An attached thread is a separate relationship. An attachment to a selected source
+retains that source; inconsistent or unresolved SQL and header attachment facts
+refuse affected cleanup. An attachment does not select its source or child.
+
 ## Observation and confirmation
 
 Catalogue reads detached SQL metadata and filesystem names/stats without opening
@@ -82,6 +86,12 @@ mutations; it does not exclude SQLite's read coordination through locks or
 sidecars.
 
 ## Native execution
+
+Selected related fork, resume and publication operations, including metadata
+rename/upsert, must have finished before cleanup. A closed label, age or writer
+lock acquisition alone does not establish this condition. Each affected rollout,
+SQLite and log location must be on a qualified local filesystem; NFS, cross-host
+coordination and concurrent offline replacement are outside the qualified scope.
 
 Only the separately qualified native helper mutates session storage. It must
 match the bundled binary digest, wire format, exact schemas and migrations.

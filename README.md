@@ -9,56 +9,68 @@ not a fixed retention policy.
 
 ## Download and install
 
-Get the matched Linux bundle from
-[release v0.4.0](https://github.com/YuriyKrasilnikov/codex-session-gc/releases/tag/v0.4.0).
-It contains the Python wheel, qualified native helper, hash-locked requirements,
-license notices and `manifest.json`. The generic Python wheel alone does not
-contain the helper needed for deletion.
+Release 0.5.0 supplies a matched Linux x86_64 bundle and a standard-library
+installer. Python 3.14 or newer, `uv` and a separately trusted GitHub CLI (`gh`)
+are prerequisites. The qualified deployment is Ubuntu 26.04 LTS, glibc 2.43;
+other environments require qualification. The native contract uses wire 6, the
+exact state schema through migration 62 and the bundled companion schemas.
 
-| Component | Release 0.4.0 boundary |
-| --- | --- |
-| Qualified host | Linux x86_64, Ubuntu 26.04 LTS, glibc 2.43 |
-| Python | Requires 3.14 or newer; tested with 3.14.7 |
-| Native contract | Wire 6, state migrations through 61 and exact companion schemas, including the qualified board template schema |
-| Compatibility authority | The wheel's bundled contract and release manifest; a Codex version string alone is insufficient |
-
-Other operating systems, architectures and libc environments require cleanup
-qualification. Native tests cover recorder/storage ownership and bounded effects;
-see [supported behavior](docs/contract.md) and
-[native qualification](native/README.md) for the lifecycle limits.
-
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and an existing
-Python 3.14 interpreter first. These commands use `python3.14` from PATH and do
-not download Python. Run them in a new download directory:
+Obtain the full 40-character assembly source commit independently from a trusted
+release record. Use a trusted `gh` whose `attestation verify --help` includes
+`--repo`, `--signer-workflow`, `--source-digest`, `--source-ref`,
+`--predicate-type`, `--deny-self-hosted-runners` and `--format`. Verify the
+bootstrap before executing it; an unverified installer cannot verify itself:
 
 ```sh
 set -eu
 mkdir codex-session-gc-download
 cd codex-session-gc-download
-curl --fail --location --remote-name https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.4.0/codex-session-gc-0.4.0-linux-x86_64.tar.gz
-curl --fail --location --remote-name https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.4.0/SHA256SUMS
-sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf codex-session-gc-0.4.0-linux-x86_64.tar.gz
-cd codex-session-gc-0.4.0-linux-x86_64
-gc_install_dir="$HOME/.local/share/codex-session-gc/0.4.0/venv"
-test ! -e "$gc_install_dir"
-uv venv --no-project --no-python-downloads --python python3.14 "$gc_install_dir"
-uv pip install --python "$gc_install_dir/bin/python" --require-hashes --only-binary :all: -r install-requirements.txt
-. "$gc_install_dir/bin/activate"
-codex-session-gc ui --helper "$PWD/codex-session-gc-native"
+curl --fail --location --output codex-session-gc-installer-0.5.0.pyz \
+  https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.5.0/codex-session-gc-installer-0.5.0.pyz
+GC_ASSEMBLY_COMMIT=FULL_40_CHARACTER_ASSEMBLY_COMMIT
+gh attestation verify codex-session-gc-installer-0.5.0.pyz \
+  --repo YuriyKrasilnikov/codex-session-gc \
+  --signer-workflow YuriyKrasilnikov/codex-session-gc/.github/workflows/artifacts.yml \
+  --source-digest "$GC_ASSEMBLY_COMMIT" --source-ref refs/heads/main \
+  --predicate-type https://slsa.dev/provenance/v1 --deny-self-hosted-runners \
+  --format json
 ```
 
-The checksum command verifies the downloaded release assets against `SHA256SUMS`;
-missing assets for other download choices are ignored. If the installation path
-already exists, choose a new empty path and use it in the MCP registration too;
-do not clear an existing environment. Keep the unpacked bundle
-at its chosen absolute location: CLI/MCP retain the helper path you supply.
-Installation must run from the bundle directory so its local wheel reference
-resolves. Runtime dependencies may need downloading; no Rust toolchain is needed.
+The verifier checks the downloaded file as the attestation subject. Stop on any
+verification failure; do not execute the bootstrap. The attestation establishes
+assembly origin, not cleanup correctness or a native rebuild. The exact source
+commit is an input to verification, not a value inferred from the downloaded file.
 
-The browser uses `CODEX_HOME` or `~/.codex`; `--home` selects another directory.
-Read the preview before confirming deletion. For interruption or an upgrade from
-an existing installation, follow [recovery and upgrades](docs/recovery.md).
+Stage the release using separately trusted absolute executable paths. The command
+prints an installation ID; retain that exact ID for activation and recovery.
+Substitute your actual existing Codex home and receipt directory:
+
+```sh
+python3.14 -I codex-session-gc-installer-0.5.0.pyz --release v0.5.0 \
+  --action stage --gh /absolute/path/to/gh --uv /absolute/path/to/uv \
+  --python /absolute/path/to/python3.14
+python3.14 -I codex-session-gc-installer-0.5.0.pyz --action activate \
+  --installation-id INSTALLATION_UUID --home /absolute/codex-home \
+  --receipt-dir /absolute/receipt-directory
+python3.14 -I codex-session-gc-installer-0.5.0.pyz --action status \
+  --installation-id INSTALLATION_UUID
+```
+
+Activation reports the exact `mcp_argv` for registering the server. Status can
+identify a completed staged installation without an activation intent; activate
+that same ID explicitly. For an existing activation intent, `--action reconcile
+--installation-id INSTALLATION_UUID` records an observable terminal state without
+repeating the switch. An unknown switch remains unknown; reconciliation does not
+resume installation or retry it. Use the same installation directory. The
+installer verifies the downloaded bundle before consuming it and does not modify
+Codex configuration. A missing or insufficient verifier causes refusal. The
+installer and its local executables must be trusted independently. Installation
+requires network access and does not require a Rust toolchain.
+
+For an existing installation, retain old receipt consumers and follow
+[recovery and upgrades](docs/recovery.md). The historical
+[0.4.0 release](https://github.com/YuriyKrasilnikov/codex-session-gc/releases/tag/v0.4.0)
+remains available for its existing consumers.
 
 ## Source checkout
 
@@ -106,6 +118,9 @@ launch the helper, or acquire application maintenance/writer ownership. Ordinary
 SQLite read transactions can create or update WAL/SHM coordination files and use
 SQLite locks. Results are separate observations, not a global snapshot or
 permission to delete; execution still requires native ownership and fresh checks.
+The source-support claim is separate from these local observations. Producer
+identity supplied on the command line remains an unverified caller observation;
+an unknown running binary origin is not inferred from a version string.
 See [compatibility](docs/compatibility.md) for the supported boundary.
 
 ## Browse and select
@@ -262,7 +277,7 @@ remain open for the checks immediately before unlink. History bodies are not
 scanned or hashed.
 
 The supported native contract is wire 6 and the exact bundled state schema
-through migration 61, with the qualified companion database schemas. The same
+through migration 62, with the qualified companion database schemas. The same
 qualified path supports plain JSONL and Zstandard, legacy and paginated history,
 and every observed pre/post-revert rollout belonging to a selected owner.
 Historical physical metadata may differ from the current SQL provider or role;
@@ -291,15 +306,15 @@ and a matching bundled identity; an arbitrary successful build is not accepted.
 
 ## MCP
 
-The stdio server exposes `query_catalogue`, `session_details`, `prepare_cleanup`,
+The stdio server exposes `compatibility_status`, `query_catalogue`, `session_details`, `prepare_cleanup`,
 `apply_cleanup`, `cleanup_status` and `reconcile_cleanup`. Register it with absolute paths:
 
-```console
-codex mcp add codex-sessions -- "$HOME/.local/share/codex-session-gc/0.4.0/venv/bin/python" -m codex_session_gc mcp --home "$HOME/.codex" --helper "$PWD/codex-session-gc-native" --receipt-dir "$HOME/.local/state/codex-session-gc/receipts"
-```
+Use the exact `mcp_argv` returned by activation when registering the server
+with `codex mcp add`. It binds the installed release, chosen home and receipt
+location; registration changes the client configuration.
 
 For observation only, add `--read-only` to the server arguments. This mode exposes
-`query_catalogue`, `session_details`, `prepare_cleanup` and `cleanup_status`.
+`compatibility_status`, `query_catalogue`, `session_details`, `prepare_cleanup` and `cleanup_status`.
 Preparation returns a conditional report with `can_apply_via_mcp=false` and creates
 no cleanup operation UUID, declaration or receipt. It needs no helper. Apply and
 reconciliation tools are unavailable because both can write application data or
@@ -307,9 +322,8 @@ receipt evidence. Default mode retains the confirmed apply and reconciliation
 tools. Read-only describes application data and receipt evidence; SQLite read
 coordination may still use locks or sidecars.
 
-Run registration from the unpacked bundle directory. Replace `--home` when Codex
-uses a different storage directory. Registration edits the client configuration;
-starting the server itself does not.
+Choose the home used by Codex when activating the installation. Starting the
+server itself does not edit client configuration.
 Reconnect the client to load changed server code. Ask for the largest project
 groups, agents last active before a chosen date, or a preview for explicit IDs.
 Query and details share a cached catalogue identity; explicit refresh replaces it.
