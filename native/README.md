@@ -2,7 +2,7 @@
 
 The helper links a patched Codex ThreadStore as a separate executable. It does
 not replace the running Codex executable or install a background service. Its
-intended operation is bounded cleanup of a selected closed MAIN thread and its
+intended operation is bounded cleanup of a selected stopped MAIN thread and its
 agents while unrelated Codex work continues.
 
 The source inputs are `helper/` (including `Cargo.lock`), the patch files in
@@ -14,8 +14,7 @@ Codex commit `092d3acd6bec3e3a14bdc7e7a2810ab628ab759d`, from
 `79c8ea8547e1dd9969f63ef6b76a4fb0d1a024ef36c0c627fbcd2ffb658d9312`.
 `build-inputs/provenance.json` records upstream source hashes before patch
 application, the exact current helper and patch inputs, compiler settings and
-artifact-bound qualification. The production executable below was rebuilt from
-those current inputs with Rust and C/C++ source-path remapping.
+artifact-bound qualification. The build uses Rust and C/C++ source-path remapping.
 The source base remains that commit. `patches/board-schema-0164.patch` carries the
 narrow official Codex 0.164 board SQL changes into its existing board extension;
 associated pool/lifecycle access preserves the bounded cleanup transaction path.
@@ -128,9 +127,8 @@ Building the helper alone does not qualify it for cleanup. The Python adapter
 loads `src/codex_session_gc/execution/closed_work_contract.json` and accepts only
 its qualified production binary SHA-256, wire version, and exact schema and
 migration identities. The supported production helper uses Rust 1.99.1, edition
-2024, wire 6, and SHA-256
-`a21f923664a98c096758eca54c91f2d79b507dd8576793f1b4fe214b86313e4d`
-(81,839,984 bytes). The release bundle names the executable
+2024 and wire 6. The matching binary identity is recorded in the bundled contract
+and release manifest. The release bundle names the executable
 `codex-session-gc-native`; supply its absolute path with `--helper`.
 A digest becomes selectable
 only when the Python contract resource records its qualification. Source profile
@@ -160,7 +158,10 @@ may identify the same saved physical rollout's compressed representation.
 
 The exhaustive tagged `parent_relation` distinguishes roots, ordinary spawn
 ownership and Guardian historical association. Ordinary spawn ownership requires
-the closed authoritative SQL edge; embedded source/header parents must agree.
+exactly one expected SQL parent with a recognized `Open` or `Closed` status;
+embedded source/header parents must agree. A status-only change is not authority
+and does not itself refuse cleanup. Unknown status and missing, multiple or wrong
+parents refuse.
 A selected Guardian requires exact SQL/header `SubAgentSource::Other("guardian")`,
 a valid association and no incoming spawn edge. Its associated parent may be
 absent, unowned or active; selecting the Guardian does not acquire that parent's
@@ -199,11 +200,17 @@ physical member and match that member's SQL/header provenance; a missing current
 pointer cannot make all members historical. Incoming spawn edges refuse this
 exception. Exact declared supplemental writer paths remain mandatory.
 
-The closed-work boundary requires selected related fork, resume and publication
-operations to finish before cleanup; unrelated work continues. The caller must
-establish completion of related publication, including selected metadata
-rename/upsert. A closed label, age or
-writer acquisition does not establish that related publication has finished.
+The admission boundary covers qualified local stock Codex 0.166.0 persistent
+public CLI and app-server workflows, with MAv1 and MAv2 qualified separately.
+The helper acquires maintenance and writer/lifecycle ownership of the root and
+all actual spawn descendants in deterministic order; a busy member refuses that
+work before effects. It holds those guards through fresh closure, identity,
+provider and exact-effect validation and removal. A label or age is not proof of
+inactivity. Custom internal controllers and arbitrary direct ephemeral-library
+access are outside this boundary. Related selected-thread metadata updates and
+dependency-reference publication
+(for example, a new fork history reference) must finish before cleanup; writer
+acquisition does not independently certify their completion.
 Each affected rollout, SQLite and log location must use a qualified local
 filesystem; NFS and concurrent offline replacement are outside qualification.
 Maintenance ownership, authoritative activity, exact SQL row effects, descriptor
@@ -213,10 +220,16 @@ mandatory. Historical names remain untouched. Ambiguous multi-database commit
 evidence reports UNKNOWN rather than claiming rollback.
 
 Qualification receipts remain attributed to the actual source and binary tested.
-The production artifact above passed current-contract, physical-storage,
-attachment, Guardian and direct closed-work cases, plus a stock writer coordination
-witness. These retain their exact producer and scope attribution. To run the stock
-writer witness against the same qualified identities, supply explicit absolute
+The helper with SHA-256
+`7b6c5065a903463e9b58baa0cf525ed2858c97934b6569fb8a5880d4eadb92ff`
+and profile SHA-256
+`fe850b5f2cefa78ca6c14f2aa74fa7926818819b1d8a76d6b281044d97772867`
+passed 151 bounded cases covering native storage, exact effects, retained
+providers, attachments, Guardians, writer coordination and stock persistent
+lifecycle observations. Related selected-thread metadata and dependency-reference
+publication must finish before cleanup, as described above. These observations
+retain their exact producer and scope attribution. To run the stock writer witness
+against the matching qualified identities, supply explicit absolute
 paths to the stock Codex executable, the fixture and the native helper, and an
 absent trace path:
 

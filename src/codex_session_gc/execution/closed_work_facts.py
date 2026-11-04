@@ -190,6 +190,8 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
         records[identifier] = ThreadRecord(
             identifier, origin, ActivityState.UNKNOWN, archive, LastActivity(timestamp)
         )
+    if any(status not in (SpawnEdgeStatus.OPEN, SpawnEdgeStatus.CLOSED) for _, _, status in edges):
+        raise collector.PreparationRefused("Unsupported spawn edge status.")
     spawn_edges = tuple(
         SpawnEdge(ThreadId.parse(p), ThreadId.parse(c), SpawnEdgeStatus(status))
         for p, c, status in edges

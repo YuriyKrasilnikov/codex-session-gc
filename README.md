@@ -1,6 +1,6 @@
 # codex-session-gc
 
-Browse Codex storage, select closed work and delete an exact set of histories
+Browse Codex storage, select stopped work and delete an exact set of histories
 while unrelated sessions continue running. The terminal interface uses Textual;
 CLI and MCP operations share its selection rules. MAIN histories can be selected.
 Explicit Guardian histories can also be selected. Their historical parent association
@@ -10,8 +10,9 @@ not a fixed retention policy.
 ## What is new in 0.5.0
 
 A matched installer stages releases alongside older consumers and reports an
-explicit MCP command. The cleanup contract recognizes attached histories and
-the state schema at migration 62. Doctor and MCP can compare an explicitly
+explicit MCP command. The cleanup contract recognizes attached histories, the state
+schema at migration 62, and stopped work whose spawn relationship still records
+`Open`. Doctor and MCP can compare an explicitly
 imported source-support record with the current helper and profile; that record
 does not authorize cleanup. The terminal keeps essential controls visible while
 its content scrolls in compact windows.
@@ -213,7 +214,7 @@ default is the user's state directory. The UI requires an interactive terminal.
 
 ## CLI preview and cleanup
 
-Choose a closed session root and an explicit UTC cutoff:
+Choose a stopped session root and an explicit UTC cutoff:
 
 ```console
 codex-session-gc plan --online --home /absolute/codex-home \
@@ -302,9 +303,17 @@ global concurrent snapshot. Path checks reject observed invalid paths and change
 endpoint identities; they do not establish uninterrupted namespace ownership.
 
 Preparation reads scoped metadata, selected effect keys and bounded first-line
-physical headers. Native execution holds the work's writer ownership, walks bounded
-namespace headers to protect retained providers, and revalidates current schema,
-selected identities and exact SQL effects before deletion. Selected descriptors
+physical headers. Native execution holds maintenance and writer/lifecycle ownership
+of the whole root and all actual spawn descendants, including unselected siblings.
+A busy member refuses that work before effects. Under retained ownership and
+transactions, it checks the complete closure, walks bounded namespace headers to
+protect retained providers, and revalidates schema, identities and exact SQL effects.
+A spawn edge marked `Open` or `Closed` is relationship metadata, not evidence of
+inactivity; a status-only change does not itself refuse cleanup. Unknown status or
+an ambiguous parent refuses. Related selected-thread metadata updates and
+dependency-reference publication
+(for example, a new fork history reference) must finish before cleanup; acquiring a
+writer guard does not independently certify their completion. Selected descriptors
 remain open for the checks immediately before unlink. History bodies are not
 scanned or hashed.
 
@@ -321,8 +330,10 @@ or be closed; selecting that parent never implicitly selects the Guardian. Exact
 selected-owner rows in `guardian_review_feedback` and `thread_read_receipts` are
 deleted for both ordinary and Guardian histories; unselected opaque rows remain
 untouched. Matched retained Guardians keep their existing physical writer guards.
-Native recorder/storage and retained-history resume witnesses do not establish a
-live Core, GuardianPool or app-server lifecycle guarantee.
+The runtime boundary is the qualified local stock Codex 0.166.0 persistent public
+CLI and app-server workflows, with MAv1 and MAv2 qualified separately. Custom
+internal controllers and arbitrary direct ephemeral-library access are outside this
+boundary. It is not a guarantee of business success or an empty runtime heap.
 
 `--max-read-bytes` defaults to 256 GiB and `--timeout-seconds` to six hours per
 collection or dispatch. These are cooperative limits, not memory reservations or

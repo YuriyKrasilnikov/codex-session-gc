@@ -1,8 +1,8 @@
 {
   "format": "codex-session-gc-compatibility-boundaries-v1",
   "baseline_commit": "360319d8dee62d87e2d59fc0c21805d79519cfed",
-  "baseline_profile_sha256": "17d36bd25ed15ca5a28e02ef0adee8ce8cfc3af4e8ec98463629e9fda94ca38b",
-  "baseline_native_inputs_sha256": "34a4efb11d12a2f630047952b7ada0c0a5781e6201ca4490e396b31431ec5a86",
+  "baseline_profile_sha256": "fe850b5f2cefa78ca6c14f2aa74fa7926818819b1d8a76d6b281044d97772867",
+  "baseline_native_inputs_sha256": "3a5064c7d81fc2fc0e19e8fb803207a5d12525fa37d4023430de7913dfcc50ed",
   "boundaries": [
     {
       "name": "state-schema",
@@ -117,6 +117,69 @@
       ],
       "witnesses": [
         "scoped-support-acceptance:sha256:684e5a419173db9ce4f864532791c17aefc31f52583fd6024d9465401e1a2ad6"
+      ]
+    },
+    {
+      "name": "public-persistent-admission",
+      "paths": [
+        "codex-rs/exec/src/cli.rs",
+        "codex-rs/exec/src/lib.rs",
+        "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+        "codex-rs/app-server/src/request_processors/thread_processor.rs",
+        "codex-rs/app-server/src/request_processors/thread_lifecycle.rs",
+        "codex-rs/core/src/config/mod.rs",
+        "codex-rs/config/src/config_toml.rs",
+        "codex-rs/features/src/lib.rs"
+      ],
+      "witnesses": [
+        "required:public-persistent-admission-source-and-runtime"
+      ]
+    },
+    {
+      "name": "persistence-admission-fresh-resume",
+      "paths": [
+        "codex-rs/core/src/thread_manager.rs",
+        "codex-rs/core/src/thread_manager/managed.rs",
+        "codex-rs/core/src/thread_manager/shutdown.rs",
+        "codex-rs/core/src/session/session.rs",
+        "codex-rs/core/src/session/startup.rs",
+        "codex-rs/core/src/session/mod.rs",
+        "codex-rs/core/src/session/handlers.rs",
+        "codex-rs/thread-store/src/lib.rs",
+        "codex-rs/thread-store/src/live_thread.rs",
+        "codex-rs/thread-store/src/local/mod.rs",
+        "codex-rs/thread-store/src/local/live_writer.rs",
+        "codex-rs/thread-store/src/local/read_thread.rs",
+        "codex-rs/thread-store/src/local/thread_rollout_resolver.rs",
+        "codex-rs/thread-store/src/local/model_context.rs",
+        "codex-rs/thread-store/src/local/history_revision.rs",
+        "codex-rs/rollout/src/compression.rs"
+      ],
+      "witnesses": [
+        "required:persistent-writer-and-fresh-resume-source-and-runtime"
+      ]
+    },
+    {
+      "name": "v2-custody-status",
+      "paths": [
+        "codex-rs/core/src/agent/control.rs",
+        "codex-rs/core/src/agent/control/runtime.rs",
+        "codex-rs/core/src/agent/control/legacy.rs",
+        "codex-rs/core/src/agent/control/residency.rs",
+        "codex-rs/core/src/agent/control/spawn.rs",
+        "codex-rs/core/src/agent/control/resume.rs",
+        "codex-rs/core/src/agent/control/mailbox.rs",
+        "codex-rs/core/src/agent/control/delivery.rs",
+        "codex-rs/core/src/agent/control/spawn_guard.rs",
+        "codex-rs/core/src/agent/child_config.rs",
+        "codex-rs/core/src/session/input_queue.rs",
+        "codex-rs/core/src/session/turn_input.rs",
+        "codex-rs/core/src/tasks/mod.rs",
+        "codex-rs/core/src/tasks/lifecycle.rs",
+        "codex-rs/state/src/model/graph.rs"
+      ],
+      "witnesses": [
+        "required:v2-custody-status-source-and-runtime"
       ]
     }
   ],

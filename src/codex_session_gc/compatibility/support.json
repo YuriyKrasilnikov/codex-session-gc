@@ -1,7 +1,10 @@
 {
   "conditions": [
     {
-      "description": "The explicitly selected work is closed, and related fork, resume and publication operations have finished; this includes selected-thread metadata updates. Unrelated work may continue."
+      "description": "The selected work is technically stopped within the qualified local stock Codex 0.166 persistent public CLI and app-server workflows, with MAv1 and MAv2 qualified separately. Native execution requires maintenance and complete root and actual spawn-descendant writer/lifecycle ownership and fresh checks; unrelated work may continue."
+    },
+    {
+      "description": "Related selected-thread metadata updates and dependency-reference publication, including a new fork history reference, must finish before cleanup. Acquiring a writer guard does not independently certify their completion."
     },
     {
       "description": "The selected rollout locations and every affected database and log location use the qualified local filesystem and cooperative writer and SQLite locks."
@@ -34,18 +37,18 @@
   "coverage_complete": true,
   "coverage_gaps": [],
   "execution": {
-    "helper_sha256": "a21f923664a98c096758eca54c91f2d79b507dd8576793f1b4fe214b86313e4d",
-    "native_inputs_sha256": "34a4efb11d12a2f630047952b7ada0c0a5781e6201ca4490e396b31431ec5a86",
-    "profile_sha256": "17d36bd25ed15ca5a28e02ef0adee8ce8cfc3af4e8ec98463629e9fda94ca38b"
+    "helper_sha256": "7b6c5065a903463e9b58baa0cf525ed2858c97934b6569fb8a5880d4eadb92ff",
+    "native_inputs_sha256": "3a5064c7d81fc2fc0e19e8fb803207a5d12525fa37d4023430de7913dfcc50ed",
+    "profile_sha256": "fe850b5f2cefa78ca6c14f2aa74fa7926818819b1d8a76d6b281044d97772867"
   },
   "record_version": 1,
-  "report_sha256": "096ca2523efeaba64de35ba7a2f4a2697c0838bc46a6ec7cb2a54aace326f8d2",
+  "report_sha256": "c42d1701d6237abca46a221bf8dc8d9359d3e932d4e7bf4dd201bfe9d79dc600",
   "review": {
-    "scope": "Selected closed-work cleanup on matching qualified local storage; scoped source-effect assessment and bounded observations, not generic Rust or producer binary equivalence.",
-    "source": "scoped-source-coverage-decision:sha256:20c7f99cb300dbeb09f570f5199c75eb6ccd378bf4d6af3792bfddea5f6c89c2"
+    "scope": "Selected technically stopped work on matching qualified local storage, within the persistent public Codex 0.166 CLI and app-server workflows; scoped source and bounded runtime evidence, not generic Rust or producer binary equivalence.",
+    "source": "source-assessment-identity:sha256:4fdd3e568a75a31bbbc96870e433fc573d07d8a12e280fc79b1e877c2c63ccef"
   },
   "source_origin": {
-    "scope": "Selected closed-work cleanup on matching qualified local storage; scoped source-effect assessment and bounded observations, not generic Rust or producer binary equivalence.",
+    "scope": "Selected technically stopped work on matching qualified local storage, within the persistent public Codex 0.166 CLI and app-server workflows; scoped source and bounded runtime evidence, not generic Rust or producer binary equivalence.",
     "source": "https://github.com/openai/codex/tree/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856"
   },
   "status": "supported_within_scope",
@@ -59,48 +62,28 @@
   },
   "witnesses": [
     {
-      "reference": "native-qualification-id:sha256:5b37875fdf3045d3d6f49a857b7a7955cd69f7353fea039bc0c27d4b7ad94d87",
-      "scope": "Selected storage, exact effects, retained dependencies and cooperative writer ownership."
+      "reference": "native-qualification-id:sha256:36ee499656b47890c15cb38759cb5438e72d453472ec036f772920983aa63d69",
+      "scope": "Exact helper, profile and native input qualification."
     },
     {
-      "reference": "native-qualification-receipt:sha256:7d0dfb45e2c0ae07940305432de93a3c5cb82c17c04ab2377907f56cc058e688",
-      "scope": "Bounded disposable native cases and one observed stock producer writer-contention witness."
+      "reference": "native-qualification-receipt:sha256:fb10f813f7a12d8ff6effff1be57627e090463f6b3c5b1048039f3d879b95115",
+      "scope": "Seven bounded native and producer partitions including eight stock lifecycle cases."
     },
     {
-      "reference": "installed-qualification-summary:sha256:cb84ee75605af35890d8642207490ce072e52ff6ada18bd0bfa597dd54aa3fd3",
-      "scope": "Installed-wheel consumer, terminal and attachment cases on disposable storage."
+      "reference": "stock-trace-audit:sha256:f24df29378e41be8226248c4d55db94a9be4fc7be1817a1a045e7e4483f95a1f",
+      "scope": "Eight observed persistent stock producer cases, with MAv1 and MAv2 represented; not producer source provenance."
     },
     {
-      "reference": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/message-board/src/local/lifecycle.rs#L95-L108 sha256:e065a2c070b2012bbbf19bbd372e8a866f7c6c4870f4d94fdabb72e620736fe5",
-      "scope": "Board lifecycle tombstone checks inside the retained write transaction."
+      "reference": "stock-manifest-oracle:sha256:d88756c09d1f814fbf076f9ac99970789e826d23fa9f7dc0ea1ca3fb2539931e",
+      "scope": "Observed selected and retained rollout paths in disposable stock cases."
     },
     {
-      "reference": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/message-board/src/local/setup.rs#L61-L74 sha256:65ab0c965050975909cc037b8dbbba926138438e9fbc656657621f8b4aca872d",
-      "scope": "Board setup uses the same tombstone guard."
+      "reference": "source-assessment-bytes:sha256:a60ad5de7c459facfd7d475eb31cd48d04640cd7df62cadba69415fe2047111a",
+      "scope": "Exact supplied scoped source assessment bytes."
     },
     {
-      "reference": "https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/state/src/sqlite/connection.rs sha256:81952e24fe6c2bb29380632062cd4822bbb748911868ee32ff12be979446e4f8",
-      "scope": "SQLite initialization and managed journal-mode policy within the stated filesystem conditions."
-    },
-    {
-      "reference": "scoped-assessment:sha256:8f534b0c64320f74c973e775de3297cf4dfb23ed8d81dd73ea236beaa8054b54",
-      "scope": "Source and runtime evidence input to the scoped acceptance."
-    },
-    {
-      "reference": "source-assessment-bytes:sha256:cb68fd0f9d1e3fa237d6e80ef2dea59265e75c00e857fd6fdd79899955f69871",
-      "scope": "Exact reviewed source assessment bytes, including scoped coverage and applicability conditions."
-    },
-    {
-      "reference": "source-assessment-identity:sha256:8b5a4c4a5e3b5688c7dff3294e0fb372fbf9179382529154863c2a1596fc940c",
-      "scope": "Canonical normalized assessment identity for evaluation against the bound source report."
-    },
-    {
-      "reference": "scoped-source-comparison-repeat:sha256:93218f6b69246811e2f8de5ff8e39325078591c5e934ad57e44b86ae6484c207",
-      "scope": "Repeated immutable source observation with the same execution identities; the repeat used the earlier equivalent assessment wording."
-    },
-    {
-      "reference": "scoped-assessment-evaluation:sha256:5d429be4f7baf44aa34f3c89b2c9bc0d496137336b8a0bd8d47a059e2c94e463",
-      "scope": "Pure evaluation of the final assessment against the retained comparison report."
+      "reference": "source-assessment-identity:sha256:4fdd3e568a75a31bbbc96870e433fc573d07d8a12e280fc79b1e877c2c63ccef",
+      "scope": "Canonical normalized assessment evaluated against the fresh immutable source report."
     }
   ]
 }

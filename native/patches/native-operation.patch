@@ -1047,14 +1047,14 @@
 +                .ownership_scope
 +                .thread_ids
 +                .contains(&parent_thread_id)
-+                && parents
-+                    == vec![(
-+                        parent_thread_id.to_string(),
-+                        codex_state::DirectionalThreadSpawnEdgeStatus::Closed
-+                            .as_ref()
-+                            .to_owned(),
-+                    )],
-+            "selected spawn parent or closed status changed",
++                && matches!(parents.as_slice(), [(parent, status)]
++                    if parent == &parent_thread_id.to_string()
++                        && match status.parse::<codex_state::DirectionalThreadSpawnEdgeStatus>() {
++                            Ok(codex_state::DirectionalThreadSpawnEdgeStatus::Open)
++                            | Ok(codex_state::DirectionalThreadSpawnEdgeStatus::Closed) => true,
++                            Err(_) => false,
++                        }),
++            "selected spawn parent or status is invalid",
 +        ),
 +        CleanupParentRelation::Root {} | CleanupParentRelation::GuardianAssociation { .. } => {
 +            require(

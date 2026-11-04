@@ -57,6 +57,25 @@ def _legacy_work(home: Path) -> None:
         connection.execute("UPDATE threads SET history_mode='legacy'")
 
 
+@pytest.mark.parametrize("status", ["unknown", "active", "future", "OPEN", ""])
+def test_execution_facts_reject_unsupported_spawn_status(tmp_path: Path, status: str) -> None:
+    _native_home(tmp_path)
+    with sqlite3.connect(tmp_path / "state_5.sqlite") as connection:
+        connection.execute("UPDATE thread_spawn_edges SET status=?", (status,))
+    with pytest.raises(PreparationRefused, match="Unsupported spawn edge status"):
+        read_closed_work_facts(tmp_path, _CUTOFF, _ROOTS, None, collection_limits())
+
+
+@pytest.mark.parametrize("status", ["open", "closed"])
+def test_execution_facts_accept_current_spawn_status(tmp_path: Path, status: str) -> None:
+    _native_home(tmp_path)
+    with sqlite3.connect(tmp_path / "state_5.sqlite") as connection:
+        connection.execute("UPDATE thread_spawn_edges SET status=?", (status,))
+    facts = read_closed_work_facts(tmp_path, _CUTOFF, _ROOTS, None, collection_limits())
+    assert facts.snapshot.spawn_edges
+    assert all(edge.status == status for edge in facts.snapshot.spawn_edges)
+
+
 def test_direct_facts_preserve_legacy_v2_members_with_complete_physical_inventory(
     tmp_path: Path,
 ) -> None:

@@ -1,8 +1,8 @@
 # Supported cleanup contract
 
-The supported operation removes an explicit set of closed histories while unrelated
+The supported operation removes an explicit set of stopped histories while unrelated
 Codex work continues. CLI, Textual and MCP use the same selection and native
-execution boundary. Age is an operator-supplied filter, never evidence of closure.
+execution boundary. Age is an operator-supplied filter, never evidence of inactivity.
 
 ## Selection and retention
 
@@ -95,11 +95,15 @@ local server operator.
 
 ## Native execution
 
-Selected related fork, resume and publication operations, including metadata
-rename/upsert, must have finished before cleanup. A closed label, age or writer
-lock acquisition alone does not establish this condition. Each affected rollout,
-SQLite and log location must be on a qualified local filesystem; NFS, cross-host
-coordination and concurrent offline replacement are outside the qualified scope.
+Admission is scoped to qualified local stock Codex 0.166.0 persistent public CLI
+and app-server workflows, with MAv1 and MAv2 qualified separately. Custom internal
+host controllers and arbitrary direct ephemeral-library access are outside this
+scope. Related selected-thread metadata updates and dependency-reference publication
+(for example, a new fork history reference) must finish before cleanup; acquiring a
+writer guard does not independently certify their completion.
+A lifecycle label or age does not establish inactivity. Each affected
+rollout, SQLite and log location must be on a qualified local filesystem; NFS,
+cross-host coordination and concurrent offline replacement are outside the scope.
 
 Only the separately qualified native helper mutates session storage. It must
 match the bundled binary digest, wire format, exact schemas and migrations.
@@ -113,8 +117,14 @@ resolve to its same-ID compressed representation. Historical members keep their
 own provider/role values. Duplicate representations and unresolved nonempty
 namespace objects refuse. Unrelated definitely empty regular files are preserved.
 
-Execution acquires writer/publication ownership and the maintenance lock, then
-revalidates current identities and exact row effects under retained transactions.
+Execution acquires the maintenance lock and writer/lifecycle ownership for the
+root and every actual spawn descendant in deterministic order. A busy member,
+including an unselected sibling, refuses that work before effects. Under retained
+ownership and transactions it checks the complete closure and unique expected
+parent, then revalidates current identities and exact row effects. A spawn edge
+may record either `Open` or `Closed`; a status-only transition does not authorize
+or refuse deletion. Unknown status, a missing, multiple or wrong parent, changed
+topology or row incidence refuse. Row-ID bounds do not freeze status bytes.
 Selected descriptors remain open through final pre-unlink checks. Retained
 provider owners remain guarded. Late rows, changed pointers/stat identities and
 expanded physical sets refuse before unapproved effects. Effects may narrow the
@@ -147,5 +157,5 @@ Limits are cooperative: the defaults are 256 GiB and six hours per collection or
 dispatch; requests are at most 16 MiB, decoded first-line headers at most 1 MiB
 including newline, and combined helper output at most 1 MiB. SQLite deadlines do
 not count exact physical I/O. A blocked filesystem call has no finite completion
-guarantee. History-body integrity and a complete live Core/GuardianPool/app-server
-lifecycle are outside the recorder/storage witnesses. See [compatibility](compatibility.md).
+guarantee. History-body integrity, business success, an empty runtime heap and
+perpetual absence of later auxiliary rows are not guaranteed. See [compatibility](compatibility.md).

@@ -30,7 +30,7 @@ is not an upgrade. Existing receipt consumers must be retained while their
 outcomes remain unresolved.
 
 The bundled scoped support claim addresses Codex 0.166.0 commit
-`6ff1e1ca3b30fc8b914720681fcf5fe62e95f856` for selected closed work under the
+`6ff1e1ca3b30fc8b914720681fcf5fe62e95f856` for selected stopped work under the
 conditions in [the cleanup contract](contract.md). The underlying automated
 source comparison remains UNKNOWN; the scoped assessment is a supplied review
 claim, not a general Rust or whole-Core equivalence proof. The installed Codex
@@ -292,15 +292,23 @@ the resulting asset before import as described above. An offline receipt records
 the earlier verification; it does not reauthenticate a signature or prove that an
 installed Codex binary came from the stated upstream commit.
 
-The scope requires the actual producer and helper to use the qualified matching
-storage locations and selected related fork, resume and publication to have
-finished. Unknown source variants stay protected. In particular, an Internal
+The scope requires the actual producer and helper to use qualified matching
+storage locations. Runtime admission covers local stock Codex 0.166.0 persistent
+public CLI and app-server workflows, with MAv1 and MAv2 qualified separately.
+The helper holds maintenance and complete root and spawn-descendant writer/lifecycle
+ownership through fresh closure and effect checks. `Open` and `Closed` spawn
+markers describe relationships rather than prove inactivity. Custom internal host
+controllers and arbitrary direct ephemeral-library access are outside this scope.
+Related selected-thread metadata updates and dependency-reference publication
+(for example, a new fork history reference) must finish before cleanup; writer
+acquisition does not independently certify their completion.
+Unknown source variants stay protected. In particular, an Internal
 Guardian source is not the qualified `SubAgentSource::Other("guardian")` case and
 remains unknown/protected; this does not claim a complete Guardian lifecycle.
 
 ## Current validation boundaries
 
-Native storage qualification tests use disposable LocalThreadStore producers and
+Historical native storage qualification tests used disposable LocalThreadStore producers and
 independent SQL/file oracles. Positive revert cases preserve distinct logical and
 immutable physical IDs; retained providers must remain readable. Compression
 witnesses identify their actual stock producer and plain SQL pointer. Separate
@@ -322,8 +330,8 @@ Installed 0.164 protocol schema export confirms `thread/start`, `thread/read`,
 `rollout/compress` (null parameters). Schema presence is not a producer/lifecycle
 witness. Background compression replies do not prove worker drain. Short-lived
 materialization files require deterministic controlled tests or source exclusion;
-missing them in polling is not proof of absence. The release qualification covers
-the named storage/ownership boundaries and exact schema identities; it does not
+missing them in polling is not proof of absence. Those historical results cover
+their named storage/ownership boundaries and exact schema identities; they do not
 certify every lifecycle behavior of an installed Codex process.
 
 ## Development checks

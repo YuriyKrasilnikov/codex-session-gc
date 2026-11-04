@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import socket
@@ -455,9 +456,13 @@ def test_source_support_is_separate_from_local_execution_observation(
     _equal(checks["report"], BindingState.UNKNOWN)
     _equal(checks["helper"], BindingState.MISMATCH)
     _equal(support.bindings.state, BindingState.MISMATCH)
+    profile = json.loads(
+        files("codex_session_gc.execution").joinpath("closed_work_contract.json").read_bytes()
+    )
+    evidence = json.loads(base64.b64decode(profile["qualification_evidence"]["data_base64"]))
     _equal(
         support.profile_declared_native_inputs_sha256,
-        "34a4efb11d12a2f630047952b7ada0c0a5781e6201ca4490e396b31431ec5a86",
+        evidence["compiled_source_manifest_sha256"],
     )
     _equal(support.profile_native_inputs_origin, "profile_declaration_not_independent_observation")
 

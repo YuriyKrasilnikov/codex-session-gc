@@ -56,7 +56,7 @@ FIXTURE = arguments.fixture
 NATIVE = arguments.native
 STOCK_SHA256 = "b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8"
 FIXTURE_SHA256 = "a08fa74e22b90ff9b181a460c65e825647cf11014cb0ab552bdc2835364d11d3"
-NATIVE_SHA256 = "a21f923664a98c096758eca54c91f2d79b507dd8576793f1b4fe214b86313e4d"
+NATIVE_SHA256 = "7b6c5065a903463e9b58baa0cf525ed2858c97934b6569fb8a5880d4eadb92ff"
 
 # Existing fixture harness owns and reaps registered subprocesses on interpreter exit.
 os.environ["GC_NATIVE_BINARY"] = str(NATIVE)

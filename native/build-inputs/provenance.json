@@ -2,19 +2,24 @@
   "archive_sha256": "79c8ea8547e1dd9969f63ef6b76a4fb0d1a024ef36c0c627fbcd2ffb658d9312",
   "archive_url": "https://codeload.github.com/openai/codex/tar.gz/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
   "build_qualification": {
-    "build_log_sha256": "ea3a0a6fc125521db23edec4b845b66a3803f64c00ddbbf335c3797fac1e0bde",
+    "build_log_sha256": "547653425a4f91f2247fbbc9676cfff5a23e8e43551d24fb7bf1f151c773f1b3",
     "build_settings": {
       "cargo": "1.99.1 (5f94df478 2026-08-27)",
       "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
       "compiler_commit": "58cf8f9c35b355199727627d07ae34a4e2846d67",
       "debug": 0,
       "edition": "2024",
+      "fixture_features": [
+        "fixtures"
+      ],
       "incremental": false,
       "jobs": 2,
+      "locked": true,
       "native_compilers": {
         "c": "GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1)",
         "cxx": "GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1)"
       },
+      "offline": true,
       "path_remapping": {
         "c_and_cxx": "CFLAGS and CXXFLAGS use -ffile-prefix-map for the same roots, including AWS-LC assertion locations.",
         "environment": "Only inherited PATH, HOME and optional RUSTUP_HOME are preserved; Cargo profile/cache/target and C/C++ compilers/remapping flags are explicit. No ambient wrapper, target, compiler flags or optional build metadata is inherited.",
@@ -30,34 +35,35 @@
       "profile": "dev",
       "target": "x86_64-unknown-linux-gnu"
     },
-    "contract_sha256": "17d36bd25ed15ca5a28e02ef0adee8ce8cfc3af4e8ec98463629e9fda94ca38b",
+    "contract_sha256": "fe850b5f2cefa78ca6c14f2aa74fa7926818819b1d8a76d6b281044d97772867",
     "dynamic_libraries": [
       "libgcc_s.so.1",
       "libm.so.6",
       "libc.so.6",
       "ld-linux-x86-64.so.2"
     ],
-    "fixture_build_log_sha256": "3933fa52962e1150c5f00eab735a3c910a3f54ad667db13cbadac3ede64a3ff3",
+    "fixture_build_log_sha256": "547653425a4f91f2247fbbc9676cfff5a23e8e43551d24fb7bf1f151c773f1b3",
     "fixture_helper_bytes": 100615912,
     "fixture_helper_sha256": "a08fa74e22b90ff9b181a460c65e825647cf11014cb0ab552bdc2835364d11d3",
-    "helper_bytes": 81839984,
-    "helper_sha256": "a21f923664a98c096758eca54c91f2d79b507dd8576793f1b4fe214b86313e4d",
+    "helper_bytes": 81838408,
+    "helper_sha256": "7b6c5065a903463e9b58baa0cf525ed2858c97934b6569fb8a5880d4eadb92ff",
     "native_candidate": {
-      "summary_sha256": "2f557589fed6f7a1dd7de3eb8c81702bdc7663557c688affdafe24778fbc7f60",
+      "summary_sha256": "caeff984d361f00ef60a88cd182a26637c07f113544d03681089b7518096da35",
       "transport": {
-        "asset_id": 702630146,
-        "bytes": 15697994,
-        "sha256": "c6d1a89817e4fc13e4eb565bc0b1be6cbd3038b168210ef1c6c59eb883088cf1"
+        "asset_id": 709232749,
+        "bytes": 15701373,
+        "sha256": "934210ffdef0f24eade1dd119b96dccc5e8a09611e109890014f62cb0f105482"
       }
     },
     "partitions": [
       {
         "cases": 63,
         "exit_code": 0,
-        "filesystem": "9p",
+        "filesystem": "overlay",
         "kind": "native-contract",
-        "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
-        "stdout_sha256": "6ad7639bc04d962206beebdb24674542730a3a75899def67bbcf3737726fcb56",
+        "scope": "Disposable storage/effect fixtures; no whole Core lifecycle proof.",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_sha256": "79f3db6cfc6449a0fff634d3eea7947ce70c3d1110388f97967d14db034fa709",
         "test_source": "native/helper/tests/current_contract.py",
         "test_source_sha256": "9a114cfcb32e9eeb0b8de79dec4f4a067e08306df768cbc2066732710cec8f51"
       },
@@ -66,17 +72,19 @@
         "exit_code": 0,
         "filesystem": "overlay",
         "kind": "physical-storage",
-        "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
-        "stdout_sha256": "61694524fb03deb34545d7684940e5a8dbcf19e793ad8aa78037495652b69ebc",
+        "scope": "Disposable storage/effect fixtures; no whole Core lifecycle proof.",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_sha256": "829290ecc176d8a5b47a7f9ed2ee6f1c5e94575aa502e557c912662b74f8220d",
         "test_source": "native/helper/tests/physical_rollouts.py",
         "test_source_sha256": "fa0aa0b13e9a0d2175a32c8b8f1ef8acc9f6527ecd1a902fa0bd65f9089e3bad"
       },
       {
         "cases": 13,
         "exit_code": 0,
-        "filesystem": "9p",
+        "filesystem": "overlay",
         "kind": "attached-retention",
-        "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+        "scope": "Disposable storage/effect fixtures; no whole Core lifecycle proof.",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "stdout_sha256": "3ba457e5af13bb531f8396b34d1b8ce63d9dff3415e398f00cefe056838bf991",
         "test_source": "native/helper/tests/attached_cleanup.py",
         "test_source_sha256": "5ca30a2ff7bfe8af0f3501a3ee8829ffe41c8f5761778088b1de72b821ac3a5c"
@@ -86,30 +94,184 @@
         "exit_code": 0,
         "filesystem": "overlay",
         "kind": "guardian-retention",
-        "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
-        "stdout_sha256": "e2c994b94eb0529289548745e62abfc9b1e71d2b119a0b3da6a355e39d53ede6",
+        "scope": "Disposable storage/effect fixtures; no whole Core lifecycle proof.",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_sha256": "f5d33ad9f4f48634fb73ab4469579a1fb85c6187ac7ad7b92a65a2dac5559df5",
         "test_source": "native/helper/tests/guardian_closed_work.py",
         "test_source_sha256": "f78c5d7164b3fcad4200b3876d99f921a9c88121dcc57aba2c185d1cb4cf8a0d"
       },
       {
-        "cases": 18,
+        "cases": 22,
         "exit_code": 0,
         "filesystem": "overlay",
         "kind": "direct-closed-work",
-        "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
-        "stdout_sha256": "62f99578c9f2e318b09b337d22b3b584173fd6230283325b15ba35b76013e510",
+        "scope": "Disposable storage/effect fixtures; no whole Core lifecycle proof.",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_sha256": "cdc9f18eea691558ba6bced9f7d498b4ed738147f3df24f9d38d96dc53fe9c15",
         "test_source": "native/helper/tests/direct_closed_work.py",
-        "test_source_sha256": "a76e63541d0feeed28533de86f8c125a43f52ae84767184d9d1989b5b74ff26f"
+        "test_source_sha256": "386413edbf742e6c58b26f2d7f19aa6944e757b3881cfecb36285e8719887fa0"
       },
       {
         "cases": 1,
         "exit_code": 0,
+        "filesystem": "overlay",
         "kind": "stock0166-writer-coordination",
         "producer_sha256": "b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8",
-        "scope": "Observed installed0.166 producer source-parent writer exclusion and post-release canonical/SQL attachment; no vendor signature/source binary provenance proof.",
-        "stdout_sha256": "732b8a70e14277747451fe7b747788c60c40eef4943fc359030ef5e4f2fc85cd",
+        "scope": "Stock 0.166 observed parent writer exclusion during attached fork and publication after release; no vendor provenance proof.",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_sha256": "9a39c84c6a64ff9763ec0ccbb71b7b6eca965b1b027f74d545aa9e5faa9f95eb",
         "test_source": "native/helper/tests/stock_attached_writer.py",
-        "test_source_sha256": "e1e95d33212d1abfb21fc4d1fd408f2f5920381cb1cfdb9e93ed715ba70544fa"
+        "test_source_sha256": "cdaa4d8fcebe5f13d4afd37cb94691e5760c25756781521caf9ce254d6ff835f",
+        "trace_sha256": "6094f64faaa7c9255c4c815e71599e7ee58399b3e81957bdad75506020446778"
+      },
+      {
+        "artifacts": {
+          "inputs.sha256": "d9c091c38bf1962e621cd0aaad7ca174ab76b29652a4b1344a02649d57f21226",
+          "manifest-oracle.json": "d88756c09d1f814fbf076f9ac99970789e826d23fa9f7dc0ea1ca3fb2539931e",
+          "results.tsv": "179ff432c172b3f19ce43bee5834b38c10b7848bd59596a7ae2d5c5db84abdee",
+          "trace-audit.json": "f24df29378e41be8226248c4d55db94a9be4fc7be1817a1a045e7e4483f95a1f",
+          "v1-cancel.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "v1-cancel.stdout": "8a6472defcd53a08e5d71864597e45ce5603c7474bd4522b3eb7aa938fa8896f",
+          "v1-clean.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "v1-clean.stdout": "2a9ada002c1be5cf602906a6a00192fdd004bfde496dd477db3232db6f35010b",
+          "v1-error.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "v1-error.stdout": "5594105dd057750398a9357a16dc1068969f03a1a4c36feb627f0b3d28c1042a",
+          "v2-cancel.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "v2-cancel.stdout": "b8e4bd11a8d9e08eb57d77b2d986d252fc47bf2eb73373cbdec5f0630479f1ed",
+          "v2-clean.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "v2-clean.stdout": "97431a719c371cdb65eefd5f67839e8524bea20ace8e9de96db4fe16179f5548",
+          "v2-error.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "v2-error.stdout": "f81b227c1d6cfdee120961b8335266485258da903a9be90a1720169d49176811",
+          "v2-sibling.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "v2-sibling.stdout": "9153a32f4257d8bb029009686b47d17024f86ba2c82efa56b56a17c89be39b1c",
+          "v2-wake.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "v2-wake.stdout": "a1ab2d15079205e1adb0750eaff2b46d5b55eabe783455d7e48eccb37844c9b3"
+        },
+        "case_evidence": [
+          {
+            "case": "v1-clean",
+            "receipts": [
+              {
+                "bytes": 65536,
+                "sha256": "541359d89c8bc08300ff2b83778cc3bd5f5383bb14c0c5d06c14469c09bc10c0"
+              },
+              {
+                "bytes": 65536,
+                "sha256": "e148496e154a4c70d8e2feafe18e4b0570b34126681c49ef1356f154f1e29a1d"
+              }
+            ],
+            "trace_sha256": "d997c202c0d06ac14bc1fd14b440093588c238d2030d04b8c6ae8bae8961d63c"
+          },
+          {
+            "case": "v1-error",
+            "receipts": [
+              {
+                "bytes": 65536,
+                "sha256": "5d6fccf0eb4025d875db66a4543562ceb8862a6ab8fce4495c6a2b8756742763"
+              },
+              {
+                "bytes": 65536,
+                "sha256": "1fdfb26cea6c59ec1617dd1d2d33b96b6266f5181bf4733e8ecd9d13e2b66893"
+              }
+            ],
+            "trace_sha256": "e884f67c0e69abadd600982f7e3c9624f9482afa5a68b8955ab5b48123984af8"
+          },
+          {
+            "case": "v1-cancel",
+            "receipts": [
+              {
+                "bytes": 65536,
+                "sha256": "33c0696c3a95120fd36acda8124ea90a5713a0240e65944edea3e2e70b420a55"
+              },
+              {
+                "bytes": 65536,
+                "sha256": "d2ea62dba6f81c5e28e7dca673a0514c797e62e43efe49c818ea661298999f15"
+              }
+            ],
+            "trace_sha256": "f6a4a177066316553ff2f565d7cc84ebc3876a5412544ed5218d61218e1dc009"
+          },
+          {
+            "case": "v2-clean",
+            "receipts": [
+              {
+                "bytes": 65536,
+                "sha256": "f6f551c5c869657dbdfdc7798fb1b221b45a6f207a27148cf1bbe4497b203d7b"
+              },
+              {
+                "bytes": 65536,
+                "sha256": "38af4238eaa3609ebb7c6694a7e4ca21097dbbed64fd2b3a80f0c8a0b504991c"
+              }
+            ],
+            "trace_sha256": "e9068f80f9a2d7b501bb8e2ea90f97f6eba16dfb2dbdf1b72daae63e50f3c0b1"
+          },
+          {
+            "case": "v2-error",
+            "receipts": [
+              {
+                "bytes": 65536,
+                "sha256": "a2bbecd9b3e8ef1a7f177757854d3d139723941251aaba9280baf8fc0e424782"
+              },
+              {
+                "bytes": 65536,
+                "sha256": "bedf09b6cc8954c9ccff01ec2dad9696156d1a43932497ad2d9f594f98f9745e"
+              }
+            ],
+            "trace_sha256": "b26e19c85a1b1e054383a02eca1a39faacca7e30966e6d3ef41c7127c7eb1ae4"
+          },
+          {
+            "case": "v2-cancel",
+            "receipts": [
+              {
+                "bytes": 65536,
+                "sha256": "557fdb4a7095538ba62d08656bcdc168550adb68e479eb8d0644071b86a0438c"
+              },
+              {
+                "bytes": 65536,
+                "sha256": "af0114f705f9bae5df5284677c7258ed81cf8c7abe1a371fd54897db33f40c88"
+              }
+            ],
+            "trace_sha256": "37e3dabd37d7ba85591396435daae287594ba180854e8bbd01fad1fccade5564"
+          },
+          {
+            "case": "v2-wake",
+            "receipts": [
+              {
+                "bytes": 65536,
+                "sha256": "6b82da11120e3df06764ae829d6cc1db3a9c83c821c253285d154cf540b5b4ac"
+              },
+              {
+                "bytes": 65536,
+                "sha256": "4e5294569a6cf0ec29d1ebe733096672a8ae021bf98d341c0d75867f5a268529"
+              }
+            ],
+            "trace_sha256": "af396997db5c10271b6670eae993ba9f6ee16edfc7a322f1fe37f94db40c364d"
+          },
+          {
+            "case": "v2-sibling",
+            "receipts": [
+              {
+                "bytes": 65536,
+                "sha256": "399fb66ad74d274b2877d2e0177bf3a756c7518fa488297fcc03d86b0ff16863"
+              },
+              {
+                "bytes": 65536,
+                "sha256": "3802aec26b2adce8181bfe3515f04ef55d579dda33e55a92ef79d9a959691194"
+              },
+              {
+                "bytes": 65536,
+                "sha256": "b418079c61283d963047767d4c5d03328e22f057725f5e48fa157f4a18326256"
+              }
+            ],
+            "trace_sha256": "0aebeca12e746b515e9b51391c97effeccbe375d411cfdeb233e8fd38be2605d"
+          }
+        ],
+        "cases": 8,
+        "exit_code": 0,
+        "filesystem": "overlay",
+        "kind": "stock0166-lifecycle-matrix",
+        "scope": "Direct native apply in disposable stock homes; V1/V2 clean/error/cancel plus V2 sleep and sibling cases. Sleep observed once, not all wake/eviction schedules; sibling attribution composes stock writer observation with fixture-held sibling guard. Guarded resume refusal observed, not scheduler pause. No installed CLI/MCP acceptance or whole Core/runtime heap certificate.",
+        "test_source": "native/helper/tests/stock_spawn_lifecycle.py",
+        "test_source_sha256": "94b8ade17ad94e1e7f8585c12b80bb914707b95306389f26e27479c3d0f9cfce"
       }
     ],
     "patch_targets": [
@@ -254,9 +416,9 @@
         "sha256": "cdee0ca24d6244979840a211ff9432e43d17b717d5170516b8d69b78f9cf5535"
       },
       {
-        "bytes": 73759,
+        "bytes": 73946,
         "path": "codex-rs/thread-store/src/local/bounded_cleanup.rs",
-        "sha256": "e229b3919ea7b57e20e8b5b18314469ff914b924877dce2eacb1ff2eb806ac72"
+        "sha256": "2c698fc657a45ac986a6efc74e78aa9a95d26787d7a995efdff36fe07bb4396d"
       },
       {
         "bytes": 33916,
@@ -315,36 +477,44 @@
       }
     ],
     "patch_targets_manifest_encoding": "UTF-8 JSON array with sorted object keys, indent 2 and one trailing newline.",
-    "patch_targets_manifest_sha256": "1e857caab3bae8aa3fa46360c216a829d85f86a2d437c71866313f0031e8b1a9",
-    "qualification_boundary": "Explicitly selected closed work, no related in-flight fork/resume/publication; unrelated work continues. Exact schema62, metadata, locks, admitted file/SQL effects. No whole Core lifecycle or whole-history integrity guarantee.",
-    "qualification_identity": "5b37875fdf3045d3d6f49a857b7a7955cd69f7353fea039bc0c27d4b7ad94d87",
+    "patch_targets_manifest_sha256": "2864f8e0b01cc44ee746d4a9ba41f2642a2b8676dd7d529694806f232f0ac0a5",
+    "qualification_boundary": "Explicit selected technically stopped work under qualified persistent stock 0.166 workflow, complete ownership and fresh effects. Related selected metadata and dependency-reference publication must be finished, including new fork history_base references; writer guards do not establish that premise. No general runtime heap certificate, whole Core lifecycle or whole-history guarantee.",
+    "qualification_identity": "36ee499656b47890c15cb38759cb5438e72d453472ec036f772920983aa63d69",
     "qualification_identity_encoding": "SHA-256 of UTF-8 JSON qualification material with sorted keys and compact separators.",
-    "qualification_receipt_sha256": "7d0dfb45e2c0ae07940305432de93a3c5cb82c17c04ab2377907f56cc058e688",
+    "qualification_receipt_sha256": "fb10f813f7a12d8ff6effff1be57627e090463f6b3c5b1048039f3d879b95115",
     "qualification_summary": {
       "archive_sha256": "79c8ea8547e1dd9969f63ef6b76a4fb0d1a024ef36c0c627fbcd2ffb658d9312",
-      "boundary": "Explicitly selected closed work, no related in-flight fork/resume/publication; unrelated work continues. Exact schema62, metadata, locks, admitted file/SQL effects. No whole Core lifecycle or whole-history integrity guarantee.",
-      "build_log_sha256": "ea3a0a6fc125521db23edec4b845b66a3803f64c00ddbbf335c3797fac1e0bde",
+      "boundary": "Explicit selected technically stopped work under qualified persistent stock 0.166 workflow, complete ownership and fresh effects. Related selected metadata and dependency-reference publication must be finished, including new fork history_base references; writer guards do not establish that premise. No general runtime heap certificate, whole Core lifecycle or whole-history guarantee.",
+      "build_log_sha256": "547653425a4f91f2247fbbc9676cfff5a23e8e43551d24fb7bf1f151c773f1b3",
+      "build_observations_sha256": "5a50f94b1aa5111c5ef9aadd316e6b7a9e67a0947d866d47063ed1d1c444a8b2",
       "build_settings": {
         "debug": 0,
+        "edition": "2024",
+        "fixtureFeatures": [
+          "fixtures"
+        ],
         "incremental": false,
         "jobs": 2,
+        "locked": true,
+        "offline": true,
         "productionFeatures": [],
         "rust": "1.99.1"
       },
-      "fixture_build_log_sha256": "3933fa52962e1150c5f00eab735a3c910a3f54ad667db13cbadac3ede64a3ff3",
+      "fixture_build_log_sha256": "547653425a4f91f2247fbbc9676cfff5a23e8e43551d24fb7bf1f151c773f1b3",
       "fixture_helper_sha256": "a08fa74e22b90ff9b181a460c65e825647cf11014cb0ab552bdc2835364d11d3",
       "format": "codex-session-gc-native-qualification-v1",
-      "helper_bytes": 81839984,
-      "helper_sha256": "a21f923664a98c096758eca54c91f2d79b507dd8576793f1b4fe214b86313e4d",
-      "native_input_manifest_sha256": "34a4efb11d12a2f630047952b7ada0c0a5781e6201ca4490e396b31431ec5a86",
+      "helper_bytes": 81838408,
+      "helper_sha256": "7b6c5065a903463e9b58baa0cf525ed2858c97934b6569fb8a5880d4eadb92ff",
+      "native_input_manifest_sha256": "3a5064c7d81fc2fc0e19e8fb803207a5d12525fa37d4023430de7913dfcc50ed",
       "partitions": [
         {
           "cases": 63,
           "exit_code": 0,
-          "filesystem": "9p",
+          "filesystem": "overlay",
           "kind": "native-contract",
-          "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
-          "stdout_sha256": "6ad7639bc04d962206beebdb24674542730a3a75899def67bbcf3737726fcb56",
+          "scope": "Disposable storage/effect fixtures; no whole Core lifecycle proof.",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_sha256": "79f3db6cfc6449a0fff634d3eea7947ce70c3d1110388f97967d14db034fa709",
           "test_source": "native/helper/tests/current_contract.py",
           "test_source_sha256": "9a114cfcb32e9eeb0b8de79dec4f4a067e08306df768cbc2066732710cec8f51"
         },
@@ -353,17 +523,19 @@
           "exit_code": 0,
           "filesystem": "overlay",
           "kind": "physical-storage",
-          "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
-          "stdout_sha256": "61694524fb03deb34545d7684940e5a8dbcf19e793ad8aa78037495652b69ebc",
+          "scope": "Disposable storage/effect fixtures; no whole Core lifecycle proof.",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_sha256": "829290ecc176d8a5b47a7f9ed2ee6f1c5e94575aa502e557c912662b74f8220d",
           "test_source": "native/helper/tests/physical_rollouts.py",
           "test_source_sha256": "fa0aa0b13e9a0d2175a32c8b8f1ef8acc9f6527ecd1a902fa0bd65f9089e3bad"
         },
         {
           "cases": 13,
           "exit_code": 0,
-          "filesystem": "9p",
+          "filesystem": "overlay",
           "kind": "attached-retention",
-          "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
+          "scope": "Disposable storage/effect fixtures; no whole Core lifecycle proof.",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "stdout_sha256": "3ba457e5af13bb531f8396b34d1b8ce63d9dff3415e398f00cefe056838bf991",
           "test_source": "native/helper/tests/attached_cleanup.py",
           "test_source_sha256": "5ca30a2ff7bfe8af0f3501a3ee8829ffe41c8f5761778088b1de72b821ac3a5c"
@@ -373,36 +545,191 @@
           "exit_code": 0,
           "filesystem": "overlay",
           "kind": "guardian-retention",
-          "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
-          "stdout_sha256": "e2c994b94eb0529289548745e62abfc9b1e71d2b119a0b3da6a355e39d53ede6",
+          "scope": "Disposable storage/effect fixtures; no whole Core lifecycle proof.",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_sha256": "f5d33ad9f4f48634fb73ab4469579a1fb85c6187ac7ad7b92a65a2dac5559df5",
           "test_source": "native/helper/tests/guardian_closed_work.py",
           "test_source_sha256": "f78c5d7164b3fcad4200b3876d99f921a9c88121dcc57aba2c185d1cb4cf8a0d"
         },
         {
-          "cases": 18,
+          "cases": 22,
           "exit_code": 0,
           "filesystem": "overlay",
           "kind": "direct-closed-work",
-          "scope": "Disposable storage/effect oracles; no whole Core lifecycle proof.",
-          "stdout_sha256": "62f99578c9f2e318b09b337d22b3b584173fd6230283325b15ba35b76013e510",
+          "scope": "Disposable storage/effect fixtures; no whole Core lifecycle proof.",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_sha256": "cdc9f18eea691558ba6bced9f7d498b4ed738147f3df24f9d38d96dc53fe9c15",
           "test_source": "native/helper/tests/direct_closed_work.py",
-          "test_source_sha256": "a76e63541d0feeed28533de86f8c125a43f52ae84767184d9d1989b5b74ff26f"
+          "test_source_sha256": "386413edbf742e6c58b26f2d7f19aa6944e757b3881cfecb36285e8719887fa0"
         },
         {
           "cases": 1,
           "exit_code": 0,
+          "filesystem": "overlay",
           "kind": "stock0166-writer-coordination",
           "producer_sha256": "b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8",
-          "scope": "Observed installed0.166 producer source-parent writer exclusion and post-release canonical/SQL attachment; no vendor signature/source binary provenance proof.",
-          "stdout_sha256": "732b8a70e14277747451fe7b747788c60c40eef4943fc359030ef5e4f2fc85cd",
+          "scope": "Stock 0.166 observed parent writer exclusion during attached fork and publication after release; no vendor provenance proof.",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_sha256": "9a39c84c6a64ff9763ec0ccbb71b7b6eca965b1b027f74d545aa9e5faa9f95eb",
           "test_source": "native/helper/tests/stock_attached_writer.py",
-          "test_source_sha256": "e1e95d33212d1abfb21fc4d1fd408f2f5920381cb1cfdb9e93ed715ba70544fa"
+          "test_source_sha256": "cdaa4d8fcebe5f13d4afd37cb94691e5760c25756781521caf9ce254d6ff835f",
+          "trace_sha256": "6094f64faaa7c9255c4c815e71599e7ee58399b3e81957bdad75506020446778"
+        },
+        {
+          "artifacts": {
+            "inputs.sha256": "d9c091c38bf1962e621cd0aaad7ca174ab76b29652a4b1344a02649d57f21226",
+            "manifest-oracle.json": "d88756c09d1f814fbf076f9ac99970789e826d23fa9f7dc0ea1ca3fb2539931e",
+            "results.tsv": "179ff432c172b3f19ce43bee5834b38c10b7848bd59596a7ae2d5c5db84abdee",
+            "trace-audit.json": "f24df29378e41be8226248c4d55db94a9be4fc7be1817a1a045e7e4483f95a1f",
+            "v1-cancel.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "v1-cancel.stdout": "8a6472defcd53a08e5d71864597e45ce5603c7474bd4522b3eb7aa938fa8896f",
+            "v1-clean.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "v1-clean.stdout": "2a9ada002c1be5cf602906a6a00192fdd004bfde496dd477db3232db6f35010b",
+            "v1-error.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "v1-error.stdout": "5594105dd057750398a9357a16dc1068969f03a1a4c36feb627f0b3d28c1042a",
+            "v2-cancel.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "v2-cancel.stdout": "b8e4bd11a8d9e08eb57d77b2d986d252fc47bf2eb73373cbdec5f0630479f1ed",
+            "v2-clean.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "v2-clean.stdout": "97431a719c371cdb65eefd5f67839e8524bea20ace8e9de96db4fe16179f5548",
+            "v2-error.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "v2-error.stdout": "f81b227c1d6cfdee120961b8335266485258da903a9be90a1720169d49176811",
+            "v2-sibling.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "v2-sibling.stdout": "9153a32f4257d8bb029009686b47d17024f86ba2c82efa56b56a17c89be39b1c",
+            "v2-wake.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "v2-wake.stdout": "a1ab2d15079205e1adb0750eaff2b46d5b55eabe783455d7e48eccb37844c9b3"
+          },
+          "case_evidence": [
+            {
+              "case": "v1-clean",
+              "receipts": [
+                {
+                  "bytes": 65536,
+                  "sha256": "541359d89c8bc08300ff2b83778cc3bd5f5383bb14c0c5d06c14469c09bc10c0"
+                },
+                {
+                  "bytes": 65536,
+                  "sha256": "e148496e154a4c70d8e2feafe18e4b0570b34126681c49ef1356f154f1e29a1d"
+                }
+              ],
+              "trace_sha256": "d997c202c0d06ac14bc1fd14b440093588c238d2030d04b8c6ae8bae8961d63c"
+            },
+            {
+              "case": "v1-error",
+              "receipts": [
+                {
+                  "bytes": 65536,
+                  "sha256": "5d6fccf0eb4025d875db66a4543562ceb8862a6ab8fce4495c6a2b8756742763"
+                },
+                {
+                  "bytes": 65536,
+                  "sha256": "1fdfb26cea6c59ec1617dd1d2d33b96b6266f5181bf4733e8ecd9d13e2b66893"
+                }
+              ],
+              "trace_sha256": "e884f67c0e69abadd600982f7e3c9624f9482afa5a68b8955ab5b48123984af8"
+            },
+            {
+              "case": "v1-cancel",
+              "receipts": [
+                {
+                  "bytes": 65536,
+                  "sha256": "33c0696c3a95120fd36acda8124ea90a5713a0240e65944edea3e2e70b420a55"
+                },
+                {
+                  "bytes": 65536,
+                  "sha256": "d2ea62dba6f81c5e28e7dca673a0514c797e62e43efe49c818ea661298999f15"
+                }
+              ],
+              "trace_sha256": "f6a4a177066316553ff2f565d7cc84ebc3876a5412544ed5218d61218e1dc009"
+            },
+            {
+              "case": "v2-clean",
+              "receipts": [
+                {
+                  "bytes": 65536,
+                  "sha256": "f6f551c5c869657dbdfdc7798fb1b221b45a6f207a27148cf1bbe4497b203d7b"
+                },
+                {
+                  "bytes": 65536,
+                  "sha256": "38af4238eaa3609ebb7c6694a7e4ca21097dbbed64fd2b3a80f0c8a0b504991c"
+                }
+              ],
+              "trace_sha256": "e9068f80f9a2d7b501bb8e2ea90f97f6eba16dfb2dbdf1b72daae63e50f3c0b1"
+            },
+            {
+              "case": "v2-error",
+              "receipts": [
+                {
+                  "bytes": 65536,
+                  "sha256": "a2bbecd9b3e8ef1a7f177757854d3d139723941251aaba9280baf8fc0e424782"
+                },
+                {
+                  "bytes": 65536,
+                  "sha256": "bedf09b6cc8954c9ccff01ec2dad9696156d1a43932497ad2d9f594f98f9745e"
+                }
+              ],
+              "trace_sha256": "b26e19c85a1b1e054383a02eca1a39faacca7e30966e6d3ef41c7127c7eb1ae4"
+            },
+            {
+              "case": "v2-cancel",
+              "receipts": [
+                {
+                  "bytes": 65536,
+                  "sha256": "557fdb4a7095538ba62d08656bcdc168550adb68e479eb8d0644071b86a0438c"
+                },
+                {
+                  "bytes": 65536,
+                  "sha256": "af0114f705f9bae5df5284677c7258ed81cf8c7abe1a371fd54897db33f40c88"
+                }
+              ],
+              "trace_sha256": "37e3dabd37d7ba85591396435daae287594ba180854e8bbd01fad1fccade5564"
+            },
+            {
+              "case": "v2-wake",
+              "receipts": [
+                {
+                  "bytes": 65536,
+                  "sha256": "6b82da11120e3df06764ae829d6cc1db3a9c83c821c253285d154cf540b5b4ac"
+                },
+                {
+                  "bytes": 65536,
+                  "sha256": "4e5294569a6cf0ec29d1ebe733096672a8ae021bf98d341c0d75867f5a268529"
+                }
+              ],
+              "trace_sha256": "af396997db5c10271b6670eae993ba9f6ee16edfc7a322f1fe37f94db40c364d"
+            },
+            {
+              "case": "v2-sibling",
+              "receipts": [
+                {
+                  "bytes": 65536,
+                  "sha256": "399fb66ad74d274b2877d2e0177bf3a756c7518fa488297fcc03d86b0ff16863"
+                },
+                {
+                  "bytes": 65536,
+                  "sha256": "3802aec26b2adce8181bfe3515f04ef55d579dda33e55a92ef79d9a959691194"
+                },
+                {
+                  "bytes": 65536,
+                  "sha256": "b418079c61283d963047767d4c5d03328e22f057725f5e48fa157f4a18326256"
+                }
+              ],
+              "trace_sha256": "0aebeca12e746b515e9b51391c97effeccbe375d411cfdeb233e8fd38be2605d"
+            }
+          ],
+          "cases": 8,
+          "exit_code": 0,
+          "filesystem": "overlay",
+          "kind": "stock0166-lifecycle-matrix",
+          "scope": "Direct native apply in disposable stock homes; V1/V2 clean/error/cancel plus V2 sleep and sibling cases. Sleep observed once, not all wake/eviction schedules; sibling attribution composes stock writer observation with fixture-held sibling guard. Guarded resume refusal observed, not scheduler pause. No installed CLI/MCP acceptance or whole Core/runtime heap certificate.",
+          "test_source": "native/helper/tests/stock_spawn_lifecycle.py",
+          "test_source_sha256": "94b8ade17ad94e1e7f8585c12b80bb914707b95306389f26e27479c3d0f9cfce"
         }
       ],
+      "patch_targets_sha256": "884c343c036737764a6a2c9671ad84dd12bf20ddc9e440f4d58a5638c2d30c07",
       "upstream_commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d"
     },
     "qualification_summary_encoding": "UTF-8 JSON with sorted keys, indent 2 and one trailing newline; excludes the final raw profile.",
-    "qualification_summary_sha256": "742f9145e15a2f805a233a94c2d5827ee61e567e174a4a747119b3bcf652a7dc"
+    "qualification_summary_sha256": "7b26c0013eb899f76f3066a989fa50dea253c5a2b772445d84b68d568d1b7268"
   },
   "commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
   "compatibility_backports": [
@@ -517,9 +844,9 @@
           "sha256": "355c89553267b7fb218b200c91251e3bc8ea279854664b4df10c7565fc372fcb"
         },
         {
-          "bytes": 75731,
+          "bytes": 75918,
           "path": "native/patches/native-operation.patch",
-          "sha256": "66ed13b77b57b10c52789b2d75d3be9261f0140c476c40a078fd3e5dab0ac6e8"
+          "sha256": "2b8520bd3a06ab0442afbaf6a00209178b88e2185289cc816e39451c153da927"
         },
         {
           "bytes": 1011,
@@ -559,7 +886,7 @@
       ]
     },
     "manifest_encoding": "UTF-8 JSON with sorted keys, indent 2 and one trailing newline; provenance, qualification and distribution metadata are sealed separately.",
-    "manifest_sha256": "34a4efb11d12a2f630047952b7ada0c0a5781e6201ca4490e396b31431ec5a86",
+    "manifest_sha256": "3a5064c7d81fc2fc0e19e8fb803207a5d12525fa37d4023430de7913dfcc50ed",
     "scope": "Exact helper source, Cargo, toolchain and patch inputs used for the qualified production executable."
   },
   "repository": "https://github.com/openai/codex",

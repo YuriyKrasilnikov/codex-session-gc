@@ -11,6 +11,7 @@ import os
 import pathlib
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -26,23 +27,83 @@ Popen = subprocess.Popen
 
 
 class MeasuredPopen(Popen):
-    """Read Linux's completed-child counters before waitpid releases the zombie."""
-    def communicate(self, input=None, timeout=None):
-        if "codex_session_gc.execution.owned_launch" not in self.args:
-            return super().communicate(input, timeout)
-        self.stdin.write(input)
-        self.stdin.close()
-        stdout, stderr = self.stdout.read(), self.stderr.read()
-        os.waitid(os.P_PID, self.pid, os.WEXITED | os.WNOWAIT)
-        self.kernel_io = {
-            key: int(value) for key, value in
-            (line.split(":", 1) for line in pathlib.Path(f"/proc/{self.pid}/io").read_text().splitlines())
-        }
-        self.wait(timeout=timeout)
-        return stdout, stderr
+    """Capture completed-child counters before Popen reaps the launcher."""
+    instances = []
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.measured = any(pathlib.Path(str(arg)).name == "owned_launch.py" for arg in self.args)
+        self.kernel_io = None
+        if self.measured:
+            self.instances.append(self)
+
+    def _capture_if_exited(self):
+        if not self.measured or self.kernel_io is not None or self.returncode is not None:
+            return
+        try:
+            exited = os.waitid(os.P_PID, self.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            if exited is not None:
+                self.kernel_io = {
+                    key: int(value) for key, value in
+                    (line.split(":", 1) for line in pathlib.Path(f"/proc/{self.pid}/io").read_text().splitlines())
+                }
+        except ChildProcessError as error:
+            raise RuntimeError("owned child was reaped before I/O measurement") from error
+
+    def poll(self):
+        self._capture_if_exited()
+        if self.measured and self.kernel_io is None and self.returncode is None:
+            return None
+        return super().poll()
+
+    def wait(self, timeout=None):
+        if self.measured and self.kernel_io is None:
+            deadline = None if timeout is None else time.monotonic() + timeout
+            while self.kernel_io is None and self.returncode is None:
+                self._capture_if_exited()
+                if self.kernel_io is not None:
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise subprocess.TimeoutExpired(self.args, timeout)
+                time.sleep(.001)
+            if deadline is not None:
+                timeout = max(0, deadline - time.monotonic())
+        return super().wait(timeout=timeout)
+
+
+class OneShotSubprocess:
+    """Replace only one_shot's process factory; leave other producers untouched."""
+    Popen = MeasuredPopen
+
+    def __getattr__(self, name):
+        return getattr(subprocess, name)
 
 
 upgrade = b.upgrade
+
+
+def check_reaped_child_measurement():
+    """A child already reaped elsewhere must fail measurement without signalling."""
+    for operation in ("poll", "wait"):
+        child = MeasuredPopen([sys.executable, "-c", "pass", "owned_launch.py"],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL)
+        os.waitpid(child.pid, 0)
+        signals = []
+        child.terminate = lambda: signals.append("terminate")
+        child.kill = lambda: signals.append("kill")
+        try:
+            if operation == "poll":
+                s.one_shot._reap(child, 1)
+            else:
+                child.wait(timeout=1)
+        except RuntimeError as error:
+            assert "reaped before I/O measurement" in str(error), error
+        else:
+            raise AssertionError((operation, "reaped child was accepted"))
+        assert not signals, (operation, signals)
+        assert child.returncode is None, (operation, child.returncode)
+
 
 def targets(request):
     b.refresh(request)
@@ -67,14 +128,22 @@ def case(name, schema_version=62, body_size=None):
             with path.open("r+b") as stream:
                 stream.truncate(body_size)
             sparse_bytes = path.stat().st_blocks * 512
+        if name in ("open-to-closed", "late-open-to-closed"):
+            with sqlite3.connect(home / "state_5.sqlite") as db:
+                db.execute("UPDATE thread_spawn_edges SET status='open' WHERE child_thread_id=?", (child,))
         targets(request)
         peer = None
-        if name in ("closed-status", "parent-change"):
+        if name in ("closed-to-open", "open-to-closed", "unknown-status", "parent-change"):
             with sqlite3.connect(home / "state_5.sqlite") as db:
-                if name == "closed-status":
-                    db.execute("UPDATE thread_spawn_edges SET status='open' WHERE child_thread_id=?", (child,))
+                if name in ("closed-to-open", "open-to-closed", "unknown-status"):
+                    status = {"closed-to-open": "open", "open-to-closed": "closed",
+                              "unknown-status": "unknown"}[name]
+                    db.execute("UPDATE thread_spawn_edges SET status=? WHERE child_thread_id=?", (status, child))
                 else:
                     db.execute("UPDATE thread_spawn_edges SET parent_thread_id=? WHERE child_thread_id=?", (unrelated["id"], child))
+        if name == "missing-parent":
+            with sqlite3.connect(home / "state_5.sqlite") as db:
+                db.execute("DELETE FROM thread_spawn_edges WHERE child_thread_id=?", (child,))
         if name == "changed-header":
             b.edit_header(path, lambda meta: meta.update(agent_role="changed"))
         if name == "replaced-file":
@@ -111,6 +180,10 @@ def case(name, schema_version=62, body_size=None):
         if name == "retained-writer":
             peer = b.peer("hold-guard", home, root)
         # Do not hash historical bodies even in the test oracle.
+        retained_parent = s.owner_snapshot(request, root)
+        retained_other = s.owner_snapshot(request, unrelated["id"])
+        unrelated_path = pathlib.Path(unrelated["path"])
+        unrelated_bytes = unrelated_path.read_bytes()
         before_sql = s.sql_snapshot(request)
         before_files = {str(p): (p.stat().st_ino, p.stat().st_size, p.stat().st_mtime_ns, p.stat().st_ctime_ns)
                         for p in home.rglob("*.jsonl")}
@@ -133,8 +206,9 @@ def case(name, schema_version=62, body_size=None):
                             break
                     time.sleep(.001)
                 assert held, "native selected ownership not observed"
-                if name == "late-status":
-                    db.execute("UPDATE thread_spawn_edges SET status='open' WHERE child_thread_id=?", (child,))
+                if name in ("late-closed-to-open", "late-open-to-closed"):
+                    status = "open" if name == "late-closed-to-open" else "closed"
+                    db.execute("UPDATE thread_spawn_edges SET status=? WHERE child_thread_id=?", (status, child))
                 else:
                     db.execute("INSERT INTO thread_read_receipts VALUES(?,?,?,?)", (child, None, "late", None))
                 db.commit()
@@ -142,12 +216,17 @@ def case(name, schema_version=62, body_size=None):
                 before_sql = s.sql_snapshot(request)
                 outcome = pending.result(timeout=30)
         else:
-            with patch.object(s.subprocess, "Popen", MeasuredPopen):
+            with patch.object(s.one_shot, "subprocess", OneShotSubprocess()):
+                before_measured = len(MeasuredPopen.instances)
                 outcome = s.dispatch(request, aid, uid, payload)
-            kernel_io = s.CHILDREN[-1].kernel_io
+            measured = MeasuredPopen.instances[before_measured:]
+            assert len(measured) == 1 and measured[0].kernel_io is not None, "launcher I/O counters unavailable"
+            kernel_io = measured[0].kernel_io
         if peer:
             b.stop(peer)
-        confirmed = name in ("eligible", "missing-retained", "io-small", "io-large")
+        confirmed = name in ("eligible", "missing-retained", "io-small", "io-large",
+                             "closed-to-open", "open-to-closed",
+                             "late-closed-to-open", "late-open-to-closed")
         assert outcome["status"] == ("confirmed" if confirmed else "refused"), (name, outcome)
         if not confirmed:
             assert s.sql_snapshot(request) == before_sql, (name, "SQL changed")
@@ -155,6 +234,10 @@ def case(name, schema_version=62, body_size=None):
                     for p in home.rglob("*.jsonl")} == before_files, (name, "histories changed")
         else:
             assert not path.exists() and pathlib.Path(manifest["main_path"]).exists()
+            assert not any(s.owner_snapshot(request, child).values())
+            assert s.owner_snapshot(request, root) == retained_parent
+            assert s.owner_snapshot(request, unrelated["id"]) == retained_other
+            assert unrelated_path.read_bytes() == unrelated_bytes
             with sqlite3.connect(home / "state_5.sqlite") as db:
                 assert db.execute("SELECT id FROM threads WHERE id=?", (root,)).fetchone()
                 if schema_version == 62:
@@ -172,14 +255,16 @@ def case(name, schema_version=62, body_size=None):
 
 
 if __name__ == "__main__":
+    check_reaped_child_measurement()
     case("eligible", 62)
-    for name in ("closed-status", "parent-change", "changed-header", "replaced-file",
+    for name in ("closed-to-open", "open-to-closed", "unknown-status", "parent-change", "missing-parent", "changed-header", "replaced-file",
                  "changed-body-stat", "retained-provider", "retained-header-missing",
                  "oversized-header", "effect-overrun", "retained-writer", "missing-retained"):
         case(name)
     for name in ("selected-guardian", "selected-receipt", "late-receipt"):
         case(name, 62)
-    case("late-status")
+    case("late-closed-to-open")
+    case("late-open-to-closed")
     small = case("io-small", body_size=128 * 1024)
     large = case("io-large", body_size=4 * 1024**3)
     assert small["kernel_io"]["rchar"] < 16 * 1024**2
