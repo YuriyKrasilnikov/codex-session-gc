@@ -104,23 +104,23 @@ There is no fallback to a retired wire format or automatic journal migration.
    [installation](../README.md#download-and-install).
    Open its UI or run a read-only `plan` to check observation of the chosen home.
 
-   Obtain the published 0.5.0 installer and independently verify it before
+   Obtain the published 0.5.1 installer and independently verify it before
    running the following commands.
 
    ```sh
-   python3.14 -I /absolute/verified/codex-session-gc-installer-0.5.0.pyz --release v0.5.0 --action stage \
+   python3.14 -I /absolute/verified/codex-session-gc-installer-0.5.1.pyz --release v0.5.1 --action stage \
      --gh /absolute/path/to/gh --uv /absolute/path/to/uv \
      --python /absolute/path/to/python3.14
-   python3.14 -I /absolute/verified/codex-session-gc-installer-0.5.0.pyz --action activate --installation-id INSTALLATION_UUID \
+   python3.14 -I /absolute/verified/codex-session-gc-installer-0.5.1.pyz --action activate --installation-id INSTALLATION_UUID \
      --home /absolute/codex-home --receipt-dir /absolute/receipt-directory
-   python3.14 -I /absolute/verified/codex-session-gc-installer-0.5.0.pyz --action status --installation-id INSTALLATION_UUID
+   python3.14 -I /absolute/verified/codex-session-gc-installer-0.5.1.pyz --action status --installation-id INSTALLATION_UUID
    ```
 
    The UUID in the latter commands is the ID returned by staging. If the current
    launcher is not managed by this installer, activation requires the observed
    `--expected-current /absolute/path/to/current/launcher` target. For a 0.4.0
-   installation in the same application directory, add that option to the
-   activation command with the actual old launcher path. A completed
+   or unmanaged 0.5.0 installation in the same application directory, add that
+   option to the activation command with the actual old launcher path. A completed
    staged installation with no activation intent can be activated by its ID. For
    an existing intent, inspect status and use the verified zipapp with `--action
    reconcile --installation-id INSTALLATION_UUID` to record an observed terminal
@@ -128,7 +128,7 @@ There is no fallback to a retired wire format or automatic journal migration.
    resume an incomplete installation. Use the same explicit `--install-dir` and
    `--bin-dir` throughout if defaults are not appropriate. An installed consumer
    that provides `update` can run the same arguments through that command; 0.4.0
-   does not provide it, so use the independently verified 0.5.0 installer.
+   does not provide it, so use the independently verified 0.5.1 installer.
 5. Before replacing an MCP registration, confirm the old client has no outstanding
    cleanup calls and retain all unresolved UUIDs/receipts. Use the README registration
    command with the new Python/helper paths and the same chosen home/receipt roots;

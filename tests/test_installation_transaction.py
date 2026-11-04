@@ -16,6 +16,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from codex_session_gc.artifacts import ArtifactIdentity, SourceIdentity
+from codex_session_gc.installation import process as process_module
 from codex_session_gc.installation import transaction
 from codex_session_gc.installation.model import (
     InstallLayout,
@@ -54,7 +55,6 @@ def _commands(
         "if args[0] == 'venv':\n"
         + (
             "    (pathlib.Path.cwd() / '.install-tmp/growth').write_bytes(b'x' * 4194304)\n"
-            "    time.sleep(10)\n"
             if grow
             else ""
         )
@@ -269,8 +269,8 @@ def test_cancelled_child_is_reaped_before_owned_root_cleanup(tmp_path: Path) -> 
         pytest.fail("Unexpected: json.loads(receipt.read_text())['state'] != '...")
 
 
-def test_storage_watchdog_stops_growth_and_removes_owned_root(tmp_path: Path) -> None:
-    """Storage watchdog stops growth and removes owned root."""
+def test_storage_boundary_refuses_growth_and_removes_owned_root(tmp_path: Path) -> None:
+    """Boundary observation refuses growth and removes the owned root."""
     with pytest.raises(OwnedProcessError) as failure:
         _run(tmp_path, grow=True)
     if failure.value.reason.value != "storage":
@@ -281,6 +281,105 @@ def test_storage_watchdog_stops_growth_and_removes_owned_root(tmp_path: Path) ->
     record = next((base / "installations").glob("*.json"))
     if json.loads(record.read_text())["state"] != "failed":
         pytest.fail("Unexpected: json.loads(record.read_text())['state'] != 'f...")
+
+
+def test_storage_observation_does_not_walk_active_child_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tree walks happen outside child mutation, while the free floor remains monitored."""
+    marker = tmp_path / "active"
+    original = process_module._tree_usage  # noqa: SLF001
+
+    def guarded(root: Path) -> tuple[int, int]:
+        if marker.exists():
+            pytest.fail("Tree walked while child was mutating it")
+        return original(root)
+
+    budget = StorageBudget.capture(tmp_path, 1024 * 1024, 0)
+    monkeypatch.setattr(process_module, "_tree_usage", guarded)
+    script = "import pathlib,time; p=pathlib.Path('active'); p.touch(); time.sleep(.3); p.unlink()"
+    asyncio.run(
+        process_module.run_owned(
+            [sys.executable, "-c", script],
+            cwd=tmp_path,
+            environment=dict(os.environ),
+            limits=ProcessLimits(5, 65536, storage=budget),
+        )
+    )
+
+
+def test_storage_floor_stops_and_reaps_active_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A falling live floor still terminates the owned subprocess."""
+    marker = tmp_path / "active"
+    original = os.statvfs
+    budget = StorageBudget.capture(tmp_path, 1024 * 1024, 1)
+
+    def statvfs(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes] | int,
+    ) -> os.statvfs_result:
+        result = original(path)
+        if marker.exists():
+            fields = list(result)
+            fields[4] = 0
+            return os.statvfs_result(fields)
+        return result
+
+    script = (
+        "import os,pathlib,time; "
+        "pathlib.Path('active').write_text(str(os.getpid())); time.sleep(30)"
+    )
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "statvfs", statvfs)
+        with pytest.raises(OwnedProcessError) as error:
+            asyncio.run(
+                process_module.run_owned(
+                    [sys.executable, "-c", script],
+                    cwd=tmp_path,
+                    environment=dict(os.environ),
+                    limits=ProcessLimits(5, 65536, storage=budget),
+                )
+            )
+    if error.value.reason.value != "storage":
+        pytest.fail("Expected storage refusal")
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(marker.read_text()), 0)
+
+
+def test_storage_boundary_refuses_missing_root(tmp_path: Path) -> None:
+    """A missing root remains an error at a subprocess boundary."""
+    root = tmp_path / "owned"
+    root.mkdir()
+    budget = StorageBudget.capture(root, 1024, 0)
+    root.rmdir()
+    with pytest.raises(OwnedProcessError) as error:
+        asyncio.run(
+            process_module.run_owned(
+                [sys.executable, "-c", "pass"],
+                cwd=tmp_path,
+                environment=dict(os.environ),
+                limits=ProcessLimits(5, 65536, storage=budget),
+            )
+        )
+    if error.value.reason.value != "storage":
+        pytest.fail("Expected storage refusal")
+
+
+def test_storage_observation_preserves_deadline(tmp_path: Path) -> None:
+    """A running subprocess remains bounded by its deadline."""
+    budget = StorageBudget.capture(tmp_path, 1024 * 1024, 0)
+    with pytest.raises(OwnedProcessError) as error:
+        asyncio.run(
+            process_module.run_owned(
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                cwd=tmp_path,
+                environment=dict(os.environ),
+                limits=ProcessLimits(0.2, 65536, storage=budget),
+            )
+        )
+    if error.value.reason.value != "timeout":
+        pytest.fail("Expected timeout")
 
 
 def test_failed_then_retry_then_next_version(

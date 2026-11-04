@@ -141,18 +141,24 @@ class StorageBudget:
     growth_bytes: int
     free_floor_bytes: int
 
+    def check_floor(self) -> None:
+        """Refuse an exhausted or unobservable free-space floor."""
+        try:
+            volume = os.statvfs(self.root)
+        except OSError as error:
+            raise OwnedProcessError(ProcessFailure.STORAGE) from error
+        if volume.f_bavail * volume.f_frsize < self.free_floor_bytes:
+            raise OwnedProcessError(ProcessFailure.STORAGE)
+
     def check(self) -> None:
         """Refuse an exceeded budget or an unobservable filesystem."""
         try:
             logical, allocated = _tree_usage(self.root)
-            volume = os.statvfs(self.root)
         except OSError as error:
             raise OwnedProcessError(ProcessFailure.STORAGE) from error
-        if (
-            max(logical - self.baseline[0], allocated - self.baseline[1]) > self.growth_bytes
-            or volume.f_bavail * volume.f_frsize < self.free_floor_bytes
-        ):
+        if max(logical - self.baseline[0], allocated - self.baseline[1]) > self.growth_bytes:
             raise OwnedProcessError(ProcessFailure.STORAGE)
+        self.check_floor()
 
     @classmethod
     def capture(cls, root: Path, growth_bytes: int, free_floor_bytes: int) -> StorageBudget:
@@ -175,7 +181,7 @@ class StorageBudget:
 
 async def _watch_storage(budget: StorageBudget) -> None:
     while True:
-        budget.check()
+        budget.check_floor()
         await asyncio.sleep(0.05)
 
 
@@ -226,6 +232,8 @@ async def run_owned(
     pass_fds: tuple[int, ...] = (),
 ) -> bytes:
     """Run one child in an owned process group and reap it before returning or cancelling."""
+    if limits.storage is not None:
+        limits.storage.check()
     read_fd, write_fd = os.pipe2(os.O_CLOEXEC)
     os.set_blocking(read_fd, False)
     process: asyncio.subprocess.Process | None = None

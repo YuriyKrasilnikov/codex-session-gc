@@ -7,7 +7,14 @@ Explicit Guardian histories can also be selected. Their historical parent associ
 does not select or require deletion of the parent. Age is a caller-supplied filter,
 not a fixed retention policy.
 
-## What is new in 0.5.0
+## What is new in 0.5.1
+
+The installer avoids false storage refusals on affected filesystems while
+dependencies create and rename temporary directories. It checks the free-space
+floor during each subprocess and cumulative installation growth at subprocess
+boundaries.
+
+## What was new in 0.5.0
 
 A matched installer stages releases alongside older consumers and reports an
 explicit MCP command. The cleanup contract recognizes attached histories, the state
@@ -19,7 +26,7 @@ its content scrolls in compact windows.
 
 ## Download and install
 
-The 0.5.0 installation workflow uses a matched Linux x86_64 bundle and a
+The 0.5.1 installation workflow uses a matched Linux x86_64 bundle and a
 standard-library installer. Obtain the published assets and independently
 verify their attestations before using them. Python 3.14 or newer, `uv` and a
 separately trusted GitHub CLI (`gh`) are prerequisites. The qualified deployment
@@ -37,10 +44,10 @@ bootstrap before executing it; an unverified installer cannot verify itself:
 set -eu
 mkdir codex-session-gc-download
 cd codex-session-gc-download
-curl --fail --location --output codex-session-gc-installer-0.5.0.pyz \
-  https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.5.0/codex-session-gc-installer-0.5.0.pyz
+curl --fail --location --output codex-session-gc-installer-0.5.1.pyz \
+  https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.5.1/codex-session-gc-installer-0.5.1.pyz
 GC_ASSEMBLY_COMMIT=FULL_40_CHARACTER_ASSEMBLY_COMMIT
-gh attestation verify codex-session-gc-installer-0.5.0.pyz \
+gh attestation verify codex-session-gc-installer-0.5.1.pyz \
   --repo YuriyKrasilnikov/codex-session-gc \
   --signer-workflow YuriyKrasilnikov/codex-session-gc/.github/workflows/artifacts.yml \
   --source-digest "$GC_ASSEMBLY_COMMIT" --source-ref refs/heads/main \
@@ -58,13 +65,13 @@ prints an installation ID; retain that exact ID for activation and recovery.
 Substitute your actual existing Codex home and receipt directory:
 
 ```sh
-python3.14 -I codex-session-gc-installer-0.5.0.pyz --release v0.5.0 \
+python3.14 -I codex-session-gc-installer-0.5.1.pyz --release v0.5.1 \
   --action stage --gh /absolute/path/to/gh --uv /absolute/path/to/uv \
   --python /absolute/path/to/python3.14
-python3.14 -I codex-session-gc-installer-0.5.0.pyz --action activate \
+python3.14 -I codex-session-gc-installer-0.5.1.pyz --action activate \
   --installation-id INSTALLATION_UUID --home /absolute/codex-home \
   --receipt-dir /absolute/receipt-directory
-python3.14 -I codex-session-gc-installer-0.5.0.pyz --action status \
+python3.14 -I codex-session-gc-installer-0.5.1.pyz --action status \
   --installation-id INSTALLATION_UUID
 ```
 
@@ -84,10 +91,11 @@ For an existing installation, retain old receipt consumers and follow
 [0.4.0 release](https://github.com/YuriyKrasilnikov/codex-session-gc/releases/tag/v0.4.0)
 must retain it while their unresolved receipts require it. A version directory
 already present in an application directory is not replaced. To install another
-copy of 0.5.0, choose both a fresh `--install-dir` and a fresh `--bin-dir`; use
+copy of 0.5.1, choose both a fresh `--install-dir` and a fresh `--bin-dir`; use
 the resulting absolute CLI and reported MCP command. This does not switch a
-launcher in the old application directory. See the replacement steps in
-[recovery and upgrades](docs/recovery.md#replace-an-existing-050-installation).
+launcher in the old application directory. The same-version 0.5.0 example in
+[recovery and upgrades](docs/recovery.md#replace-an-existing-050-installation)
+illustrates this procedure.
 
 ## Source checkout
 

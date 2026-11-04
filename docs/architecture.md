@@ -109,6 +109,11 @@ attestation describes assembly origin, not cleanup correctness or native rebuild
 reproducibility. Bootstrap verification requires a separately trusted `gh` before
 the downloaded installer is run.
 
+The installer checks cumulative owned-tree growth and the free-space floor before
+and after each environment subprocess, using one baseline across both subprocesses.
+While a subprocess runs, it monitors the free-space floor. Temporary tree growth
+that disappears before a boundary is not measured by the growth check.
+
 Replace a module through its typed inputs/results and observable invariants.
 A schema or helper change requires exact profile/effect and recovery validation;
 a catalogue-only change does not authorize a new deletion route. Keep native

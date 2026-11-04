@@ -11,9 +11,9 @@ The pinned native source is OpenAI Codex commit
 current request format. Qualification does not turn the helper into the installed
 Codex executable or establish a complete live Core/app-server lifecycle guarantee.
 
-## 0.5.0 contract
+## 0.5.0 and 0.5.1 contract
 
-The 0.5.0 contract uses wire 6 and exact state/companion schemas through state
+The 0.5.0 and 0.5.1 contract uses wire 6 and exact state/companion schemas through state
 migration 62. Its native source is pinned above with tracked storage changes:
 board templates, nullable channel descriptions and attachment metadata are
 included in the qualified schema. The
