@@ -21,6 +21,7 @@ from codex_session_gc.cli import closed_work_execution
 from codex_session_gc.cli.console_display import preview_lines
 from codex_session_gc.cli.console_tasks import preview_selection
 from codex_session_gc.cli.mcp_capability import McpCapability
+from codex_session_gc.cli.storage_display import run_storage
 from codex_session_gc.compatibility.intake import SupportIntakeRequest, intake_support
 from codex_session_gc.compatibility.observation import ImportedSupport, observe_record
 from codex_session_gc.compatibility.record import ProducerObservation
@@ -169,6 +170,14 @@ def _parser() -> argparse.ArgumentParser:
     doctor.add_argument("--support-record-sha256")
     doctor.add_argument("--support-context-sha256")
     doctor.add_argument("--json", action="store_true")
+    storage = commands.add_parser("storage", help="Observe storage usage")
+    storage.add_argument("--home", type=Path, required=True)
+    storage.add_argument("--json", action="store_true")
+    storage.add_argument(
+        "--objects", choices=("all", "matched", "missing", "ambiguous", "unknown", "unparsed")
+    )
+    storage.add_argument("--offset", type=int)
+    storage.add_argument("--limit", type=int)
     ui = commands.add_parser("ui", help="Browse and select histories with Textual")
     ui.add_argument("--home", type=Path)
     ui.add_argument("--helper", type=Path)
@@ -323,16 +332,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if values and values[0] in ("install", "update"):
         return installer_main(values[1:])
     arguments = _parser().parse_args(values)
-    if arguments.command == "support":
-        return _support(arguments)
-    if arguments.command == "doctor":
-        return _doctor(arguments)
+    handlers = {"support": _support, "doctor": _doctor, "storage": run_storage, "mcp": _mcp}
+    if arguments.command in handlers:
+        return handlers[arguments.command](arguments)
     if arguments.command == "ui":
         from codex_session_gc.cli import textual_console  # noqa: PLC0415
 
         return textual_console.run(arguments)
-    if arguments.command == "mcp":
-        return _mcp(arguments)
     if arguments.command == "plan":
         report, status = _preview(arguments)
         output = json.dumps(report, sort_keys=True) if arguments.json else _print_preview(report)
