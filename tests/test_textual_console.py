@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -23,6 +24,7 @@ from textual.widgets import DataTable, Input, Select, Static
 from codex_session_gc.cli import mcp_server
 from codex_session_gc.cli import textual_console as ui
 from codex_session_gc.cli.console_tasks import PreviewMode
+from codex_session_gc.cli.main import main
 from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.domain import ArchiveState, ThreadId, UtcCutoff
 from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
@@ -1015,3 +1017,85 @@ def test_global_history_order_matches_mcp_pages_and_preserves_exact_selection(
             assert reviewed[0].roots == (_C,)
 
     asyncio.run(asyncio.wait_for(scenario(), timeout=45))
+
+
+def test_storage_screen_keys_preserve_catalogue_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        browser = app(tmp_path, monkeypatch)
+        metric = {"known_bytes": 0, "unknown_objects": 0}
+        summary = {
+            "storage_snapshot_id": "storage/test",
+            "fs_coverage": "complete",
+            "sql_coverage": "partial",
+            "totals": {"logical_file_bytes": metric, "allocated_bytes": metric},
+            "categories": [],
+            "counts_by_reason": {},
+        }
+
+        async def overview(*, refresh: bool = False) -> dict[str, Any]:  # noqa: ARG001
+            return summary
+
+        monkeypatch.setattr(browser.storage, "overview", overview)
+        monkeypatch.setattr(
+            browser.storage,
+            "objects",
+            lambda *_args, **_kwargs: {"items": [], "next_offset": None},
+        )
+        async with browser.run_test(size=(150, 45)) as pilot:
+            await pilot.pause()
+            browser.selected[ROOT] = ROOT
+            for key in ("escape", "q"):
+                await pilot.click("#storage")
+                await pilot.pause()
+                assert isinstance(browser.screen, ui.StorageScreen)
+                await pilot.press("space")
+                assert browser.selected == {ROOT: ROOT}
+                await pilot.press(key)
+                await pilot.pause()
+                assert not isinstance(browser.screen, ui.StorageScreen)
+                assert browser.selected == {ROOT: ROOT}
+            await pilot.click("#storage")
+            await pilot.pause()
+            await pilot.click("#storage-back")
+            await pilot.pause()
+            assert browser.selected == {ROOT: ROOT}
+
+    asyncio.run(scenario())
+
+
+def test_storage_live_fixture_matches_cli_and_mcp(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    catalogue_home(tmp_path)
+    missing = f"rollout-2026-06-01T00-00-00-{UUID(int=900)}.jsonl"
+    (tmp_path / "sessions" / missing).write_bytes(b"unindexed history")
+    assert main(["storage", "--home", str(tmp_path), "--json", "--objects", "missing"]) == 0
+    expected = json.loads(capsys.readouterr().out)
+
+    async def scenario() -> None:
+        server = mcp_server.CatalogueService(tmp_path, capability=McpCapability.READ_ONLY)
+        overview = await server.storage_overview()
+        page = await server.storage_objects(overview["storage_snapshot_id"], association="missing")
+        assert overview["totals"] == expected["totals"]
+        assert page["items"] == expected["objects"]["items"]
+        await server.storage.close()
+        browser = ui.SessionApp(tmp_path, CUTOFF, None, tmp_path / "receipts")
+        async with browser.run_test(size=(150, 45)) as pilot:
+            await pilot.pause()
+            await pilot.click("#storage")
+            await pilot.pause()
+            assert isinstance(browser.screen, ui.StorageScreen)
+            screen = browser.screen
+            while screen.summary is None:
+                await pilot.pause(0.01)
+            assert screen.summary["totals"] == expected["totals"]
+            assert screen.summary["categories"] == tuple(expected["categories"])
+            screen.query_one("#storage-filter", Select).value = "missing"
+            await pilot.pause()
+            table = screen.query_one("#storage-objects", DataTable)
+            assert table.row_count == 1
+            assert missing in str(table.get_row_at(0)[0])
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=20))

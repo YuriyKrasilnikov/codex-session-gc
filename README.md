@@ -390,7 +390,7 @@ and a matching bundled identity; an arbitrary successful build is not accepted.
 ## MCP
 
 The stdio server exposes `compatibility_status`, `query_catalogue`, `session_details`, `prepare_cleanup`,
-`apply_cleanup`, `cleanup_status` and `reconcile_cleanup`. Register it with absolute paths:
+`apply_cleanup`, `cleanup_status`, `reconcile_cleanup`, and the storage overview tools. Register it with absolute paths:
 
 Use the exact `mcp_argv` returned by activation when registering the server
 with `codex mcp add`. It binds the installed release, chosen home, receipt
@@ -402,7 +402,8 @@ clients cannot choose a filesystem path or a different installation. Selecting
 another imported record takes effect on the next call without restarting.
 
 For observation only, add `--read-only` to the server arguments. This mode exposes
-`compatibility_status`, `query_catalogue`, `session_details`, `prepare_cleanup` and `cleanup_status`.
+`compatibility_status`, `query_catalogue`, `session_details`, `prepare_cleanup`, `cleanup_status`
+and the storage overview tools.
 Preparation returns a conditional report with `can_apply_via_mcp=false` and creates
 no cleanup operation UUID, declaration or receipt. It needs no helper. Apply and
 reconciliation tools are unavailable because both can write application data or
@@ -450,6 +451,16 @@ The digest binds those inputs; it does not establish human consent. The helper
 and receipt directory are fixed at server startup and cannot be chosen by tools.
 The receipt directory must be outside the selected home. Without `--helper`, the
 server discovers the qualified helper using the same rules as Textual.
+
+In current source builds, open **Storage** in Textual for the same whole-home
+overview. Use **Refresh** for a new observation and **Back** to return to your
+work selection.
+
+Both MCP capability modes expose `storage_overview` and `storage_objects`.
+Call `storage_overview` to get totals and a `storage_snapshot_id`. Pass that ID
+to `storage_objects` with an optional association filter, offset and page
+limit. These tools use the server's configured home. A page stays tied to its
+observation until a successful refresh replaces it.
 
 Keep the operation UUID after cancellation, disconnect or a lost response. Read
 `cleanup_status` or call `reconcile_cleanup` with that UUID. Reconciliation may

@@ -11,10 +11,13 @@ import hashlib
 import json
 import os
 import uuid
+from collections.abc import AsyncIterator  # noqa: TC003
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+import anyio
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 
@@ -22,6 +25,7 @@ from codex_session_gc import diagnostics
 from codex_session_gc.cli.console_display import discover_helper
 from codex_session_gc.cli.console_tasks import Intent, async_preview, parse_cutoff
 from codex_session_gc.cli.mcp_capability import McpCapability
+from codex_session_gc.cli.storage_service import StorageService
 from codex_session_gc.compatibility.observation import ImportedSupport
 from codex_session_gc.domain import ArchiveState, ThreadId
 from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
@@ -113,6 +117,25 @@ class CatalogueService:
         self.snapshot_id: str | None = None
         self.index: CatalogueIndex | None = None
         self._lock = asyncio.Lock()
+        self.storage = StorageService(self.home)
+
+    async def storage_overview(self, *, refresh: bool = False) -> dict[str, Any]:
+        """Observe storage once, or explicitly refresh the published generation."""
+        return await self.storage.overview(refresh=refresh)
+
+    async def storage_objects(
+        self,
+        storage_snapshot_id: str,
+        association: Literal[
+            "all", "matched", "missing", "ambiguous", "unknown", "unparsed"
+        ] = "all",
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Read a bounded page from the current storage generation."""
+        return self.storage.objects(
+            storage_snapshot_id, association=association, offset=offset, limit=limit
+        )
 
     async def compatibility_status(
         self, record_sha256: str | None = None, context_sha256: str | None = None
@@ -357,8 +380,18 @@ def create_server(
     service = CatalogueService(
         home, helper, receipts, capability=capability, support_scope=support_scope
     )
+
+    @asynccontextmanager
+    async def lifespan(_server: MCPServer[Any]) -> AsyncIterator[None]:
+        try:
+            yield None
+        finally:
+            with anyio.CancelScope(shield=True):
+                await service.storage.close()
+
     server = MCPServer(
         "codex-session-gc",
+        lifespan=lifespan,
         instructions=(
             "Read-only mode exposes catalogue, details, conditional preview and saved status. "
             "Preparation creates no cleanup operation. Apply and reconciliation are unavailable."
@@ -373,6 +406,8 @@ def create_server(
         read_only_hint=True, destructive_hint=False, open_world_hint=False
     )
     for tool in (
+        service.storage_overview,
+        service.storage_objects,
         service.query_catalogue,
         service.session_details,
         service.prepare_cleanup,
