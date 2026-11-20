@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sqlite3
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -21,6 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from codex_session_gc import sqlite_engine as sqlite3
 from codex_session_gc.domain import GuardianAssociation, ThreadId
 from codex_session_gc.execution import closed_work_request as collector
 from codex_session_gc.execution.closed_work_apply import DispatchLimits
@@ -742,9 +742,10 @@ def _effects_absent(
     if kind is collector.DatabaseKind.STATE:
         paths = tuple(str(path) for path in (*request.paths, *request.raw_paths))
         path_marks = ",".join("?" for _ in paths)
-        if connection.execute(
+        row = connection.execute(
             f"SELECT EXISTS(SELECT 1 FROM threads WHERE rollout_path IN ({path_marks}))", paths
-        ).fetchone()[0]:
+        ).fetchone()
+        if row is None or row[0]:
             raise collector.PreparationRefused("A known selected physical path remains catalogued.")
     for table, column in collector._TABLES[kind].items():
         budget.check()
@@ -752,12 +753,12 @@ def _effects_absent(
         if kind is collector.DatabaseKind.BOARD:
             if request.root not in request.selected:
                 continue
-            exists = connection.execute(
+            row = connection.execute(
                 f"SELECT EXISTS(SELECT 1 FROM {table} WHERE board=?)", (request.root,)
-            ).fetchone()[0]
+            ).fetchone()
             tombstone = table == "deleted_boards"
             required_marker = kind in request.original_databases and tombstone
-            if bool(exists) != required_marker:
+            if row is None or bool(row[0]) != required_marker:
                 raise collector.PreparationRefused("Selected board final state is not observed.")
             continue
         if column is None:
@@ -767,7 +768,8 @@ def _effects_absent(
             clause = f"{column} IN ({marks})"
             if table == "jobs":
                 clause += " AND kind='memory_stage1'"
-        if connection.execute(
+        row = connection.execute(
             f"SELECT EXISTS(SELECT 1 FROM {table} WHERE {clause})", params
-        ).fetchone()[0]:
+        ).fetchone()
+        if row is None or row[0]:
             raise collector.PreparationRefused("A selected logical effect remains present.")

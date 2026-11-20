@@ -6,11 +6,12 @@
 from __future__ import annotations
 
 import os
-import sqlite3
 import stat
 import time
 from contextlib import closing, contextmanager
 from typing import TYPE_CHECKING
+
+from codex_session_gc import sqlite_engine as sqlite3
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

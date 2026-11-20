@@ -16,7 +16,6 @@ import json
 import math
 import os
 import re
-import sqlite3
 import stat
 import time
 from contextlib import contextmanager
@@ -27,6 +26,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from codex_session_gc import sqlite_engine as sqlite3
 from codex_session_gc.domain import (
     GraphSnapshot,
     PhysicalInventory,

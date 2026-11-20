@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 import pytest
 
+from codex_session_gc import sqlite_engine
 from codex_session_gc.domain import (
     ArchiveState,
     RolloutMetadata,
@@ -169,7 +170,7 @@ def test_guardian_guards_index_observed_objects_without_extending_scope(
         before = _before(home)
         budget = adapter.CollectionBudget(_LIMITS, time.monotonic() + _LIMITS.deadline_seconds)
         with adapter._read_transaction(home / DatabaseKind.STATE, budget) as connection:
-            connection.row_factory = sqlite3.Row
+            connection.row_factory = sqlite_engine.Row
             with monkeypatch.context() as patch:
                 patch.setattr(RolloutMetadata, "__getattribute__", counted)
                 accesses = 0

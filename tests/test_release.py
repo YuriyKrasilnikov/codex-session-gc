@@ -89,7 +89,7 @@ def _inputs(root: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     ]
     (root / "pyproject.toml").write_text(
         '[project]\nname="codex-session-gc"\nversion="1.2.3"\n'
-        'requires-python=">=3.14"\ndependencies=["fixture-dependency==1.0"]\n'
+        'requires-python=">=3.14"\ndependencies=["fixture-dependency==1.0", "pysqlite3==0.6.2"]\n'
         'license="Apache-2.0"\n' + "license-files=" + json.dumps(list(_LICENSE_FILES)) + "\n"
         '[build-system]\nrequires=["hatchling==1.32.4"]\nbuild-backend="hatchling.build"\n'
         '[tool.hatch.build.targets.wheel]\npackages=["src/codex_session_gc"]\n'
@@ -102,6 +102,10 @@ def _inputs(root: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     binary.mkdir()
     uv = binary / "uv"
     locked = "fixture-dependency==1.0 --hash=sha256:" + "a" * 64 + "\n"
+    locked += (
+        "pysqlite3==0.6.2 --hash=sha256:"
+        "4766d49c3a6ae9a94ac73fdd020deacd92ab7b28dbaa74345dd8670479ca0ec5\n"
+    )
     uv.write_text(f"#!{sys.executable}\nimport sys\nsys.stdout.write({locked!r})\n")
     uv.chmod(0o755)
     environment = os.environ.copy()

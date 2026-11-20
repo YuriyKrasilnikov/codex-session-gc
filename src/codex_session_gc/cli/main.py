@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import sqlite3
 import sys
 from dataclasses import asdict
 from datetime import datetime
@@ -16,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from codex_session_gc import diagnostics
+from codex_session_gc import sqlite_engine as sqlite3
 from codex_session_gc.artifacts import ArtifactIdentity, SourceIdentity
 from codex_session_gc.cli import closed_work_execution
 from codex_session_gc.cli.console_display import preview_lines

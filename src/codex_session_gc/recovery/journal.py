@@ -11,7 +11,6 @@ the adapters own native processes.
 from __future__ import annotations
 
 import os
-import sqlite3
 import stat
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -22,6 +21,8 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import quote
 from uuid import UUID
+
+from codex_session_gc import sqlite_engine as sqlite3
 
 APPLICATION_ID: Final = 0x43534752
 SCHEMA_VERSION: Final = 2
@@ -283,6 +284,7 @@ class AttemptStatus:
 def create(path: Path, start: StartEnvelope, units: tuple[Unit, ...]) -> None:
     """Exclusively create a receipt and atomically record its start envelope."""
     _validate_units(units)
+    sqlite3.ensure_qualified()
     path = _absolute(path)
     if not path.parent.is_dir():
         msg = "Recovery receipt parent directory must already exist."

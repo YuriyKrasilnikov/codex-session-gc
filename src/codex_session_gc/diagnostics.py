@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import math
-import sqlite3
 import time
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -13,6 +12,7 @@ from enum import StrEnum
 from hashlib import sha256
 from typing import TYPE_CHECKING
 
+from codex_session_gc import sqlite_engine as sqlite3
 from codex_session_gc.compatibility.observation import (
     BundledSupport,
     SourceSupportObservation,

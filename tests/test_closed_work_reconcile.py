@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 import pytest
 
+from codex_session_gc import sqlite_engine
 from codex_session_gc.execution import closed_work_reconcile as observer
 from codex_session_gc.execution import closed_work_request as collector
 from codex_session_gc.execution.closed_work_apply import DispatchLimits, _payload, apply_closed_work
@@ -306,7 +307,7 @@ def _observe(
 
     monkeypatch.setattr(observer, "child_presence", present)
     monkeypatch.setattr(subprocess, "Popen", forbidden)
-    connect = sqlite3.connect
+    connect = sqlite_engine.connect
 
     def readonly_sources(
         database: str | Path,
@@ -314,13 +315,13 @@ def _observe(
         uri: bool = False,
         timeout: float = 5,
         isolation_level: Literal["DEFERRED", "EXCLUSIVE", "IMMEDIATE"] | None = None,
-    ) -> sqlite3.Connection:
+    ) -> sqlite_engine.Connection:
         if str(tmp_path / "home") in str(database):
             assert uri
             assert str(database).endswith("?mode=ro")
         return connect(database, uri=uri, timeout=timeout, isolation_level=isolation_level)
 
-    monkeypatch.setattr(sqlite3, "connect", readonly_sources)
+    monkeypatch.setattr(sqlite_engine, "connect", readonly_sources)
     before = _before(tmp_path / "home")
     result = observer.reconcile(receipt, attempt, unit, helper=helper, limits=limits)
     assert _before(tmp_path / "home") == before
