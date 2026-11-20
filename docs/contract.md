@@ -95,12 +95,27 @@ local server operator.
 
 ## Native execution
 
-Admission is scoped to qualified local stock Codex 0.166.0 persistent public CLI
-and app-server workflows, with MAv1 and MAv2 qualified separately. Custom internal
-host controllers and arbitrary direct ephemeral-library access are outside this
-scope. Related selected-thread metadata updates and dependency-reference publication
-(for example, a new fork history reference) must finish before cleanup; acquiring a
-writer guard does not independently certify their completion.
+The 0.5.2 contract uses the exact state schema through migration 64
+and thread history schema through migration 9, with its bundled companion
+schemas. Its Python application and native helper use SQLite 3.54.1. The
+locally verified scope covers selected stopped stock Codex 0.171.0 work; see
+[compatibility](compatibility.md) for the observations and remaining limits.
+Unknown Guardian sources, including `Internal`, remain protected. Retain an
+older consumer while unresolved receipts require its exact profile and wire.
+For 0.5.2, cleanup refuses before effects when a selected
+`session_model_ids` namespace is nonempty and a retained consumer uses it or
+relevant ownership cannot be resolved. Selecting a worker alone does not delete
+its parent’s namespace.
+
+The 0.5.1 admission is scoped to qualified local stock Codex 0.166.0 persistent
+public CLI and app-server workflows, with MAv1 and MAv2 qualified separately.
+Custom internal host controllers and arbitrary direct ephemeral-library access are
+outside this scope.
+
+For both 0.5.1 and 0.5.2, related selected-thread metadata updates
+and dependency-reference publication (for example, a new fork history reference)
+must finish before cleanup; acquiring a writer guard does not independently
+certify their completion.
 A lifecycle label or age does not establish inactivity. Each affected
 rollout, SQLite and log location must be on a qualified local filesystem; NFS,
 cross-host coordination and concurrent offline replacement are outside the scope.

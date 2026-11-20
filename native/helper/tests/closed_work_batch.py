@@ -1,4 +1,4 @@
-"""Isolated wire-6/schema-62 closed-work effects through native storage and journal APIs."""
+"""Isolated wire-6/state-64/history-9 closed-work effects through native storage and journal APIs."""
 
 import concurrent.futures
 import fcntl
@@ -85,6 +85,14 @@ def bounds(home, selected, root, history_ids=None):
                     row[0]
                     for row in db.execute(
                         f"SELECT rowid FROM thread_goal_continuation_deferrals WHERE thread_id IN ({marks}) ORDER BY rowid",
+                        values,
+                    )
+                ]
+            if "session_model_ids" in names:
+                rows["session_model_ids"] = [
+                    row[0]
+                    for row in db.execute(
+                        f"SELECT rowid FROM session_model_ids WHERE session_id IN ({marks}) ORDER BY rowid",
                         values,
                     )
                 ]
@@ -202,10 +210,13 @@ def upgrade(home):
     """The fixture producer runs the compiled official reference migrations itself."""
     with s.connection(home / "state_5.sqlite") as db:
         latest = db.execute("SELECT MAX(version) FROM _sqlx_migrations").fetchone()[0]
-        assert latest == 62, latest
+        assert latest == 64, latest
+    with s.connection(home / "thread_history_1.sqlite") as db:
+        latest = db.execute("SELECT MAX(version) FROM _sqlx_migrations").fetchone()[0]
+        assert latest == 9, latest
 
 
-def prepare(directory, schema_version=62):
+def prepare(directory, schema_version=64):
     home = directory / "home"
     made = native("create-batch", home)
     assert made.returncode == 0, made.stderr
@@ -219,6 +230,15 @@ def prepare(directory, schema_version=62):
             "INSERT INTO thread_spawn_edges(parent_thread_id,child_thread_id,status) VALUES(?,?,'closed')",
             (manifest["main"], manifest["target"]),
         )
+    assert schema_version in (59, 61, 62, 64), schema_version
+    if schema_version != 64:
+        # Reverse the exact state-64 and state-63 migrations before older ones.
+        with s.sqlite_context(home / "state_5.sqlite") as db:
+            for index in ("idx_threads_interactive_created_at_ms", "idx_threads_interactive_updated_at_ms", "idx_threads_interactive_recency_at_ms", "idx_threads_attached_parent"):
+                db.execute(f"DROP INDEX {index}")
+            db.execute("CREATE INDEX idx_threads_attached_parent ON threads(attached_thread_parent_id)\n    WHERE attached_thread_parent_id IS NOT NULL")
+            db.execute("DROP TABLE session_model_ids")
+            db.execute("DELETE FROM _sqlx_migrations WHERE version IN (63,64)")
     if schema_version in (59, 61):
         # Construct an older, explicitly unsupported deployed state for refusal tests.
         with s.sqlite_context(home / "state_5.sqlite") as db:
@@ -229,8 +249,6 @@ def prepare(directory, schema_version=62):
                 db.execute("DROP TABLE guardian_review_feedback")
                 db.execute("DROP TABLE thread_read_receipts")
                 db.execute("DELETE FROM _sqlx_migrations WHERE version IN (60,61)")
-    else:
-        assert schema_version == 62
     # Populate native history-cache tables with isolated fixture-owned rows.
     with s.sqlite_context(home / "thread_history_1.sqlite") as db:
         for identity in (manifest["main"], manifest["target"], unrelated["id"]):

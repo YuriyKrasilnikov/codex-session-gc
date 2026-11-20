@@ -256,6 +256,7 @@ class CollectionBudget:
 _TABLES: dict[DatabaseKind, dict[str, str | None]] = {
     DatabaseKind.STATE: {
         "threads": "id",
+        "session_model_ids": "session_id",
         "thread_dynamic_tools": "thread_id",
         "thread_attachments": "thread_id",
         "guardian_review_feedback": "thread_id",
@@ -371,6 +372,23 @@ def prepare_request(  # noqa: C901, PLR0912, PLR0915
                     targets, captured_rollouts = prepare_targets(
                         connection, observation, selection, codex_home, budget
                     )
+                    marks = ",".join("?" for _ in selected)
+                    active_sessions = frozenset(
+                        row[0]
+                        for row in connection.execute(
+                            f"SELECT DISTINCT session_id FROM session_model_ids "
+                            f"WHERE session_id IN ({marks})",
+                            selected,
+                        )
+                    )
+                    if active_sessions:
+                        _validate_alias_consumers(
+                            connection,
+                            selected,
+                            active_sessions,
+                            observation.physical_inventory,
+                            budget,
+                        )
                     guardian_guards, guardian_identities = _guardian_guards(
                         connection, selected, codex_home, budget, observation.physical_inventory
                     )
@@ -499,6 +517,44 @@ def _bound(
         "queue_bookkeeping": kind is DatabaseKind.QUEUE,
         "board_tombstone": root if kind is DatabaseKind.BOARD and root in selected else None,
     }
+
+
+def _validate_alias_consumers(
+    connection: sqlite3.Connection,
+    selected: tuple[str, ...],
+    active_sessions: frozenset[str],
+    inventory: PhysicalInventory,
+    budget: CollectionBudget,
+) -> None:
+    """Use the bounded physical observation; native revalidates before effects."""
+    if not inventory.alias_coverage or inventory.unresolved_empty_rollouts:
+        raise PreparationRefused("Retained session ownership is unavailable.")
+    selected_set = frozenset(selected)
+    observed: set[tuple[str, Path]] = set()
+    for item in inventory.rollouts:
+        budget.check()
+        owner = str(item.ownership.thread_id.value)
+        if owner in selected_set:
+            continue
+        if item.physical is None or item.session_id is None or item.ambiguous_agent_session:
+            raise PreparationRefused("A retained history has ambiguous session ownership.")
+        if str(item.session_id.value) in active_sessions:
+            raise PreparationRefused("Retained history consumes a selected session namespace.")
+        path = item.physical.path
+        plain = path.with_suffix("") if path.name.endswith(".jsonl.zst") else path
+        observed.add((owner, plain))
+    marks = ",".join("?" for _ in selected)
+    for owner, raw_path in connection.execute(
+        f"SELECT id, rollout_path FROM threads WHERE id NOT IN ({marks})", selected
+    ):
+        if type(owner) is not str or type(raw_path) is not str:
+            raise PreparationRefused("A retained SQL thread has unresolved history ownership.")
+        path = Path(raw_path)
+        plain = path.with_suffix("") if path.name.endswith(".jsonl.zst") else path
+        if (owner, plain) not in observed:
+            raise PreparationRefused(
+                "A retained SQL thread has no resolvable current history header."
+            )
 
 
 def prepare_targets(  # noqa: C901
@@ -904,6 +960,7 @@ def _observe_header_descriptor(
         raise PreparationRefused("A complete native metadata line is unavailable.")
     keys = (
         "id",
+        "session_id",
         "source",
         "parent_thread_id",
         "model_provider",

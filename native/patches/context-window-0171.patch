@@ -1,0 +1,598 @@
+--- a/codex-rs/Cargo.toml
++++ b/codex-rs/Cargo.toml
+@@ -265,6 +265,7 @@
+ codex-model-provider = { path = "model-provider" }
+ codex-process-hardening = { path = "process-hardening" }
+ codex-protocol = { path = "protocol" }
++codex-utils-model-facing-id = { path = "utils/model-facing-id" }
+ codex-prompts = { path = "prompts" }
+ codex-queue-extension = { path = "ext/queue" }
+ codex-responses-api-proxy = { path = "responses-api-proxy" }
+@@ -407,7 +408,7 @@
+ libc = "0.2.182"
+ # Keep SQLx's bundled SQLite on a version containing the WAL-reset corruption fix:
+ # https://www.sqlite.org/wal.html#the_wal_reset_bug
+-libsqlite3-sys = { version = "0.37", default-features = false }
++libsqlite3-sys = { version = "0.39.1", default-features = false }
+ log = "0.4"
+ lru = "0.18.2"
+ maplit = "1.0.2"
+--- a/codex-rs/protocol/Cargo.toml
++++ b/codex-rs/protocol/Cargo.toml
+@@ -22,6 +22,7 @@
+ codex-network-proxy = { workspace = true }
+ codex-utils-absolute-path = { workspace = true }
+ codex-utils-image = { workspace = true }
++codex-utils-model-facing-id = { workspace = true }
+ codex-utils-path-uri = { workspace = true }
+ codex-utils-redacted-string = { workspace = true }
+ codex-utils-string = { workspace = true }
+--- a/codex-rs/protocol/src/lib.rs
++++ b/codex-rs/protocol/src/lib.rs
+@@ -4,6 +4,7 @@
+ mod response_item_id;
+ mod response_usage;
+ mod sanitized_git_url;
++mod context_window_id;
+ mod session_id;
+ mod thread_id;
+ mod tool_name;
+@@ -13,6 +14,7 @@
+ pub use response_item_id::ResponseItemId;
+ pub use response_usage::ResponseUsageMetadata;
+ pub use sanitized_git_url::SanitizedGitUrl;
++pub use context_window_id::ContextWindowId;
+ pub use session_id::SessionId;
+ pub use thread_id::RolloutId;
+ pub use thread_id::ThreadId;
+--- a/codex-rs/protocol/src/protocol.rs
++++ b/codex-rs/protocol/src/protocol.rs
+@@ -3117,12 +3117,13 @@
+ 
+ #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema, TS)]
+ pub struct SessionContextWindow {
+-    /// UUIDv7 identity of this context window.
+-    pub window_id: String,
++    /// Persisted model-facing window identity.
++    #[ts(type = "string | { salt: string; ordinal: number; value: number }")]
++    pub window_id: crate::ContextWindowId,
+ }
+ 
+ impl SessionContextWindow {
+-    pub fn new(window_id: String) -> Self {
++    pub fn new(window_id: crate::ContextWindowId) -> Self {
+         Self { window_id }
+     }
+ }
+--- /dev/null
++++ b/codex-rs/protocol/src/context_window_id.rs
+@@ -0,0 +1,57 @@
++//! Rollouts store a UUIDv7 string or a window allocation. Request metadata uses its display form.
++
++use codex_utils_model_facing_id::ModelFacingId;
++use schemars::JsonSchema;
++use serde::Deserialize;
++use serde::Serialize;
++use std::fmt;
++use uuid::Uuid;
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
++#[serde(untagged)]
++pub enum ContextWindowId {
++    Text(String),
++    Generated(Box<ModelFacingId>),
++}
++
++impl ContextWindowId {
++    pub fn new_uuid_v7() -> Self {
++        Self::Text(Uuid::now_v7().to_string())
++    }
++
++    pub fn allocation(&self) -> Option<&ModelFacingId> {
++        match self {
++            Self::Text(_) => None,
++            Self::Generated(id) => (id.salt() == "window").then_some(id),
++        }
++    }
++
++    /// Parses a UUIDv7 window ID from a rollout string.
++    pub fn parse(value: &str) -> Option<Self> {
++        Uuid::parse_str(value)
++            .ok()
++            .filter(|uuid| uuid.get_version_num() == 7)
++            .map(|uuid| Self::Text(uuid.to_string()))
++    }
++
++    /// Restore the window without discarding its allocation ordinal.
++    pub fn validated(&self) -> Option<Self> {
++        match self {
++            Self::Text(text) => Self::parse(text),
++            Self::Generated(_) => self.allocation().map(|_| self.clone()),
++        }
++    }
++}
++
++impl fmt::Display for ContextWindowId {
++    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
++        match self {
++            Self::Text(text) => formatter.write_str(text),
++            Self::Generated(id) => id.fmt(formatter),
++        }
++    }
++}
++
++#[cfg(test)]
++#[path = "context_window_id_tests.rs"]
++mod tests;
+--- /dev/null
++++ b/codex-rs/protocol/src/context_window_id_tests.rs
+@@ -0,0 +1,16 @@
++#![cfg(test)]
++
++use super::ContextWindowId;
++use codex_utils_model_facing_id::ModelFacingIdGenerator;
++use pretty_assertions::assert_eq;
++
++#[test]
++fn restores_allocations_from_the_window_generator() {
++    let window = ContextWindowId::Generated(Box::new(
++        ModelFacingIdGenerator::new(/*seed*/ 0, "window").fetch_next(),
++    ));
++    assert_eq!(window.validated(), Some(window));
++
++    let item = ModelFacingIdGenerator::new(/*seed*/ 0, "item").fetch_next();
++    assert_eq!(ContextWindowId::Generated(Box::new(item)).validated(), None);
++}
+--- a/codex-rs/rollout/src/recorder.rs
++++ b/codex-rs/rollout/src/recorder.rs
+@@ -118,7 +118,7 @@
+         history_mode: ThreadHistoryMode,
+         history_base: Option<HistoryPosition>,
+         subagent_history_start_ordinal: Option<u64>,
+-        initial_window_id: Option<String>,
++        initial_window_id: Option<codex_protocol::ContextWindowId>,
+     },
+     Resume {
+         path: PathBuf,
+@@ -351,7 +351,7 @@
+         self
+     }
+ 
+-    pub fn with_initial_window_id(mut self, initial_window_id: String) -> Self {
++    pub fn with_initial_window_id(mut self, initial_window_id: codex_protocol::ContextWindowId) -> Self {
+         if let Self::Create {
+             initial_window_id: window_id,
+             ..
+--- a/codex-rs/thread-store/src/types.rs
++++ b/codex-rs/thread-store/src/types.rs
+@@ -110,7 +110,7 @@
+     /// First rollout ordinal that belongs to this subagent's projected history.
+     pub subagent_history_start_ordinal: Option<u64>,
+     /// Initial context-window identity captured when the thread was created.
+-    pub initial_window_id: String,
++    pub initial_window_id: codex_protocol::ContextWindowId,
+     /// Runtime workspace roots at creation, excluding permission-profile roots.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub runtime_workspace_roots: Option<Vec<AbsolutePathBuf>>,
+--- a/codex-rs/thread-store/src/local/mod.rs
++++ b/codex-rs/thread-store/src/local/mod.rs
+@@ -2244,7 +2244,7 @@
+             history_mode: ThreadHistoryMode::Legacy,
+             history_base: None,
+             subagent_history_start_ordinal: None,
+-            initial_window_id: uuid::Uuid::now_v7().to_string(),
++            initial_window_id: codex_protocol::ContextWindowId::new_uuid_v7(),
+             runtime_workspace_roots: None,
+             metadata: thread_metadata(),
+         }
+--- a/codex-rs/thread-store/src/thread_metadata_sync.rs
++++ b/codex-rs/thread-store/src/thread_metadata_sync.rs
+@@ -502,7 +502,7 @@
+             history_mode: ThreadHistoryMode::Legacy,
+             history_base: None,
+             subagent_history_start_ordinal: None,
+-            initial_window_id: uuid::Uuid::now_v7().to_string(),
++            initial_window_id: codex_protocol::ContextWindowId::new_uuid_v7(),
+             runtime_workspace_roots: None,
+             metadata: ThreadPersistenceMetadata {
+                 cwd: None,
+--- a/codex-rs/thread-store/src/in_memory.rs
++++ b/codex-rs/thread-store/src/in_memory.rs
+@@ -182,7 +182,7 @@
+                     history_mode: ThreadHistoryMode::Legacy,
+                     history_base: None,
+                     subagent_history_start_ordinal: None,
+-                    initial_window_id: uuid::Uuid::now_v7().to_string(),
++                    initial_window_id: codex_protocol::ContextWindowId::new_uuid_v7(),
+                     runtime_workspace_roots: None,
+                     metadata: ThreadPersistenceMetadata {
+                         cwd: None,
+@@ -458,7 +458,7 @@
+             history_mode,
+             history_base: None,
+             subagent_history_start_ordinal: None,
+-            initial_window_id: uuid::Uuid::now_v7().to_string(),
++            initial_window_id: codex_protocol::ContextWindowId::new_uuid_v7(),
+             runtime_workspace_roots: None,
+             metadata: thread_metadata(),
+         }
+--- /dev/null
++++ b/codex-rs/utils/model-facing-id/Cargo.toml
+@@ -0,0 +1,23 @@
++[package]
++name = "codex-utils-model-facing-id"
++version.workspace = true
++edition.workspace = true
++license.workspace = true
++
++[lints]
++workspace = true
++
++[lib]
++doctest = false
++test = false
++
++[dependencies]
++blake3.workspace = true
++schemars.workspace = true
++serde = { workspace = true, features = ["derive"] }
++serde_json.workspace = true
++thiserror.workspace = true
++tracing.workspace = true
++
++[dev-dependencies]
++pretty_assertions.workspace = true
+--- /dev/null
++++ b/codex-rs/utils/model-facing-id/src/lib.rs
+@@ -0,0 +1,230 @@
++//! Issues a salt followed by shuffled decimal IDs from `000`–`999`, then `001000`–`999999`.
++//! Each pool uses a four-round Feistel permutation with BLAKE3 and cycle-walking.
++//! The seed can be varied across sessions to change the order in which IDs are issued.
++
++use std::borrow::Cow;
++use std::fmt;
++use std::ops::RangeInclusive;
++
++use schemars::JsonSchema;
++use serde::Deserialize;
++use serde::Serialize;
++use thiserror::Error;
++
++mod bindings;
++mod environment;
++pub use bindings::ModelIdKey;
++pub use bindings::ModelIdKind;
++pub use bindings::ModelIdMap;
++pub use environment::ModelEnvironmentId;
++pub use environment::RegisteredEnvironmentId;
++
++const VERSION: u32 = 1;
++// Our tokenizers encode every decimal ID of up to three digits as a single token.
++const GROUP_SIZE: u64 = 1_000;
++
++/// Stores the generator salt, allocation ordinal and shuffled value.
++/// Display pads the value to groups of three digits.
++/// With salt `environment`, zero renders as `environment000` and 1000 as `environment001000`.
++#[derive(
++    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
++)]
++pub struct ModelFacingId {
++    salt: Cow<'static, str>,
++    /// Zero-based position in the generator sequence.
++    ordinal: u64,
++    value: u64,
++}
++
++impl fmt::Display for ModelFacingId {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        write!(f, "{}{}", self.salt, self.digits())
++    }
++}
++
++impl ModelFacingId {
++    /// Identifies the generator sequence and prefixes the displayed number.
++    pub fn salt(&self) -> &str {
++        &self.salt
++    }
++
++    /// Position in the allocation sequence before shuffling.
++    pub fn ordinal(&self) -> u64 {
++        self.ordinal
++    }
++
++    /// Formats the padded digits for protocols that supply their own type prefix.
++    pub fn digits(&self) -> impl fmt::Display + '_ {
++        padded_digits(self.value)
++    }
++}
++
++fn padded_digits(value: u64) -> impl fmt::Display {
++    fmt::from_fn(move |f| write!(f, "{value:0width$}", width = decimal_width(value)))
++}
++
++fn decimal_width(value: u64) -> usize {
++    (value.checked_ilog10().unwrap_or(0) as usize + 1).next_multiple_of(3)
++}
++
++/// Generates token-efficient identifiers for model context.
++#[derive(Debug)]
++pub struct ModelFacingIdGenerator {
++    state: ModelFacingIdGeneratorState,
++}
++
++impl ModelFacingIdGenerator {
++    /// Starts a sequence for one ID kind using a shared session seed.
++    /// The salt also prefixes each displayed ID. Use the [tokenizer](https://platform.openai.com/tokenizer)
++    /// to choose a stable, single-token salt such as `environment`.
++    ///
++    /// # Panics
++    ///
++    /// Panics if the salt is empty.
++    pub fn new(seed: u64, salt: &'static str) -> Self {
++        Self::starting_at(seed, salt, /*next_ordinal*/ 0)
++    }
++
++    /// Continues a sequence at the given ordinal using its original seed and salt.
++    pub fn starting_at(seed: u64, salt: &'static str, next_ordinal: u64) -> Self {
++        assert!(!salt.is_empty(), "a model ID salt must be nonempty");
++        let mut hasher = blake3::Hasher::new();
++        hasher.update(&seed.to_le_bytes());
++        hasher.update(salt.as_bytes());
++        let mut seed_bytes = [0; 8];
++        hasher.finalize_xof().fill(&mut seed_bytes);
++        let derived_seed = u64::from_le_bytes(seed_bytes);
++        Self {
++            state: ModelFacingIdGeneratorState::new(VERSION, derived_seed, salt, next_ordinal),
++        }
++    }
++
++    /// Issues the next ID. After all `u64` values are issued, the sequence repeats from zero.
++    pub fn fetch_next(&mut self) -> ModelFacingId {
++        let ordinal = self.state.next_ordinal;
++        let mut pool = 0..=GROUP_SIZE - 1;
++        while ordinal > *pool.end() {
++            let start = pool.end() + 1;
++            // The final decimal pool ends at u64::MAX, which has no representable successor.
++            let last = start
++                .checked_mul(GROUP_SIZE)
++                .map_or(u64::MAX, |end| end - 1);
++            pool = start..=last;
++        }
++        let id = permute(self.state.seed, pool, ordinal);
++        let (next, wrapped) = ordinal.overflowing_add(1);
++        if wrapped {
++            tracing::error!(
++                "model-facing ID generator exhausted all u64 values and wrapped to zero"
++            );
++        }
++        self.state.next_ordinal = next;
++        ModelFacingId {
++            salt: self.state.salt.clone(),
++            ordinal,
++            value: id,
++        }
++    }
++
++    /// Position that the next allocation will use.
++    pub fn next_ordinal(&self) -> u64 {
++        self.state.next_ordinal
++    }
++
++    /// Captures the position of the next allocation.
++    pub fn snapshot(&self) -> ModelFacingIdGeneratorState {
++        self.state.clone()
++    }
++
++    /// Continues the snapshot's sequence from its next unissued ordinal.
++    pub fn restore(state: ModelFacingIdGeneratorState) -> Result<Self, RestoreError> {
++        if state.version != VERSION {
++            return Err(RestoreError::UnsupportedVersion(state.version));
++        }
++        if state.salt.is_empty() {
++            return Err(RestoreError::InvalidSalt);
++        }
++        Ok(Self { state })
++    }
++}
++
++/// Persisted sequence version, derived seed, salt, and zero-based next allocation ordinal.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
++pub struct ModelFacingIdGeneratorState {
++    version: u32,
++    seed: u64,
++    salt: Cow<'static, str>,
++    next_ordinal: u64,
++}
++
++impl ModelFacingIdGeneratorState {
++    /// Recovers the ID at a stored binding's ordinal in this version of the sequence.
++    pub fn id_at(&self, ordinal: u64) -> Result<ModelFacingId, RestoreError> {
++        let mut state = self.clone();
++        state.next_ordinal = ordinal;
++        Ok(ModelFacingIdGenerator::restore(state)?.fetch_next())
++    }
++
++    /// Returns the namespace this snapshot belongs to.
++    pub fn salt(&self) -> &str {
++        &self.salt
++    }
++
++    /// Rebuilds a snapshot from its stored fields. [`ModelFacingIdGenerator::restore`] validates it.
++    pub fn new(
++        version: u32,
++        seed: u64,
++        salt: impl Into<Cow<'static, str>>,
++        next_ordinal: u64,
++    ) -> Self {
++        Self {
++            version,
++            seed,
++            salt: salt.into(),
++            next_ordinal,
++        }
++    }
++}
++
++/// The snapshot cannot be used to resume an allocation sequence.
++#[derive(Debug, PartialEq, Eq, Error)]
++pub enum RestoreError {
++    #[error("unsupported model-facing ID generator version {0}")]
++    UnsupportedVersion(u32),
++    #[error("a model ID salt must be nonempty")]
++    InvalidSalt,
++}
++
++// Use the smallest balanced Feistel domain that covers the pool to limit cycle-walking.
++// Both the four rounds and their input encoding are part of the snapshot format.
++fn permute(seed: u64, pool: RangeInclusive<u64>, ordinal: u64) -> u64 {
++    let start = *pool.start();
++    let size = pool.end() - start + 1;
++    let bits = u64::BITS - (size - 1).leading_zeros();
++    let half_bits = bits.div_ceil(2);
++    let half_mask = (1_u64 << half_bits) - 1;
++    // The seed, pool index, and round occupy 17 bytes. The pool width fixes the right half's length.
++    let input_len = 17 + half_bits.div_ceil(8) as usize;
++    let mut input = [0; 25];
++    input[..8].copy_from_slice(&seed.to_le_bytes());
++    input[8..16].copy_from_slice(&(start / GROUP_SIZE).to_le_bytes());
++
++    let mut slot = ordinal - start;
++    loop {
++        let (mut left, mut right) = (slot >> half_bits, slot & half_mask);
++        for round in 0..4 {
++            input[16] = round;
++            input[17..].copy_from_slice(&right.to_le_bytes());
++            let hash = blake3::hash(&input[..input_len]);
++            let mut bytes = [0; 8];
++            bytes.copy_from_slice(&hash.as_bytes()[..8]);
++            let f = u64::from_le_bytes(bytes) & half_mask;
++            (left, right) = (right, left ^ f);
++        }
++        slot = (left << half_bits) | right;
++        // Following the permutation cycle must eventually return to the starting slot.
++        if slot < size {
++            return start + slot;
++        }
++    }
++}
+--- /dev/null
++++ b/codex-rs/utils/model-facing-id/src/bindings.rs
+@@ -0,0 +1,59 @@
++//! Stable names for external objects in low-cardinality ID spaces.
++
++use std::hash::Hash;
++
++use serde::Serialize;
++use serde::de::DeserializeOwned;
++
++use crate::ModelFacingId;
++use crate::ModelFacingIdGenerator;
++use crate::ModelFacingIdGeneratorState;
++use crate::RestoreError;
++
++/// The key type selects the alias type and a unique, stable prefix. Its JSON encoding must
++/// distinguish unequal keys and remain stable across releases.
++pub trait ModelIdKind: Eq + Hash + Serialize + DeserializeOwned {
++    const PREFIX: &'static str;
++    type Alias: From<ModelFacingId>;
++}
++
++#[derive(Clone)]
++pub struct ModelIdKey {
++    pub kind: &'static str,
++    pub key: String,
++}
++
++impl ModelIdKey {
++    pub fn new<K: ModelIdKind>(key: &K) -> serde_json::Result<Self> {
++        let mut key = serde_json::to_value(key)?;
++        key.sort_all_objects();
++        Ok(Self {
++            kind: K::PREFIX,
++            key: key.to_string(),
++        })
++    }
++}
++
++/// A namespace needs only its initial generator state and the external keys in allocation order.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct ModelIdMap {
++    pub initial: ModelFacingIdGeneratorState,
++    pub keys: Vec<String>,
++}
++
++impl ModelIdMap {
++    pub fn new(seed: u64, kind: &'static str) -> Self {
++        Self {
++            initial: ModelFacingIdGenerator::new(seed, kind).snapshot(),
++            keys: Vec::new(),
++        }
++    }
++
++    pub fn lookup(&self, key: &str) -> Result<Option<ModelFacingId>, RestoreError> {
++        self.keys
++            .iter()
++            .position(|bound| bound == key)
++            .map(|ordinal| self.initial.id_at(ordinal as u64))
++            .transpose()
++    }
++}
+--- /dev/null
++++ b/codex-rs/utils/model-facing-id/src/environment.rs
+@@ -0,0 +1,56 @@
++//! Distinguishes client executor IDs from aliases accepted in model-facing environment arguments.
++
++use std::fmt;
++
++use serde::Deserialize;
++use serde::Serialize;
++
++use crate::ModelFacingId;
++use crate::ModelIdKind;
++
++/// An ID assigned to an executor by the client.
++#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
++#[serde(transparent)]
++pub struct RegisteredEnvironmentId(String);
++
++impl RegisteredEnvironmentId {
++    pub fn new(id: impl Into<String>) -> Self {
++        Self(id.into())
++    }
++
++    pub fn as_str(&self) -> &str {
++        &self.0
++    }
++}
++
++impl fmt::Display for RegisteredEnvironmentId {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str(self.as_str())
++    }
++}
++
++/// The environment namespace supplies the prefix when this value is displayed.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
++pub struct ModelEnvironmentId(u64);
++
++impl fmt::Display for ModelEnvironmentId {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        write!(
++            f,
++            "{}{}",
++            RegisteredEnvironmentId::PREFIX,
++            crate::padded_digits(self.0)
++        )
++    }
++}
++
++impl ModelIdKind for RegisteredEnvironmentId {
++    const PREFIX: &'static str = "env";
++    type Alias = ModelEnvironmentId;
++}
++
++impl From<ModelFacingId> for ModelEnvironmentId {
++    fn from(id: ModelFacingId) -> Self {
++        Self(id.value)
++    }
++}

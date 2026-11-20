@@ -194,6 +194,8 @@ class RolloutMetadata:
     history_prefix: HistoryPrefix | None
     logical_fork: LogicalForkBoundary | None
     attachment: Attachment | None = None
+    session_id: ThreadId | None = None
+    ambiguous_agent_session: bool = True
 
     def __post_init__(self) -> None:
         """Validate facts without traversing providers or inventing missing physical data."""
@@ -220,6 +222,11 @@ class RolloutMetadata:
                 and self.attachment.child_thread_id == self.ownership.thread_id
             ),
             message="Attachment must belong to the rollout owner.",
+        )
+        _require(
+            condition=(self.session_id is None or type(self.session_id) is ThreadId)
+            and type(self.ambiguous_agent_session) is bool,
+            message="Session identity and ambiguity must be explicit.",
         )
         if self.physical is not None:
             _require(
@@ -263,6 +270,8 @@ class PhysicalInventory:
     rollouts: tuple[RolloutMetadata, ...]
     current_pointers: tuple[CurrentRolloutPointer, ...]
     completeness: InventoryCompleteness
+    alias_coverage: bool = False
+    unresolved_empty_rollouts: tuple[Path, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject conflicting IDs, paths, descriptor aliases and current pointers."""
@@ -277,6 +286,12 @@ class PhysicalInventory:
         _require(
             condition=type(self.completeness) is InventoryCompleteness,
             message="Coverage must be explicit.",
+        )
+        _require(
+            condition=type(self.alias_coverage) is bool
+            and type(self.unresolved_empty_rollouts) is tuple
+            and all(isinstance(path, Path) for path in self.unresolved_empty_rollouts),
+            message="Session namespace coverage and empty rollouts must be explicit.",
         )
         ids, paths, descriptors = set(), set(), set()
         by_id = {}

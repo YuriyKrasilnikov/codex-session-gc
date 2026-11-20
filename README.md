@@ -7,7 +7,15 @@ Explicit Guardian histories can also be selected. Their historical parent associ
 does not select or require deletion of the parent. Age is a caller-supplied filter,
 not a fixed retention policy.
 
-## What is new in 0.5.1
+## What is new in 0.5.2
+
+The locally verified 0.5.2 package supports selected stopped local Codex 0.171.0
+work within the boundaries described in [compatibility](docs/compatibility.md).
+It uses state migration 64, thread history migration 9 and SQLite 3.54.1 in the
+application and helper. Keep older receipt consumers while their unresolved
+operations require them. Publication and public installation remain to be verified.
+
+## What was new in 0.5.1
 
 The installer avoids false storage refusals on affected filesystems while
 dependencies create and rename temporary directories. It checks the free-space
@@ -26,13 +34,14 @@ its content scrolls in compact windows.
 
 ## Download and install
 
-The 0.5.1 installation workflow uses a matched Linux x86_64 bundle and a
-standard-library installer. Obtain the published assets and independently
+Once 0.5.2 is published, its installation workflow uses a matched Linux x86_64
+bundle and a standard-library installer. Obtain the published assets and independently
 verify their attestations before using them. Python 3.14 or newer, `uv` and a
 separately trusted GitHub CLI (`gh`) are prerequisites. The qualified deployment
 is Ubuntu 26.04 LTS, glibc 2.43;
 other environments require qualification. The native contract uses wire 6, the
-exact state schema and migration 62, and the specified companion schemas.
+exact state schema through migration 64, thread history through migration 9,
+and the specified companion schemas.
 
 Obtain the full 40-character assembly source commit independently from a trusted
 release record. Use a trusted `gh` whose `attestation verify --help` includes
@@ -44,10 +53,10 @@ bootstrap before executing it; an unverified installer cannot verify itself:
 set -eu
 mkdir codex-session-gc-download
 cd codex-session-gc-download
-curl --fail --location --output codex-session-gc-installer-0.5.1.pyz \
-  https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.5.1/codex-session-gc-installer-0.5.1.pyz
+curl --fail --location --output codex-session-gc-installer-0.5.2.pyz \
+  https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.5.2/codex-session-gc-installer-0.5.2.pyz
 GC_ASSEMBLY_COMMIT=FULL_40_CHARACTER_ASSEMBLY_COMMIT
-gh attestation verify codex-session-gc-installer-0.5.1.pyz \
+gh attestation verify codex-session-gc-installer-0.5.2.pyz \
   --repo YuriyKrasilnikov/codex-session-gc \
   --signer-workflow YuriyKrasilnikov/codex-session-gc/.github/workflows/artifacts.yml \
   --source-digest "$GC_ASSEMBLY_COMMIT" --source-ref refs/heads/main \
@@ -65,13 +74,13 @@ prints an installation ID; retain that exact ID for activation and recovery.
 Substitute your actual existing Codex home and receipt directory:
 
 ```sh
-python3.14 -I codex-session-gc-installer-0.5.1.pyz --release v0.5.1 \
+python3.14 -I codex-session-gc-installer-0.5.2.pyz --release v0.5.2 \
   --action stage --gh /absolute/path/to/gh --uv /absolute/path/to/uv \
   --python /absolute/path/to/python3.14
-python3.14 -I codex-session-gc-installer-0.5.1.pyz --action activate \
+python3.14 -I codex-session-gc-installer-0.5.2.pyz --action activate \
   --installation-id INSTALLATION_UUID --home /absolute/codex-home \
   --receipt-dir /absolute/receipt-directory
-python3.14 -I codex-session-gc-installer-0.5.1.pyz --action status \
+python3.14 -I codex-session-gc-installer-0.5.2.pyz --action status \
   --installation-id INSTALLATION_UUID
 ```
 
@@ -91,7 +100,7 @@ For an existing installation, retain old receipt consumers and follow
 [0.4.0 release](https://github.com/YuriyKrasilnikov/codex-session-gc/releases/tag/v0.4.0)
 must retain it while their unresolved receipts require it. A version directory
 already present in an application directory is not replaced. To install another
-copy of 0.5.1, choose both a fresh `--install-dir` and a fresh `--bin-dir`; use
+copy of 0.5.2, choose both a fresh `--install-dir` and a fresh `--bin-dir`; use
 the resulting absolute CLI and reported MCP command. This does not switch a
 launcher in the old application directory. The same-version 0.5.0 example in
 [recovery and upgrades](docs/recovery.md#replace-an-existing-050-installation)
@@ -325,9 +334,9 @@ writer guard does not independently certify their completion. Selected descripto
 remain open for the checks immediately before unlink. History bodies are not
 scanned or hashed.
 
-The supported native contract is wire 6 and the exact bundled state schema
-through migration 62, with the qualified companion database schemas. The same
-qualified path supports plain JSONL and Zstandard, legacy and paginated history,
+The 0.5.2 native contract is wire 6 and the exact bundled state schema
+through migration 64, thread history through migration 9, and the companion
+schemas. Its bounded path supports plain JSONL and Zstandard, legacy and paginated history,
 and every observed pre/post-revert rollout belonging to a selected owner.
 Historical physical metadata may differ from the current SQL provider or role;
 the current header must agree with current SQL. Unsupported schema identities,
@@ -338,8 +347,8 @@ or be closed; selecting that parent never implicitly selects the Guardian. Exact
 selected-owner rows in `guardian_review_feedback` and `thread_read_receipts` are
 deleted for both ordinary and Guardian histories; unselected opaque rows remain
 untouched. Matched retained Guardians keep their existing physical writer guards.
-The runtime boundary is the qualified local stock Codex 0.166.0 persistent public
-CLI and app-server workflows, with MAv1 and MAv2 qualified separately. Custom
+The observed runtime boundary is stopped local stock Codex 0.171.0 work in the
+named V1 and V2 history modes described in [compatibility](docs/compatibility.md). Custom
 internal controllers and arbitrary direct ephemeral-library access are outside this
 boundary. It is not a guarantee of business success or an empty runtime heap.
 

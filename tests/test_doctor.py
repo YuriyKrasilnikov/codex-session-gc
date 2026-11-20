@@ -23,6 +23,7 @@ from codex_session_gc.cli.main import main
 from codex_session_gc.compatibility import observation
 from codex_session_gc.compatibility.record import (
     BindingState,
+    ProducerIdentity,
     ProducerObservation,
     SupportStatus,
     parse_record,
@@ -89,6 +90,15 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, 
     )
     monkeypatch.setattr(diagnostics, "load_closed_work_contract", lambda: contract)
     return home, helper
+
+
+@pytest.fixture
+def claimed_producer() -> ProducerIdentity:
+    """Use the bundled claim as test input, not as independent producer proof."""
+    record = parse_record(
+        files("codex_session_gc.compatibility").joinpath("support.json").read_bytes()
+    )
+    return record.target
 
 
 def _database(report: diagnostics.DoctorReport, kind: DatabaseKind) -> diagnostics.Observation:
@@ -430,13 +440,14 @@ def test_symlink_database_is_unavailable_without_following_it(
 
 def test_source_support_is_separate_from_local_execution_observation(
     environment: tuple[Path, Path],
+    claimed_producer: ProducerIdentity,
 ) -> None:
     """A bundled support claim cannot establish producer or native-input identity."""
     home, helper = environment
     target = ProducerObservation(
-        repository="openai/codex",
-        commit="6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
-        ref="refs/tags/rust-v0.166.0",
+        repository=claimed_producer.repository,
+        commit=claimed_producer.source.commit,
+        ref=claimed_producer.source.ref,
     )
     report = diagnostics.inspect_compatibility(home, helper, producer=target)
     support = report.source_support
@@ -487,7 +498,9 @@ def test_missing_or_malformed_support_record_does_not_change_doctor_exit(
 
 
 def test_cli_producer_values_are_caller_observations_not_source_proof(
-    environment: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+    environment: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+    claimed_producer: ProducerIdentity,
 ) -> None:
     """Explicit producer fields compare independently without changing local exit status."""
     home, helper = environment
@@ -500,11 +513,11 @@ def test_cli_producer_values_are_caller_observations_not_source_proof(
             str(helper),
             "--json",
             "--producer-repository",
-            "openai/codex",
+            claimed_producer.repository,
             "--producer-commit",
-            "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
+            claimed_producer.source.commit,
             "--producer-ref",
-            "refs/tags/rust-v0.166.0",
+            claimed_producer.source.ref,
             "--producer-binary-sha256",
             "b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8",
         ]

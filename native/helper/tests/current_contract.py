@@ -23,7 +23,7 @@ s = b.s
 def admission_case(name):
     with tempfile.TemporaryDirectory(prefix="gc-current-admission-") as temporary:
         manifest, unrelated, request, aid, uid, payload = b.prepare(
-            pathlib.Path(temporary), schema_version=59 if name == "schema59" else 61 if name == "schema61" else 62)
+            pathlib.Path(temporary), schema_version=59 if name == "schema59" else 61 if name == "schema61" else 62 if name == "schema62" else 64)
         home = pathlib.Path(manifest["home"])
         b.refresh(request)
         if name == "expanded-ownership":
@@ -73,13 +73,15 @@ def admission_case(name):
         elif name == "migration-checksum":
             with s.sqlite_context(home / "state_5.sqlite") as db:
                 db.execute("UPDATE _sqlx_migrations SET checksum=? WHERE version=62", (b"invalid",))
-        elif name == "schema63":
+        elif name == "unexpected-table":
             with s.sqlite_context(home / "state_5.sqlite") as db:
                 db.execute("CREATE TABLE unqualified(id TEXT)")
         before_sql, before_files = s.sql_snapshot(request), s.history_snapshot(home)
         before_guards = set((home / "thread-writer-locks").iterdir())
         result = s.dispatch(request, aid, uid, payload)
         assert result["status"] == "refused", (name, result)
+        if name in ("schema59", "schema61", "schema62", "unexpected-table"):
+            assert "native database schema is not qualified" in result["detail"], result
         if name == "expanded-ownership":
             assert set(request["deletion_scope"]) == {manifest["main"], manifest["target"]}
             assert {target["thread_id"] for target in request["targets"]} == set(request["deletion_scope"])
@@ -163,7 +165,7 @@ if __name__ == "__main__":
         print(json.dumps(result), flush=True)
     for name in ("wire1", "wire2", "wire3", "wire4", "wire5", "wire7", "unknown-request-field",
                  "unknown-target-field", "missing-identity", "null-header", "schema59",
-                 "schema61", "schema63", "migration-checksum", "migration-success", "archive-integer", "selected-root-feedback", "selected-root-receipt", "expanded-ownership", "contracted-ownership",
+                 "schema61", "schema62", "unexpected-table", "migration-checksum", "migration-success", "archive-integer", "selected-root-feedback", "selected-root-receipt", "expanded-ownership", "contracted-ownership",
                  "duplicate-ownership", "wrong-deletion", "missing-root-guard", "leaf-as-root", "root-cycle"):
         result = admission_case(name)
         results.append(result)

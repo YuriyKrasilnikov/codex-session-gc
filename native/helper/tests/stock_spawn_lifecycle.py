@@ -1,7 +1,7 @@
 """Observe stock spawn and archive ownership in a fresh disposable home.
 
 Observe persistent producer lifecycle, native guard admission, and child cleanup.
-Each producer mode and turn outcome must be run and evaluated separately.
+Each producer mode, history mode, and turn outcome must be run and evaluated separately.
 The supplied root must be a fresh task-owned /tmp/gc-root-closure-* directory.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 from unittest.mock import patch
 
-STOCK_SHA = 'b8a11fedf24b2dfb59a70c9e52b030f9a508dcd49cd2dd0d41956f4c785156b8'
+STOCK_SHA = 'b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0'
 MAX_TRACE = 16 * 1024 * 1024
 MAX_RPC_LINE = 4 * 1024 * 1024
 MAX_HTTP_BODY = 4 * 1024 * 1024
@@ -281,7 +281,10 @@ def observe_threads(home: Path, identifiers: tuple[str, str]) -> list[dict[str, 
         require(first_line.endswith(b'\n') and len(first_line) <= 1024 * 1024, 'stock header unavailable')
         envelope = json.loads(first_line)
         require(envelope.get('type') == 'session_meta' and envelope.get('payload', {}).get('id') == identifier, 'stock header identity differs')
-        observed.append({'id': identifier, 'sql_source': source, 'header_source': envelope['payload'].get('source')})
+        observed.append({'id': identifier, 'sql_source': source,
+                         'header_source': envelope['payload'].get('source'),
+                         'session_id': envelope['payload'].get('session_id'),
+                         'context_window': envelope['payload'].get('context_window')})
     return observed
 
 
@@ -377,6 +380,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--mode', choices=('v1', 'v2'), required=True)
+    parser.add_argument('--history-mode', choices=('legacy', 'paginated'), required=True)
     parser.add_argument('--turn-outcome', choices=('clean', 'error', 'cancel'), default='clean')
     parser.add_argument('--sibling', action='store_true')
     parser.add_argument('--wake', action='store_true', help='request V2 child durable sleep')
@@ -409,7 +413,7 @@ def main() -> None:
     trace.add({'event': 'controller_started', 'pid': os.getpid(),
                'script_sha256': digest(Path(__file__)), 'stock_sha256': args.stock_sha256,
                'fixture_sha256': args.fixture_sha256, 'native_sha256': args.native_sha256,
-               'mode': args.mode, 'turn_outcome': args.turn_outcome,
+               'mode': args.mode, 'history_mode': args.history_mode, 'turn_outcome': args.turn_outcome,
                'sibling': args.sibling, 'wake': args.wake,
                'expect_native': args.expect_native})
     require(not args.wake or args.mode == 'v2', 'wake scenario requires v2')
@@ -435,8 +439,10 @@ def main() -> None:
         response = rpc.request('initialize', {'clientInfo': {'name': 'disposable-spawn-witness', 'version': '1'}, 'capabilities': {'experimentalApi': True}})
         require('result' in response, 'initialize failed')
         rpc.send({'method': 'initialized', 'params': {}})
-        start = {'model': 'local-inert', 'modelProvider': 'inert', 'cwd': str(home), 'ephemeral': False, 'historyMode': 'legacy', 'approvalPolicy': 'never', 'sandbox': 'read-only'}
+        start = {'model': 'local-inert', 'modelProvider': 'inert', 'cwd': str(home), 'ephemeral': False, 'historyMode': args.history_mode, 'approvalPolicy': 'never', 'sandbox': 'read-only'}
         parent_response = rpc.request('thread/start', start)
+        require(parent_response['result']['thread']['historyMode'] == args.history_mode,
+                'stock parent history mode differs')
         parent = str(UUID(parent_response['result']['thread']['id']))
         other_response = rpc.request('thread/start', start)
         other = str(UUID(other_response['result']['thread']['id']))
@@ -675,7 +681,7 @@ def main() -> None:
                 require(not server_thread.is_alive(), 'loopback server did not terminate')
     if signal_state['interrupted']:
         raise KeyboardInterrupt('probe was interrupted')
-    print(json.dumps({'status': status, 'trace_sha256': digest(trace.path), 'model': 'scripted_loopback', 'stock_sha256': STOCK_SHA, 'fixture_sha256': args.fixture_sha256, 'native_sha256': args.native_sha256, 'mode': args.mode, 'turn_outcome': args.turn_outcome, 'scope': 'stock clean archive, guarded admission and direct native child-only apply'}))
+    print(json.dumps({'status': status, 'trace_sha256': digest(trace.path), 'model': 'scripted_loopback', 'stock_sha256': STOCK_SHA, 'fixture_sha256': args.fixture_sha256, 'native_sha256': args.native_sha256, 'mode': args.mode, 'history_mode': args.history_mode, 'turn_outcome': args.turn_outcome, 'scope': 'stock clean archive, guarded admission and direct native child-only apply'}))
 
 
 if __name__ == '__main__':

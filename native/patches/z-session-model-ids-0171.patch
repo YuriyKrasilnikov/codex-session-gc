@@ -1,0 +1,255 @@
+--- a/codex-rs/thread-store/src/local/bounded_cleanup.rs
++++ b/codex-rs/thread-store/src/local/bounded_cleanup.rs
+@@ -357,7 +357,7 @@
+             .collect::<Result<Vec<_>>>()?;
+         #[cfg(feature = "fixtures")]
+         fixture_checkpoint(&request, "during_heavy_reads")?;
+-        let (preserved_zero_files, mut retained_guardians) =
++        let (preserved_zero_files, mut retained_guardians, retained_alias_headers) =
+             validate_batch_history_dependencies(&request, &bounded_targets)?;
+         retained_guardians.sort_by_key(|guardian| guardian.checked.metadata.meta.id.to_string());
+         for guardian in &retained_guardians {
+@@ -425,6 +425,43 @@
+                 .collect::<Vec<_>>(),
+         )
+         .map_err(error)?;
++        let nonempty_names: HashSet<String> = sqlx::query_scalar::<_, String>("SELECT DISTINCT session_id FROM session_model_ids WHERE session_id IN (SELECT value FROM json_each(?))")
++            .bind(&selected_json).fetch_all(&mut *state.transaction).await.map_err(error)?.into_iter().collect();
++        if !nonempty_names.is_empty() {
++            let state_owners: Vec<(String, String)> = sqlx::query_as(
++                "SELECT id, rollout_path FROM threads WHERE id NOT IN (SELECT value FROM json_each(?))",
++            ).bind(&selected_json).fetch_all(&mut *state.transaction).await.map_err(error)?;
++            let retained_current: HashSet<(String, PathBuf)> = retained_alias_headers
++                .iter()
++                .map(|header| {
++                    (
++                        header.owner_id.clone(),
++                        codex_rollout::plain_rollout_path(&header.path),
++                    )
++                })
++                .collect();
++            require(
++                state_owners.iter().all(|(id, path)| {
++                    retained_current.contains(&(
++                        id.clone(),
++                        codex_rollout::plain_rollout_path(std::path::Path::new(path)),
++                    ))
++                }),
++                "retained SQL thread has no resolvable current history header",
++            )?;
++            require(
++                preserved_zero_files
++                    .iter()
++                    .all(|file| codex_rollout::rollout_id_from_path(&file.path).is_none()),
++                "empty retained history has unresolved session ownership",
++            )?;
++            for header in &retained_alias_headers {
++                require(
++                    !header.ambiguous_agent_session && !nonempty_names.contains(&header.session_id),
++                    "retained or ambiguous history consumes a selected session model ID namespace",
++                )?;
++            }
++        }
+         let attached_child: bool = sqlx::query_scalar(
+             "SELECT EXISTS(SELECT 1 FROM threads WHERE attached_thread_parent_id IN (SELECT value FROM json_each(?)))",
+         ).bind(&selected_json).fetch_one(&mut *state.transaction).await.map_err(error)?;
+@@ -494,6 +531,11 @@
+         outcome.preserved_name_index = Some(request.codex_home.join("session_index.jsonl"));
+         #[cfg(feature = "fixtures")]
+         fixture_checkpoint(&request, "before_effects")?;
++        if !nonempty_names.is_empty() {
++            for header in &retained_alias_headers {
++                header.recheck()?;
++            }
++        }
+         for database in &mut databases {
+             let effect_ids = if matches!(database.kind, Kind::History) {
+                 &history_ids
+@@ -578,6 +620,26 @@
+             .iter()
+             .find(|bound| bound.path == state.path)
+             .ok_or("authoritative state has no approved effect bound")?;
++        let expected_aliases = u64::try_from(
++            supplemental_bound
++                .rows
++                .get("session_model_ids")
++                .ok_or("session model ID effect bound is absent")?
++                .len(),
++        )
++        .map_err(error)?;
++        let removed_aliases = sqlx::query(
++            "DELETE FROM session_model_ids WHERE session_id IN (SELECT value FROM json_each(?))",
++        )
++        .bind(&selected_json)
++        .execute(&mut *state.transaction)
++        .await
++        .map_err(error)?
++        .rows_affected();
++        require(
++            removed_aliases == expected_aliases,
++            "native session model ID effects differ from the approved bound",
++        )?;
+         let expected_feedback = u64::try_from(
+             supplemental_bound
+                 .rows
+@@ -731,6 +793,27 @@
+     }
+ }
+ 
++struct RetainedAliasHeader {
++    path: PathBuf,
++    identity: PhysicalIdentity,
++    digest: [u8; 32],
++    representation: RolloutRepresentation,
++    session_id: String,
++    owner_id: String,
++    ambiguous_agent_session: bool,
++}
++impl RetainedAliasHeader {
++    fn recheck(&self) -> Result<()> {
++        let (file, identity) = open_bounded_history(&self.path)?;
++        require(
++            identity.device == self.identity.device
++                && identity.inode == self.identity.inode
++                && bounded_header(&file, self.representation)?.0 == self.digest,
++            "retained session header changed",
++        )
++    }
++}
++
+ /// One retained physical member of a typed Guardian's history.
+ /// Logical writer ownership is shared while every descriptor remains guarded.
+ struct RetainedGuardian {
+@@ -891,7 +974,7 @@
+ fn bounded_header(
+     file: &std::fs::File,
+     representation: RolloutRepresentation,
+-) -> Result<([u8; 32], codex_protocol::protocol::SessionMetaLine)> {
++) -> Result<([u8; 32], codex_protocol::protocol::SessionMetaLine, bool)> {
+     use std::io::{BufRead, Read};
+     let input = HeaderInput {
+         file,
+@@ -915,10 +998,15 @@
+             && bytes.last() == Some(&b'\n'),
+         "history first line is missing or exceeds the bounded header limit",
+     )?;
++    let json: serde_json::Value = serde_json::from_slice(&bytes).map_err(error)?;
++    let explicit_session = json
++        .get("payload")
++        .and_then(|p| p.get("session_id"))
++        .is_some_and(|v| v.is_string());
+     let line = codex_rollout::parse_rollout_line_bytes(&bytes).map_err(error)?;
+     match line.item {
+         codex_rollout::RolloutItem::SessionMeta(metadata) => {
+-            Ok((Sha256::digest(&bytes).into(), metadata))
++            Ok((Sha256::digest(&bytes).into(), metadata, explicit_session))
+         }
+         _ => Err("history first line is not session metadata".into()),
+     }
+@@ -971,7 +1059,7 @@
+         wire_identity(&identity)? == rollout.physical_identity,
+         "bounded target physical identity differs from the prepared request",
+     )?;
+-    let (digest, metadata) = bounded_header(&file, rollout.representation)?;
++    let (digest, metadata, _explicit_session) = bounded_header(&file, rollout.representation)?;
+     require(
+         digest == rollout.header_sha256,
+         "selected metadata header changed",
+@@ -1045,12 +1133,12 @@
+                 .thread_ids
+                 .contains(&parent_thread_id)
+                 && matches!(parents.as_slice(), [(parent, status)]
+-                    if parent == &parent_thread_id.to_string()
+-                        && match status.parse::<codex_state::DirectionalThreadSpawnEdgeStatus>() {
+-                            Ok(codex_state::DirectionalThreadSpawnEdgeStatus::Open)
+-                            | Ok(codex_state::DirectionalThreadSpawnEdgeStatus::Closed) => true,
+-                            Err(_) => false,
+-                        }),
++                if parent == &parent_thread_id.to_string()
++                    && match status.parse::<codex_state::DirectionalThreadSpawnEdgeStatus>() {
++                        Ok(codex_state::DirectionalThreadSpawnEdgeStatus::Open)
++                        | Ok(codex_state::DirectionalThreadSpawnEdgeStatus::Closed) => true,
++                        Err(_) => false,
++                    }),
+             "selected spawn parent or status is invalid",
+         ),
+         CleanupParentRelation::Root {} | CleanupParentRelation::GuardianAssociation { .. } => {
+@@ -1062,7 +1150,7 @@
+     }
+ }
+ 
+-#[derive(PartialEq, Eq)]
++#[derive(Clone, PartialEq, Eq)]
+ struct PhysicalIdentity {
+     device: u64,
+     inode: u64,
+@@ -1402,7 +1490,11 @@
+ fn validate_batch_history_dependencies(
+     request: &ClosedWorkCleanupRequest,
+     bounded: &[BoundedTarget],
+-) -> Result<(Vec<PreservedZeroFile>, Vec<RetainedGuardian>)> {
++) -> Result<(
++    Vec<PreservedZeroFile>,
++    Vec<RetainedGuardian>,
++    Vec<RetainedAliasHeader>,
++)> {
+     let physical: Vec<_> = request
+         .targets
+         .iter()
+@@ -1434,6 +1526,7 @@
+     let mut providers = HashSet::new();
+     let mut preserved_zero_files = Vec::new();
+     let mut retained_guardians = Vec::new();
++    let mut retained_alias_headers = Vec::new();
+     let mut directories = vec![
+         request.codex_home.join(codex_rollout::SESSIONS_SUBDIR),
+         request
+@@ -1509,7 +1602,7 @@
+             } else {
+                 let (file, identity) = open_bounded_history(&path)?;
+                 let representation = path_representation(&path)?;
+-                let (digest, metadata) = bounded_header(&file, representation)?;
++                let (digest, metadata, explicit_session) = bounded_header(&file, representation)?;
+                 #[cfg(feature = "fixtures")]
+                 fixture_checkpoint(request, "during_namespace_header")?;
+                 let path_now = capture_physical_identity(&path)?;
+@@ -1525,6 +1618,18 @@
+                 )?;
+                 // Unrelated append-only body growth is not a provider-header change.
+                 // Selected files and separately guarded retained Guardians keep full-stat checks.
++                retained_alias_headers.push(RetainedAliasHeader {
++                    path: path.clone(),
++                    identity: identity.clone(),
++                    digest,
++                    representation,
++                    session_id: metadata.meta.session_id.to_string(),
++                    owner_id: metadata.meta.id.to_string(),
++                    ambiguous_agent_session: metadata.meta.source.is_non_root_agent()
++                        && (!explicit_session
++                            || metadata.meta.session_id.to_string()
++                                == metadata.meta.id.to_string()),
++                });
+                 retained_file = Some(BoundedTarget {
+                     file,
+                     identity,
+@@ -1610,7 +1715,11 @@
+         zero_ids.is_disjoint(&providers),
+         "retained history requires an unresolved zero physical provider",
+     )?;
+-    Ok((preserved_zero_files, retained_guardians))
++    Ok((
++        preserved_zero_files,
++        retained_guardians,
++        retained_alias_headers,
++    ))
+ }
+ 
+ /// Read-only physical row selection for the guarded batch validator.
+@@ -1623,6 +1732,7 @@
+     let tables: &[(&str, &str)] = match kind {
+         Kind::State => &[
+             ("threads", "id"),
++            ("session_model_ids", "session_id"),
+             ("thread_dynamic_tools", "thread_id"),
+             ("thread_spawn_edges", "spawn"),
+             ("thread_attachments", "thread_id"),
