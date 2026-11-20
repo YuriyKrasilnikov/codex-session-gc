@@ -58,6 +58,10 @@ _DDL = {
             "model_provider TEXT,updated_at_ms INTEGER,archived INTEGER,history_mode TEXT,"
             "attached_thread_parent_id TEXT)"
         ),
+        (
+            "CREATE TABLE session_model_ids(session_id TEXT,kind TEXT,external_key TEXT,"
+            "ordinal INTEGER,initial_state TEXT)"
+        ),
         "CREATE TABLE thread_spawn_edges(parent_thread_id TEXT,child_thread_id TEXT,status TEXT)",
         "CREATE TABLE thread_dynamic_tools(thread_id TEXT)",
         "CREATE TABLE thread_attachments(thread_id TEXT)",

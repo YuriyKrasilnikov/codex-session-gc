@@ -149,6 +149,27 @@ def _metadata(header: HeaderObservation, representation: PhysicalRepresentation)
         except (TypeError, ValueError) as error:
             message = "An attached thread requires a distinct fork source."
             raise PreparationRefused(message) from error
+    raw_session = metadata.get("session_id", str(ownership.thread_id.value))
+    source = metadata.get("source", "vscode")
+    non_root = (
+        isinstance(source, dict)
+        and len(source) == 1
+        and next(iter(source)) in ("internal", "subagent")
+    )
+    valid_source = isinstance(source, str) or (
+        isinstance(source, dict)
+        and len(source) == 1
+        and next(iter(source)) in ("internal", "subagent", "custom")
+    )
+    try:
+        session_id = ThreadId.parse(raw_session)
+    except TypeError, ValueError:
+        session_id = None
+    ambiguous = (
+        not valid_source
+        or session_id is None
+        or (non_root and ("session_id" not in metadata or session_id == ownership.thread_id))
+    )
     return RolloutMetadata(
         ownership=ownership,
         history_mode=HistoryMode(str(metadata.get("history_mode", "legacy"))),
@@ -163,6 +184,8 @@ def _metadata(header: HeaderObservation, representation: PhysicalRepresentation)
         if fork is None
         else LogicalForkBoundary(ThreadId.parse(fork), coordinate),
         attachment=attachment,
+        session_id=session_id,
+        ambiguous_agent_session=ambiguous,
     )
 
 
@@ -179,6 +202,7 @@ def observe_inventory(  # noqa: C901
     Only headers needed by current SQL pointers are retained as small projections.
     """
     items = []
+    unresolved_empty_rollouts = []
     headers = {}
     seen = set()
     with closing(_files(home)) as entries:
@@ -216,6 +240,7 @@ def observe_inventory(  # noqa: C901
                     ):
                         message = "A selected or current physical history is empty."
                         raise PreparationRefused(message)
+                    unresolved_empty_rollouts.append(path)
                     continue
                 selected = ownership.thread_id in capture_owners
                 header = _observe_header_descriptor(
@@ -250,6 +275,12 @@ def observe_inventory(  # noqa: C901
             message = "Current SQL pointer logical identity disagrees."
             raise PreparationRefused(message)
         pointers.append(CurrentRolloutPointer(ownership, raw))
-    inventory = PhysicalInventory(tuple(items), tuple(pointers), InventoryCompleteness.COMPLETE)
+    inventory = PhysicalInventory(
+        tuple(items),
+        tuple(pointers),
+        InventoryCompleteness.COMPLETE,
+        alias_coverage=True,
+        unresolved_empty_rollouts=tuple(unresolved_empty_rollouts),
+    )
     normalize_history_providers(inventory)
     return inventory, headers

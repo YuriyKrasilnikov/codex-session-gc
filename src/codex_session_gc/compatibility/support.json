@@ -1,7 +1,7 @@
 {
   "conditions": [
     {
-      "description": "The selected work is technically stopped within the qualified local stock Codex 0.166 persistent public CLI and app-server workflows, with MAv1 and MAv2 qualified separately. Native execution requires maintenance and complete root and actual spawn-descendant writer/lifecycle ownership and fresh checks; unrelated work may continue."
+      "description": "Selected work is technically stopped in the observed local persistent stock workflows. Cleanup holds maintenance and complete root and actual spawn-descendant writer ownership through fresh validation. Independent work may continue."
     },
     {
       "description": "Related selected-thread metadata updates and dependency-reference publication, including a new fork history reference, must finish before cleanup. Acquiring a writer guard does not independently certify their completion."
@@ -19,7 +19,7 @@
       "description": "This scoped assessment does not certify historical-body integrity, a complete Core lifecycle, generic Rust equivalence or the source and signature of an observed producer binary."
     },
     {
-      "description": "Relevant local source, caller and generated-input effects were reviewed within the declared scope; external implementation, compiler, feature-matrix and runtime configuration equivalence are not established."
+      "description": "Source review covers the named consumed paths and the checked conditions for the new helper and profile. The automated source comparison does not establish general caller, feature or binary equivalence."
     },
     {
       "description": "Only qualified owner, provider, attachment and Guardian representations are covered; unsupported Internal Guardian selections remain protected or refused."
@@ -37,53 +37,57 @@
   "coverage_complete": true,
   "coverage_gaps": [],
   "execution": {
-    "helper_sha256": "7b6c5065a903463e9b58baa0cf525ed2858c97934b6569fb8a5880d4eadb92ff",
-    "native_inputs_sha256": "3a5064c7d81fc2fc0e19e8fb803207a5d12525fa37d4023430de7913dfcc50ed",
-    "profile_sha256": "fe850b5f2cefa78ca6c14f2aa74fa7926818819b1d8a76d6b281044d97772867"
+    "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+    "native_inputs_sha256": "e254868253af0e6ff4ae459628a4d59b96f51e7489daf3a4334d27911ca91cb1",
+    "profile_sha256": "6ac727487130177d5a57e9b28fa497214c718b03bc51604717d0dba53cf367e3"
   },
   "record_version": 1,
-  "report_sha256": "c42d1701d6237abca46a221bf8dc8d9359d3e932d4e7bf4dd201bfe9d79dc600",
+  "report_sha256": "496172df63121c685df2fbb818aac5da865d86145bc1e97684500e210a7dd6ab",
   "review": {
-    "scope": "Selected technically stopped work on matching qualified local storage, within the persistent public Codex 0.166 CLI and app-server workflows; scoped source and bounded runtime evidence, not generic Rust or producer binary equivalence.",
-    "source": "source-assessment-identity:sha256:4fdd3e568a75a31bbbc96870e433fc573d07d8a12e280fc79b1e877c2c63ccef"
+    "scope": "Selected technically stopped work in the qualified local persistent stock Codex 0.171.0 workflows on matching state and companion storage, after related metadata updates and history-reference publication finish. The observed cases cover a V1 legacy parent with a paginated child, V2 paginated and V2 legacy, and an excluded retained-fork provider.",
+    "source": "scoped-source-assessment:sha256:c323866791c57435efe5633dab591baddfc49966f19c49a95a0d4a0abaad8e58"
   },
   "source_origin": {
-    "scope": "Selected technically stopped work on matching qualified local storage, within the persistent public Codex 0.166 CLI and app-server workflows; scoped source and bounded runtime evidence, not generic Rust or producer binary equivalence.",
-    "source": "https://github.com/openai/codex/tree/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856"
+    "scope": "Selected technically stopped work in the qualified local persistent stock Codex 0.171.0 workflows on matching state and companion storage, after related metadata updates and history-reference publication finish. The observed cases cover a V1 legacy parent with a paginated child, V2 paginated and V2 legacy, and an excluded retained-fork provider.",
+    "source": "https://github.com/openai/codex/tree/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e"
   },
   "status": "supported_within_scope",
   "target": {
     "observed_binary_sha256": null,
     "repository": "openai/codex",
     "source": {
-      "commit": "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
-      "ref": "refs/tags/rust-v0.166.0"
+      "commit": "ccf9be8cc458bd6b8336fe84d68d8893f2691a5e",
+      "ref": "refs/tags/rust-v0.171.0"
     }
   },
   "witnesses": [
     {
-      "reference": "native-qualification-id:sha256:36ee499656b47890c15cb38759cb5438e72d453472ec036f772920983aa63d69",
-      "scope": "Exact helper, profile and native input qualification."
+      "reference": "native-qualification-id:sha256:7eb502ff2471ed4faeb701157f4490fe1b962b1130c33a140b57597e316850db",
+      "scope": "Exact helper, profile and native-input binding on the named local checks."
     },
     {
-      "reference": "native-qualification-receipt:sha256:fb10f813f7a12d8ff6effff1be57627e090463f6b3c5b1048039f3d879b95115",
-      "scope": "Seven bounded native and producer partitions including eight stock lifecycle cases."
+      "reference": "stock-trace:sha256:56d2586336857f08f5320d117bb87c632e43b7b0243b6c7b68a86a1e446dbe36",
+      "scope": "Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session."
     },
     {
-      "reference": "stock-trace-audit:sha256:f24df29378e41be8226248c4d55db94a9be4fc7be1817a1a045e7e4483f95a1f",
-      "scope": "Eight observed persistent stock producer cases, with MAv1 and MAv2 represented; not producer source provenance."
+      "reference": "stock-trace:sha256:860a9ec5af378bd1efb876855a829f930ccd42b6fa1602f7d6d9c35501919312",
+      "scope": "Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session."
     },
     {
-      "reference": "stock-manifest-oracle:sha256:d88756c09d1f814fbf076f9ac99970789e826d23fa9f7dc0ea1ca3fb2539931e",
-      "scope": "Observed selected and retained rollout paths in disposable stock cases."
+      "reference": "stock-retained-fork:sha256:3fa69d9913eb5f3deebfc20ff92de341fa3e52aed0b8ce4a0b2c4fbeed450ab5",
+      "scope": "Actual stock paginated fork creation and retained provider dependency at rest."
     },
     {
-      "reference": "source-assessment-bytes:sha256:a60ad5de7c459facfd7d475eb31cd48d04640cd7df62cadba69415fe2047111a",
-      "scope": "Exact supplied scoped source assessment bytes."
+      "reference": "installed-provider-plan:sha256:e46a94cbeb7b80dd33d01260237cb876fb0c6514b2708eb92cecbc1025b54081",
+      "scope": "Installed plan excluded the provider required by the retained fork before effects."
     },
     {
-      "reference": "source-assessment-identity:sha256:4fdd3e568a75a31bbbc96870e433fc573d07d8a12e280fc79b1e877c2c63ccef",
-      "scope": "Canonical normalized assessment evaluated against the fresh immutable source report."
+      "reference": "installed-interface-checks:sha256:5e3d110c57408b85b447e927a219b111d6ee37eedb5f07a2a01436ae830474e5",
+      "scope": "Named installed CLI, Textual and MCP cleanup and receipt behavior with the final execution profile."
+    },
+    {
+      "reference": "scoped-source-assessment:sha256:c323866791c57435efe5633dab591baddfc49966f19c49a95a0d4a0abaad8e58",
+      "scope": "Selected technically stopped work in the qualified local persistent stock Codex 0.171.0 workflows on matching state and companion storage, after related metadata updates and history-reference publication finish. The observed cases cover a V1 legacy parent with a paginated child, V2 paginated and V2 legacy, and an excluded retained-fork provider."
     }
   ]
 }

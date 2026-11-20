@@ -1,0 +1,71 @@
+--- a/codex-rs/thread-store/src/local/revert_thread_tests.rs
++++ b/codex-rs/thread-store/src/local/revert_thread_tests.rs
+@@ -94,6 +94,8 @@
+         .expect("read replacement metadata")
+         .meta;
+     assert_eq!(replacement_meta.id, thread_id);
++    assert_eq!(serde_json::to_value(replacement_meta.context_window.as_ref().expect("window")).expect("serialize window"),
++        serde_json::json!({"window_id": {"salt": "window", "ordinal": 3, "value": 42}}));
+     assert_eq!(
+         (
+             replacement_meta.creator_user_id.as_deref(),
+@@ -289,7 +291,7 @@
+             history_mode: ThreadHistoryMode::Paginated,
+             history_base: None,
+             subagent_history_start_ordinal: None,
+-            initial_window_id: "window-1".to_string(),
++            initial_window_id: serde_json::from_value(serde_json::json!({"salt": "window", "ordinal": 3, "value": 42})).expect("generated window"),
+             runtime_workspace_roots: Some(vec![store.config.codex_home.join("workspace").abs()]),
+             metadata: ThreadPersistenceMetadata {
+                 cwd: Some(std::env::current_dir().expect("cwd")),
+--- a/codex-rs/thread-store/src/local/thread_history_materialization_tests.rs
++++ b/codex-rs/thread-store/src/local/thread_history_materialization_tests.rs
+@@ -136,7 +136,7 @@
+             Vec::new(),
+         )
+         .with_history_mode(ThreadHistoryMode::Paginated)
+-        .with_initial_window_id("window-1".to_string()),
++        .with_initial_window_id(codex_protocol::ContextWindowId::Text("window-1".to_string())),
+     )
+     .await
+     .expect("create paginated rollout");
+@@ -769,7 +769,7 @@
+             history_mode: ThreadHistoryMode::Legacy,
+             history_base: None,
+             subagent_history_start_ordinal: None,
+-            initial_window_id: "window-1".to_string(),
++            initial_window_id: codex_protocol::ContextWindowId::Text("window-1".to_string()),
+             runtime_workspace_roots: None,
+             metadata: ThreadPersistenceMetadata {
+                 cwd: Some(home.path().to_path_buf()),
+@@ -2827,7 +2827,7 @@
+             history_mode: ThreadHistoryMode::Paginated,
+             history_base,
+             subagent_history_start_ordinal,
+-            initial_window_id: "window-1".to_string(),
++            initial_window_id: codex_protocol::ContextWindowId::Text("window-1".to_string()),
+             runtime_workspace_roots: None,
+             metadata: ThreadPersistenceMetadata {
+                 cwd: Some(std::env::current_dir().expect("cwd")),
+--- a/codex-rs/thread-store/src/local/pending_thread_metadata_tests.rs
++++ b/codex-rs/thread-store/src/local/pending_thread_metadata_tests.rs
+@@ -365,7 +365,7 @@
+         history_mode: ThreadHistoryMode::Legacy,
+         history_base: None,
+         subagent_history_start_ordinal: None,
+-        initial_window_id: uuid::Uuid::now_v7().to_string(),
++        initial_window_id: codex_protocol::ContextWindowId::new_uuid_v7(),
+         runtime_workspace_roots: None,
+         metadata: ThreadPersistenceMetadata {
+             cwd: Some(std::env::current_dir().expect("cwd")),
+--- a/codex-rs/rollout/src/recorder_tests.rs
++++ b/codex-rs/rollout/src/recorder_tests.rs
+@@ -673,7 +673,7 @@
+     let config = test_config(home.path());
+     let session_id = SessionId::default();
+     let thread_id = ThreadId::new();
+-    let initial_window_id = Uuid::now_v7().to_string();
++    let initial_window_id = codex_protocol::ContextWindowId::new_uuid_v7();
+     let recorder = RolloutRecorder::new(
+         &config,
+         RolloutRecorderParams::new(

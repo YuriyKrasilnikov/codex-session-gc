@@ -45,7 +45,12 @@ async fn main() -> anyhow::Result<()> {
             );
             stock_compression_fixture(&home, &source).await?;
         }
-        "create-paginated" | "create-reverted" | "fork-peer" | "delete-native" | "read-lineage" => {
+        "create-paginated"
+        | "create-reverted"
+        | "create-reverted-generated"
+        | "fork-peer"
+        | "delete-native"
+        | "read-lineage" => {
             publication_fixture(&home, mode, arguments.get(3)).await?;
         }
         "initialize-memory-v2" => {
@@ -711,7 +716,7 @@ fn publication_params(
         history_mode: ThreadHistoryMode::Paginated,
         history_base,
         subagent_history_start_ordinal: None,
-        initial_window_id: "publication-window".to_owned(),
+        initial_window_id: codex_protocol::ContextWindowId::Text("publication-window".to_owned()),
         runtime_workspace_roots: None,
         metadata: ThreadPersistenceMetadata {
             cwd: Some(home.to_path_buf()),
@@ -742,17 +747,21 @@ async fn publication_fixture(
         None => ThreadId::default(),
     };
     match mode {
-        "create-paginated" | "create-reverted" => {
-            store
-                .create_thread(publication_params(home, thread_id, None, None))
-                .await?;
+        "create-paginated" | "create-reverted" | "create-reverted-generated" => {
+            let mut params = publication_params(home, thread_id, None, None);
+            if mode == "create-reverted-generated" {
+                params.initial_window_id = serde_json::from_value(
+                    serde_json::json!({"salt":"window","ordinal":3,"value":42}),
+                )?;
+            }
+            store.create_thread(params).await?;
             store
                 .append_items(codex_thread_store::AppendThreadItemsParams {
                     thread_id,
                     items: vec![message("publication-source-marker".to_owned())],
                 })
                 .await?;
-            if mode == "create-reverted" {
+            if mode == "create-reverted" || mode == "create-reverted-generated" {
                 use codex_protocol::protocol::{EventMsg, TurnCompleteEvent, TurnStartedEvent};
                 let mut items = Vec::new();
                 for turn_id in ["fixture-turn-1", "fixture-turn-2"] {
@@ -789,7 +798,7 @@ async fn publication_fixture(
                 .await?;
             publish_fixture_metadata(&store, thread_id).await?;
             store.shutdown_thread(thread_id).await?;
-            if mode == "create-reverted" {
+            if mode == "create-reverted" || mode == "create-reverted-generated" {
                 store
                     .revert_thread(codex_thread_store::RevertThreadParams {
                         thread_id,
@@ -802,6 +811,19 @@ async fn publication_fixture(
                 .get_thread(thread_id)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("source metadata absent after persistence"))?;
+            if mode == "create-reverted-generated" {
+                let meta = codex_rollout::read_session_meta_line(metadata.rollout_path.as_path())
+                    .await?
+                    .meta;
+                let window = meta
+                    .context_window
+                    .ok_or_else(|| anyhow::anyhow!("replacement window absent"))?;
+                anyhow::ensure!(
+                    serde_json::to_value(window)?
+                        == serde_json::json!({"window_id":{"salt":"window","ordinal":3,"value":42}}),
+                    "revert changed generated window allocation"
+                );
+            }
             println!(
                 "{}",
                 serde_json::json!({"id":thread_id,"rollout_id":codex_rollout::rollout_id_from_path(metadata.rollout_path.as_path()),"path":metadata.rollout_path})

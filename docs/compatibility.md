@@ -11,6 +11,30 @@ The pinned native source is OpenAI Codex commit
 current request format. Qualification does not turn the helper into the installed
 Codex executable or establish a complete live Core/app-server lifecycle guarantee.
 
+## 0.5.2 contract
+
+The locally verified 0.5.2 package supports selected stopped local stock Codex
+0.171.0 work within the stated ownership and publication boundaries. The scoped
+source assessment is `supported_within_scope`; the full automated comparison
+remains UNKNOWN and producer source equivalence is not established. The target
+source is commit `ccf9be8cc458bd6b8336fe84d68d8893f2691a5e`; the native helper
+still derives from the pinned `092d3acd` archive and tracked patches.
+
+The contract uses wire 6, exact state migration 64, thread history migration 9
+and the bundled companion schemas. Both the Python application and native
+helper use SQLite 3.54.1. Installed stock witnesses observed clean selected-work
+cases for V1 legacy parent with paginated child, V2 paginated and V2 legacy;
+the V2 parent and child both used the named mode. A retained stock paginated
+fork case excluded its provider from the plan before effects. These observations
+are bounded to the tested cases and do not prove a complete lifecycle guarantee.
+Related selected-thread metadata updates and dependency-reference publication
+must finish before cleanup; writer acquisition does not certify their completion.
+Unknown Guardian sources, including `Internal`, remain protected.
+
+Local artifacts have been verified. Publication, official GitHub attestations and
+public installation remain separate prerequisites. Preserve the consumer named
+by any unresolved older receipt; changing profiles does not migrate receipts.
+
 ## 0.5.0 and 0.5.1 contract
 
 The 0.5.0 and 0.5.1 contract uses wire 6 and exact state/companion schemas through state
@@ -29,7 +53,7 @@ Download a matched bundle; changing only the helper or only a profile JSON file
 is not an upgrade. Existing receipt consumers must be retained while their
 outcomes remain unresolved.
 
-The bundled scoped support claim addresses Codex 0.166.0 commit
+The 0.5.1 bundled scoped support claim addresses Codex 0.166.0 commit
 `6ff1e1ca3b30fc8b914720681fcf5fe62e95f856` for selected stopped work under the
 conditions in [the cleanup contract](contract.md). The underlying automated
 source comparison remains UNKNOWN; the scoped assessment is a supplied review
@@ -293,8 +317,9 @@ the earlier verification; it does not reauthenticate a signature or prove that a
 installed Codex binary came from the stated upstream commit.
 
 The scope requires the actual producer and helper to use qualified matching
-storage locations. Runtime admission covers local stock Codex 0.166.0 persistent
-public CLI and app-server workflows, with MAv1 and MAv2 qualified separately.
+storage locations. For 0.5.1, runtime admission covers local stock Codex 0.166.0
+persistent public CLI and app-server workflows, with MAv1 and MAv2 qualified
+separately.
 The helper holds maintenance and complete root and spawn-descendant writer/lifecycle
 ownership through fresh closure and effect checks. `Open` and `Closed` spawn
 markers describe relationships rather than prove inactivity. Custom internal host

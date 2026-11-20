@@ -134,10 +134,13 @@ A digest becomes selectable
 only when the Python contract resource records its qualification. Source profile
 qualification and installation are separate operations.
 
-The validator accepts only the exact deployed state schema through migration 62
-and the pinned exact companion database schemas. These deployed DDL and checksum
-identities are qualification inputs. Different schemas, triggers or migrations
-refuse cleanup; no additional schema variant is qualified.
+The 0.5.2 validator uses the exact state schema through migration 64,
+thread history schema through migration 9 and the pinned exact companion database
+schemas. The helper bundles SQLite 3.54.1; the Python application also uses
+SQLite 3.54.1. Local artifacts have been verified; publication and public
+installation remain separate prerequisites. The exact
+DDL and checksum identities are qualification inputs. Different schemas, triggers or migrations
+refuse cleanup; no additional schema variant is admitted by this profile.
 The exact board schema includes `board_templates` and nullable
 `channels.description`. Only a selected root's template rows enter its declared
 board effects; selecting a child preserves its parent's template. Opaque retained
@@ -200,8 +203,9 @@ physical member and match that member's SQL/header provenance; a missing current
 pointer cannot make all members historical. Incoming spawn edges refuse this
 exception. Exact declared supplemental writer paths remain mandatory.
 
-The admission boundary covers qualified local stock Codex 0.166.0 persistent
-public CLI and app-server workflows, with MAv1 and MAv2 qualified separately.
+The historical 0.5.1 admission boundary covers qualified local stock Codex
+0.166.0 persistent public CLI and app-server workflows, with MAv1 and MAv2
+qualified separately.
 The helper acquires maintenance and writer/lifecycle ownership of the root and
 all actual spawn descendants in deterministic order; a busy member refuses that
 work before effects. It holds those guards through fresh closure, identity,
@@ -219,8 +223,14 @@ closure members stay locked; selected state rows and the work root remain
 mandatory. Historical names remain untouched. Ambiguous multi-database commit
 evidence reports UNKNOWN rather than claiming rollback.
 
-Qualification receipts remain attributed to the actual source and binary tested.
-The helper with SHA-256
+The locally verified 0.5.2 helper has SHA-256
+`cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc`.
+Its source inputs and bounded target-runtime observations are described in
+[compatibility](../docs/compatibility.md); a build alone does not qualify it.
+Unknown Guardian sources, including `Internal`, remain protected.
+
+Historical qualification receipts remain attributed to the actual source and
+binary tested. The helper with SHA-256
 `7b6c5065a903463e9b58baa0cf525ed2858c97934b6569fb8a5880d4eadb92ff`
 and profile SHA-256
 `fe850b5f2cefa78ca6c14f2aa74fa7926818819b1d8a76d6b281044d97772867`
@@ -341,21 +351,21 @@ source is intended for maintainers changing or validating the native contract.
 A digest mismatch remains a refusal, even after a successful build.
 
 Run these commands from the source checkout after the candidate helper and exact
-bundled profile have been qualified and the package version is set to 0.5.0. Synchronize the Python development environment
-and build the source distribution first. The
+bundled profile have been qualified and the package version is set to 0.5.2.
+Synchronize the Python development environment and build the source distribution first. The
 commands below assume the already-qualified release helper has been retained at
 `/absolute/qualified/codex-session-gc-native` and the output directories are absent:
 
 ```sh
 set -eu
 uv sync --locked --group build --no-install-project --no-build --no-python-downloads
-test ! -e build/release-0.5.0
-mkdir -p build/release-0.5.0
-uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.5.0
-uv build --wheel build/release-0.5.0/codex_session_gc-0.5.0.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.5.0
-PYTHONPATH=src .venv/bin/python -m tools.build_release --wheel build/release-0.5.0/codex_session_gc-0.5.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.5.0/codex-session-gc-0.5.0-linux-x86_64
-PYTHONPATH=src .venv/bin/python -m tools.ci_release --sdist build/release-0.5.0/codex_session_gc-0.5.0.tar.gz --wheel build/release-0.5.0/codex_session_gc-0.5.0-py3-none-any.whl --bundle build/release-0.5.0/codex-session-gc-0.5.0-linux-x86_64 --helper /absolute/qualified/codex-session-gc-native
-PYTHONPATH=src .venv/bin/python -m tools.build_installer --output "$PWD/build/release-0.5.0/codex-session-gc-installer-0.5.0.pyz"
+test ! -e build/release-0.5.2
+mkdir -p build/release-0.5.2
+uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.5.2
+uv build --wheel build/release-0.5.2/codex_session_gc-0.5.2.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.5.2
+PYTHONPATH=src .venv/bin/python -m tools.build_release --wheel build/release-0.5.2/codex_session_gc-0.5.2-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.5.2/codex-session-gc-0.5.2-linux-x86_64
+PYTHONPATH=src .venv/bin/python -m tools.ci_release --sdist build/release-0.5.2/codex_session_gc-0.5.2.tar.gz --wheel build/release-0.5.2/codex_session_gc-0.5.2-py3-none-any.whl --bundle build/release-0.5.2/codex-session-gc-0.5.2-linux-x86_64 --helper /absolute/qualified/codex-session-gc-native
+PYTHONPATH=src .venv/bin/python -m tools.build_installer --output "$PWD/build/release-0.5.2/codex-session-gc-installer-0.5.2.pyz"
 ```
 
 The build group pins the existing Hatchling backend in `pyproject.toml`; its
@@ -386,9 +396,9 @@ shared archiver writes the v2 manifest before the payload and checks the archive
 against it; use the same archiver for local and CI releases:
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m tools.build_release --archive build/release-0.5.0/codex-session-gc-0.5.0-linux-x86_64 --output build/release-0.5.0/codex-session-gc-0.5.0-linux-x86_64.tar.gz
-cd build/release-0.5.0
-sha256sum codex-session-gc-0.5.0-linux-x86_64.tar.gz codex_session_gc-0.5.0-py3-none-any.whl codex_session_gc-0.5.0.tar.gz codex-session-gc-installer-0.5.0.pyz > SHA256SUMS
+PYTHONPATH=src .venv/bin/python -m tools.build_release --archive build/release-0.5.2/codex-session-gc-0.5.2-linux-x86_64 --output build/release-0.5.2/codex-session-gc-0.5.2-linux-x86_64.tar.gz
+cd build/release-0.5.2
+sha256sum codex-session-gc-0.5.2-linux-x86_64.tar.gz codex_session_gc-0.5.2-py3-none-any.whl codex_session_gc-0.5.2.tar.gz codex-session-gc-installer-0.5.2.pyz > SHA256SUMS
 ```
 
 Ship those four assets and `SHA256SUMS` together with the same version/tag.
