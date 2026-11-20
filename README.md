@@ -173,6 +173,29 @@ saved receipt records a past verification and is not fresh authentication or
 cleanup authority. Local profile, helper and database observations stay separate.
 See [compatibility](docs/compatibility.md) for the supported boundary.
 
+## Inspect disk usage
+
+The current source checkout supports a whole-home storage overview.
+
+```sh
+codex-session-gc storage --home /absolute/codex-home
+codex-session-gc storage --home /absolute/codex-home --json --objects missing
+```
+
+The command shows logical regular-file bytes and filesystem-reported allocated
+bytes. The totals include history directories, database files and sidecars,
+packages, worktrees, cache, plugins, and other entries. Hard-linked names share
+one contribution. The overview counts a symbolic link itself and stops at
+other mount boundaries.
+
+With `--objects`, page through physical history names using `--offset` and
+`--limit`. Each CLI invocation makes a fresh observation. An owner marked
+`missing` was absent from the complete SQL owner observation. The report shows
+unknown associations and observation gaps explicitly. File and SQL observations
+have separate intervals. Normal SQLite WAL coordination can create or update
+sidecar files. The overview supports inspection. Cleanup uses separate selection and
+confirmation commands.
+
 ## Browse and select
 
 The browser opens with the largest work groups first. Works mode keeps expandable
