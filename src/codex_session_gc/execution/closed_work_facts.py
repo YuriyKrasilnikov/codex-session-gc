@@ -10,10 +10,11 @@ can approve deletion. Selection here remains conditional on that validation.
 
 from __future__ import annotations
 
-import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
+
+from codex_session_gc import sqlite_engine as sqlite3
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -133,7 +133,25 @@ def runtime_lock(root: Path) -> bytes:
         check=True,
         timeout=30,
     )
+    # Only the qualified CPython 3.14 Linux x86-64 wheel is admitted.
     raw = result.stdout
+    if not raw or len(raw) > 1024 * 1024:
+        raise ValueError("Runtime export is empty or exceeds the 1 MiB bound.")
+    wheel_hash = "4766d49c3a6ae9a94ac73fdd020deacd92ab7b28dbaa74345dd8670479ca0ec5"
+    logical_lines = raw.decode().replace("\\\n", " ").splitlines()
+    matched = 0
+    for index, line in enumerate(logical_lines):
+        if line.startswith("pysqlite3=="):
+            if (
+                not line.startswith("pysqlite3==0.6.2 ")
+                or f"--hash=sha256:{wheel_hash}" not in line.split()
+            ):
+                raise ValueError("The qualified SQLite wheel is absent from the runtime lock.")
+            logical_lines[index] = f"pysqlite3==0.6.2 --hash=sha256:{wheel_hash}"
+            matched += 1
+    if matched != 1:
+        raise ValueError("The runtime lock must contain the qualified SQLite wheel exactly once.")
+    raw = ("\n".join(logical_lines) + "\n").encode()
     if not raw or len(raw) > 1024 * 1024:
         raise ValueError("Runtime export is empty or exceeds the 1 MiB bound.")
     logical = raw.decode().replace("\\\n", " ")

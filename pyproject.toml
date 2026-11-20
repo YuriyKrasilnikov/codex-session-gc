@@ -18,6 +18,7 @@ classifiers = [
 dependencies = [
     "textual>=8.2.8,<9",
     "mcp>=2.3.0,<3",
+    "pysqlite3==0.6.2",
 ]
 
 [project.urls]
@@ -51,6 +52,7 @@ only-include = [
     "NOTICE",
     "third_party",
     "src/codex_session_gc",
+    "typings",
     "README.md",
     "docs/contract.md",
     "docs/recovery.md",
@@ -118,7 +120,7 @@ convention = "google"
 
 [tool.mypy]
 python_version = "3.14"
-mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src:$MYPY_CONFIG_FILE_DIR/typings"
 explicit_package_bases = true
 strict = true
 warn_unreachable = true

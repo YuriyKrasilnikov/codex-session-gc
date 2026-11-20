@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from codex_session_gc import sqlite_engine
 from codex_session_gc.execution import closed_work_request as collector
 from codex_session_gc.execution.closed_work_facts import read_closed_work_facts
 from codex_session_gc.planning.closed_work import select_closed_work
@@ -149,7 +150,7 @@ def test_live_wal_read_transaction_is_stable_and_query_only(tmp_path: Path) -> N
                 ).fetchone()
                 == old
             )
-            with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            with pytest.raises(sqlite_engine.OperationalError, match="readonly"):
                 reader.execute("DELETE FROM threads")
 
 
