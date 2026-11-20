@@ -35,6 +35,8 @@ from codex_session_gc.cli.console_tasks import (
     confirmed_intent,
     parse_cutoff,
 )
+from codex_session_gc.cli.storage_screen import StorageScreen
+from codex_session_gc.cli.storage_service import StorageService
 from codex_session_gc.domain import ArchiveState, ThreadId, UtcCutoff
 from codex_session_gc.execution.progress import ProgressChannel, ProgressEvent, ProgressKind
 from codex_session_gc.inventory.catalogue import SessionCatalogue, read_session_catalogue
@@ -130,6 +132,7 @@ class SessionApp(App[tuple[str, int]]):
         """Bind one home and frozen selection without storage I/O."""
         super().__init__()
         self.home, self.cutoff, self.helper, self.receipts = home, cutoff, helper, receipts
+        self.storage = StorageService(home)
         self.index: CatalogueIndex | None = None
         self.catalogue: SessionCatalogue | None = None
         self.groups: tuple[CatalogueGroup, ...] = ()
@@ -251,6 +254,7 @@ class SessionApp(App[tuple[str, int]]):
             yield Button("Cancel / Back", id="cancel")
             yield Button("Execute DELETE", id="execute", variant="error")
             yield Button("Refresh", id="refresh")
+            yield Button("Storage", id="storage")
             yield Button("Quit", id="quit")
         yield Footer()
 
@@ -269,6 +273,8 @@ class SessionApp(App[tuple[str, int]]):
     async def _check_interrupt(self) -> None:
         if self.interrupt_requested and not self.dispatching:
             self.interrupt_requested = False
+            if isinstance(self.screen, StorageScreen):
+                await self.screen.action_back()
             await self.action_quit()
 
     def _notice(self, text: str) -> None:
@@ -575,7 +581,7 @@ class SessionApp(App[tuple[str, int]]):
             if current:
                 self._select((current[0],), current[1])
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
         """Route explicit browsing and execution actions."""
         action = event.button.id
         if self.dispatching:
@@ -586,7 +592,12 @@ class SessionApp(App[tuple[str, int]]):
             return
         if self.review_open and action not in {"cancel", "quit", "execute"}:
             return
-        if action == "select":
+        if action == "storage":
+            if self.load_task is not None and not self.load_task.done():
+                self._notice("Wait for the catalogue to finish loading before opening Storage.")
+            else:
+                self.push_screen(StorageScreen(self.storage))
+        elif action == "select":
             self._select(self.groups)
         elif action == "clear":
             self.selected.clear()
@@ -616,7 +627,7 @@ class SessionApp(App[tuple[str, int]]):
         self.query_one("#confirm", Input).value = ""
         self.query_one("#confirm").display = False
         self.query_one("#execute").display = False
-        for identifier in ("select", "clear", "refresh", "preview"):
+        for identifier in ("select", "clear", "refresh", "preview", "storage"):
             self.query_one("#" + identifier, Button).disabled = enabled
         for widget in self.query(".filters Input, .filters Select"):
             widget.disabled = enabled
@@ -741,6 +752,7 @@ class SessionApp(App[tuple[str, int]]):
     async def on_unmount(self) -> None:
         """Join owned work even if framework teardown bypasses ordinary quit actions."""
         self.catalogue_teardown = True
+        await self.storage.close()
         if self.preview_task is not None and not self.preview_task.done():
             self.preview_task.cancel()
             with suppress(asyncio.CancelledError):

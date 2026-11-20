@@ -96,6 +96,20 @@ def _data(result: CallToolResult) -> dict[str, Any]:
     return json.loads(result.content[0].text)  # type: ignore[union-attr,no-any-return]
 
 
+async def _assert_storage_pages(session: ClientSession) -> None:
+    overview = _data(await session.call_tool("storage_overview", {}))
+    snapshot = overview["storage_snapshot_id"]
+    assert snapshot.startswith("storage/")
+    assert overview["totals"]["unique_objects"] > 0
+    page = _data(
+        await session.call_tool("storage_objects", {"storage_snapshot_id": snapshot, "limit": 1})
+    )
+    assert page["storage_snapshot_id"] == snapshot
+    assert len(page["items"]) == 1
+    assert page["items"][0]["display_path"].startswith("sessions/")
+    assert _data(await session.call_tool("storage_overview", {}))["storage_snapshot_id"] == snapshot
+
+
 def test_cache_exact_pages_refresh_and_bounded_details(tmp_path: Path) -> None:
     _home(tmp_path)
 
@@ -140,8 +154,11 @@ def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> N
             initialized = await session.initialize()
             assert initialized.protocol_version == mcp.client.session.LATEST_HANDSHAKE_VERSION
             assert session.protocol_version == initialized.protocol_version
+            await _assert_storage_pages(session)
             tools = await session.list_tools()
             assert {tool.name for tool in tools.tools} == {
+                "storage_overview",
+                "storage_objects",
                 "query_catalogue",
                 "session_details",
                 "prepare_cleanup",
@@ -228,8 +245,11 @@ def test_read_only_sdk_exposes_observation_without_cleanup_operation_or_receipt(
         )
         async with stdio_client(parameters) as (read, write), ClientSession(read, write) as session:
             await session.initialize()
+            await _assert_storage_pages(session)
             tools = await session.list_tools()
             assert {tool.name for tool in tools.tools} == {
+                "storage_overview",
+                "storage_objects",
                 "query_catalogue",
                 "session_details",
                 "prepare_cleanup",
