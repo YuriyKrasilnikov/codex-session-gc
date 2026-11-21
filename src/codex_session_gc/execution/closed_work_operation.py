@@ -47,6 +47,7 @@ from codex_session_gc.execution.resource_policy import (
     dispatch_limits,
 )
 from codex_session_gc.execution.selection_provenance import check_reviewed_associations
+from codex_session_gc.execution.timing import Count, Phase, count, interval
 from codex_session_gc.planning.closed_work import select_closed_work
 from codex_session_gc.recovery import AttemptId, TerminalKind, inspect
 
@@ -262,7 +263,7 @@ def execute(
     return report, _exit(str(report["outcome"]))
 
 
-def _apply(
+def _apply(  # noqa: PLR0915
     arguments: ExecutionRequest,
     helper: QualifiedHelperContract,
     limits: tuple[CollectionLimits, DispatchLimits],
@@ -279,58 +280,65 @@ def _apply(
     facts = read_closed_work_facts(arguments.home, arguments.cutoff, roots, selected, collection)
     report["initialInventoryResourceBounded"] = True
     report["initialIncomingReferencesComplete"] = facts.incoming_references_complete
-    combined = select_closed_work(
-        facts.snapshot,
-        facts.cutoff,
-        roots,
-        selected_threads=selected,
-        physical_inventory=facts.physical_inventory,
-    )
-    _confirmed_context(arguments, helper)
-    _reviewed_context(arguments, facts, combined, arguments.home, collection)
-    if combined.errors:
-        report["selectionErrors"] = list(combined.errors)
-        report["requestedRoots"] = sorted(str(x.value) for x in roots)
-        return
-    selections = []
-    for root in sorted(roots):
-        one = select_closed_work(
+    with interval(Phase.SELECTION_MANIFEST):
+        combined = select_closed_work(
             facts.snapshot,
             facts.cutoff,
-            frozenset({root}),
+            roots,
+            selected_threads=selected,
             physical_inventory=facts.physical_inventory,
         )
-        if selected is not None:
+        with interval(Phase.CONFIRMATION):
+            _confirmed_context(arguments, helper)
+            _reviewed_context(arguments, facts, combined, arguments.home, collection)
+        if combined.errors:
+            report["selectionErrors"] = list(combined.errors)
+            report["requestedRoots"] = sorted(str(x.value) for x in roots)
+            return
+        selections = []
+        for root in sorted(roots):
             one = select_closed_work(
                 facts.snapshot,
                 facts.cutoff,
-                one.roots,
-                selected_threads=selected & one.ownership_scope,
+                frozenset({root}),
                 physical_inventory=facts.physical_inventory,
             )
-        selections.append(one)
-    rows = [_selection(selection) for selection in selections]
-    report["roots"] = rows
-    eligible = tuple(x for x in selections if not x.errors and x.conditional_candidates)
-    if not eligible:
-        report["detail"] = "No eligible selected threads; no helper was dispatched."
-        return
-    declaration = arguments.declaration
-    attempt_id = arguments.attempt_id
-    if declaration is None:
-        binding = _fresh_binding(arguments, helper, facts, combined, collection)
-        declaration = binding.model_dump(mode="json")
-        attempt_id = AttemptId(UUID(binding.operation_id))
-        eligible = tuple(
-            select_closed_work(
-                facts.snapshot,
-                facts.cutoff,
-                selection.roots,
-                selected_threads=selection.conditional_candidates,
-                physical_inventory=facts.physical_inventory,
-            )
-            for selection in eligible
+            if selected is not None:
+                one = select_closed_work(
+                    facts.snapshot,
+                    facts.cutoff,
+                    one.roots,
+                    selected_threads=selected & one.ownership_scope,
+                    physical_inventory=facts.physical_inventory,
+                )
+            selections.append(one)
+        rows = [_selection(selection) for selection in selections]
+        report["roots"] = rows
+        eligible = tuple(x for x in selections if not x.errors and x.conditional_candidates)
+        count(Count.ROOTS, len(roots))
+        count(
+            Count.CANDIDATES, sum(len(selection.conditional_candidates) for selection in eligible)
         )
+        if not eligible:
+            report["detail"] = "No eligible selected threads; no helper was dispatched."
+            return
+        declaration = arguments.declaration
+        attempt_id = arguments.attempt_id
+        if declaration is None:
+            with interval(Phase.CONFIRMATION):
+                binding = _fresh_binding(arguments, helper, facts, combined, collection)
+            declaration = binding.model_dump(mode="json")
+            attempt_id = AttemptId(UUID(binding.operation_id))
+            eligible = tuple(
+                select_closed_work(
+                    facts.snapshot,
+                    facts.cutoff,
+                    selection.roots,
+                    selected_threads=selection.conditional_candidates,
+                    physical_inventory=facts.physical_inventory,
+                )
+                for selection in eligible
+            )
     eligible_roots = {next(iter(selection.roots)) for selection in eligible}
     uncertain_rows = [
         row
@@ -361,7 +369,8 @@ def _apply(
         native = results.get(next(iter(selection.roots)))
         if native is not None:
             _root_result(row, native)
-    (stored,) = inspect(arguments.receipt)
+    with interval(Phase.FINAL_RECEIPT_OBSERVE):
+        (stored,) = inspect(arguments.receipt)
     skipped = saved_skipped_roots(stored)
     projected = project_operation_status(stored, skipped_roots=skipped)
     report.update(

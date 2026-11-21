@@ -36,6 +36,7 @@ from codex_session_gc.execution.closed_work_request import (
     _empty_descriptor,
     _observe_header_descriptor,
 )
+from codex_session_gc.execution.timing import Count, count
 from codex_session_gc.planning.physical_lineage import normalize_history_providers
 
 if TYPE_CHECKING:
@@ -189,7 +190,7 @@ def _metadata(header: HeaderObservation, representation: PhysicalRepresentation)
     )
 
 
-def observe_inventory(  # noqa: C901
+def observe_inventory(  # noqa: C901, PLR0915
     home: Path,
     current_rows: Mapping[str, Mapping[str, object]],
     capture_owners: frozenset[ThreadId],
@@ -205,63 +206,73 @@ def observe_inventory(  # noqa: C901
     unresolved_empty_rollouts = []
     headers = {}
     seen = set()
-    with closing(_files(home)) as entries:
-        for entry in entries:
-            budget.check()
-            with _leaf(entry) as descriptor:
-                path = entry.path
-                representation = (
-                    PhysicalRepresentation.ZSTD
-                    if path.name.endswith(".jsonl.zst")
-                    else PhysicalRepresentation.PLAIN
-                )
-                empty = _empty_descriptor(path, descriptor)
-                try:
-                    ownership = ownership_from_path(path, representation)
-                except InvalidRecordError:
-                    if empty:
-                        continue
-                    raise
-                if ownership.rollout_id in seen:
-                    message = "One physical rollout has duplicate or competing representations."
-                    raise PreparationRefused(message)
-                seen.add(ownership.rollout_id)
-                if empty:
-                    row = current_rows.get(str(ownership.thread_id.value))
-                    raw = None if row is None else Path(str(row["rollout_path"]))
-                    plain = (
-                        path.with_suffix("")
-                        if representation is PhysicalRepresentation.ZSTD
-                        else path
+    entries_seen = 0
+    headers_read = 0
+    initial_used = budget.used
+    try:
+        with closing(_files(home)) as entries:
+            for entry in entries:
+                entries_seen += 1
+                budget.check()
+                with _leaf(entry) as descriptor:
+                    path = entry.path
+                    representation = (
+                        PhysicalRepresentation.ZSTD
+                        if path.name.endswith(".jsonl.zst")
+                        else PhysicalRepresentation.PLAIN
                     )
-                    if ownership.thread_id in capture_owners or raw in (
-                        plain,
-                        plain.with_name(plain.name + ".zst"),
-                    ):
-                        message = "A selected or current physical history is empty."
+                    empty = _empty_descriptor(path, descriptor)
+                    try:
+                        ownership = ownership_from_path(path, representation)
+                    except InvalidRecordError:
+                        if empty:
+                            continue
+                        raise
+                    if ownership.rollout_id in seen:
+                        message = "One physical rollout has duplicate or competing representations."
                         raise PreparationRefused(message)
-                    unresolved_empty_rollouts.append(path)
-                    continue
-                selected = ownership.thread_id in capture_owners
-                header = _observe_header_descriptor(
-                    path,
-                    descriptor,
-                    budget,
-                    require_stable_extent=selected,
-                    enforce_extent_limit=selected,
-                )
-                item = _metadata(header, representation)
-                items.append(item)
-                row = current_rows.get(str(ownership.thread_id.value))
-                if row is not None and ownership.thread_id in capture_owners:
-                    raw = Path(str(row["rollout_path"]))
-                    plain = (
-                        path.with_suffix("")
-                        if representation is PhysicalRepresentation.ZSTD
-                        else path
+                    seen.add(ownership.rollout_id)
+                    if empty:
+                        row = current_rows.get(str(ownership.thread_id.value))
+                        raw = None if row is None else Path(str(row["rollout_path"]))
+                        plain = (
+                            path.with_suffix("")
+                            if representation is PhysicalRepresentation.ZSTD
+                            else path
+                        )
+                        if ownership.thread_id in capture_owners or raw in (
+                            plain,
+                            plain.with_name(plain.name + ".zst"),
+                        ):
+                            message = "A selected or current physical history is empty."
+                            raise PreparationRefused(message)
+                        unresolved_empty_rollouts.append(path)
+                        continue
+                    selected = ownership.thread_id in capture_owners
+                    header = _observe_header_descriptor(
+                        path,
+                        descriptor,
+                        budget,
+                        require_stable_extent=selected,
+                        enforce_extent_limit=selected,
                     )
-                    if raw in (plain, plain.with_name(plain.name + ".zst")):
-                        headers[path] = header
+                    headers_read += 1
+                    item = _metadata(header, representation)
+                    items.append(item)
+                    row = current_rows.get(str(ownership.thread_id.value))
+                    if row is not None and ownership.thread_id in capture_owners:
+                        raw = Path(str(row["rollout_path"]))
+                        plain = (
+                            path.with_suffix("")
+                            if representation is PhysicalRepresentation.ZSTD
+                            else path
+                        )
+                        if raw in (plain, plain.with_name(plain.name + ".zst")):
+                            headers[path] = header
+    finally:
+        count(Count.INVENTORY_ENTRIES, entries_seen)
+        count(Count.HEADERS_READ, headers_read)
+        count(Count.INVENTORY_BUDGET_BYTES, budget.used - initial_used)
     pointers = []
     for owner, row in current_rows.items():
         raw = Path(str(row["rollout_path"]))
