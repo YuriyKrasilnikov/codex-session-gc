@@ -36,6 +36,7 @@ class StorageDiagnosticScreen(Screen[None]):
     #diagnostic-summary { height: auto; max-height: 35%; overflow-y: auto; }
     #diagnostic-rows { height: 1fr; }
     #diagnostic-controls { height: 3; }
+    #diagnostic-controls Button { width: 1fr; min-width: 8; }
     """
 
     def __init__(self, service: StorageService, snapshot_id: str, subject_id: str | None) -> None:
@@ -44,7 +45,10 @@ class StorageDiagnosticScreen(Screen[None]):
         self._service = service
         self._snapshot_id = snapshot_id
         self._subject_id = subject_id
+        self._physical_id: str | None = None
         self._summary: dict[str, Any] | None = None
+        self._providers = False
+        self._problems_only = True
         self._scan: asyncio.Task[None] | None = None
         self._offset = 0
         self._next_offset: int | None = None
@@ -64,6 +68,7 @@ class StorageDiagnosticScreen(Screen[None]):
             yield Button("Prev", id="diagnostic-prev", disabled=True)
             yield Button("Next", id="diagnostic-next", disabled=True)
             yield Button("Problems", id="diagnostic-problems")
+            yield Button("Providers", id="diagnostic-providers")
             yield Button("Back", id="diagnostic-back")
 
     def on_mount(self) -> None:
@@ -72,11 +77,17 @@ class StorageDiagnosticScreen(Screen[None]):
         self._scan = asyncio.create_task(self._load())
 
     async def _load(self) -> None:
+        providers = self.query_one("#diagnostic-providers", Button)
+        providers.disabled = True
         try:
-            self._summary = await self._service.diagnostics(self._snapshot_id)
+            self._summary = await self._service.diagnostics(
+                self._snapshot_id, providers=self._providers
+            )
         except (OSError, ValueError) as error:
             self._show_error(error)
             return
+        finally:
+            providers.disabled = False
         self._render_page()
 
     def _show_error(self, error: Exception) -> None:
@@ -87,7 +98,10 @@ class StorageDiagnosticScreen(Screen[None]):
     def _page(self, diagnostic_id: str) -> dict[str, Any]:
         if self._subject_id is None:
             return self._service.diagnostic_subjects(
-                diagnostic_id, reason="problems", offset=self._offset, limit=PAGE_LIMIT
+                diagnostic_id,
+                reason="problems" if self._problems_only else "all",
+                offset=self._offset,
+                limit=PAGE_LIMIT,
             )
         return self._service.explain(
             diagnostic_id,
@@ -116,7 +130,12 @@ class StorageDiagnosticScreen(Screen[None]):
             f"{name} {state}" for name, state in self._summary["coverage"].items()
         )
         subject = page.get("subject")
-        heading = diagnostic_subject_line(subject) if subject else "Observed problems"
+        self._physical_id = subject["object_id"] if subject is not None else None
+        heading = (
+            diagnostic_subject_line(subject)
+            if subject is not None
+            else ("Observed problems" if self._problems_only else "Observed subjects")
+        )
         self.query_one("#diagnostic-summary", Static).update(
             Text(f"{heading}\n{coverage}\n{page['total_matching']} observed")
         )
@@ -158,8 +177,20 @@ class StorageDiagnosticScreen(Screen[None]):
                 await self.action_back()
             case "diagnostic-problems":
                 self._subject_id = None
+                self._problems_only = True
                 self._offset = 0
                 self._render_page()
+            case "diagnostic-providers" if self._scan is None or self._scan.done():
+                self._providers = not self._providers
+                self._subject_id = self._physical_id
+                self._problems_only = not self._providers
+                self._summary = None
+                self._offset = 0
+                self._next_offset = None
+                self.query_one(DataTable).clear()
+                self.query_one("#diagnostic-summary", Static).update("Reading diagnostic evidence…")
+                event.button.label = "SQL evidence" if self._providers else "Providers"
+                self._scan = asyncio.create_task(self._load())
             case "diagnostic-prev" if self._offset:
                 self._offset = max(0, self._offset - PAGE_LIMIT)
                 self._render_page()

@@ -40,6 +40,8 @@ _DIRECTORIES = _HISTORY_CATEGORIES | {"packages", "worktrees", "cache", "plugins
 _DISPLAY_LIMIT = 500
 _DIAGNOSTIC_PATH_COUNT = 25_000
 _DIAGNOSTIC_PATH_BYTES = 8 * 1024 * 1024
+_HEADER_LOCATOR_NODES = 25_000
+_HEADER_LOCATOR_BYTES = 8 * 1024 * 1024
 _BYTES_PER_BLOCK = 512
 _SURROGATE_BASE = 0xDC00
 _BYTE_SURROGATES = range(0xDC80, 0xDD00)
@@ -162,6 +164,9 @@ class StorageSnapshot:
     _diagnostic_paths: tuple[tuple[str, ...] | None, ...] = ()
     _history_names_observed: int = 0
     _sql_scan: StorageScan | None = None
+    _header_scan: StorageScan | None = None
+    _header_names_complete: bool = False
+    _provider_names_complete: bool = False
 
     def summary(self) -> dict[str, Any]:
         """Return summary values without sharing the observation's state."""
@@ -484,6 +489,49 @@ def observe_storage(
         )
     )
     source_scan = StorageScan(scan.home, scan.home_identity, source_entries, scan.root_complete, ())
+    # Charge each unique retained prefix, including the leaf, independently.
+    needed: set[tuple[str, ...]] = set()
+    locator_bytes = 0
+    locator_complete = True
+    for parts in diagnostic_paths:
+        _check_cancelled(stop)
+        if parts is None:
+            locator_complete = False
+            continue
+        fresh = [parts[:index] for index in range(len(parts) + 1) if parts[:index] not in needed]
+        cost = sum(max(1, sum(len(os.fsencode(part)) + 1 for part in prefix)) for prefix in fresh)
+        if (
+            len(needed) + len(fresh) > _HEADER_LOCATOR_NODES
+            or locator_bytes + cost > _HEADER_LOCATOR_BYTES
+        ):
+            locator_complete = False
+            continue
+        needed.update(fresh)
+        locator_bytes += cost
+    header_entries = tuple(entry for entry in scan.entries if entry.parts in needed)
+    header_scan = StorageScan(scan.home, scan.home_identity, header_entries, scan.root_complete, ())
+    unsupported_names = any(
+        entry.parts
+        and entry.parts[0] in _HISTORY_CATEGORIES
+        and entry.parts[-1].endswith((".jsonl", ".jsonl.zst"))
+        and not stat.S_ISREG(entry.stat.st_mode)
+        for entry in scan.entries
+    )
+    header_names_complete = (
+        summary.history_coverage == "complete"
+        and not unsupported_names
+        and locator_complete
+        and len(diagnostic_paths) == len(rows)
+        and all(parts is not None for parts in diagnostic_paths)
+    )
     return StorageSnapshot(
-        f"storage/{uuid4()}", summary, rows, diagnostic_paths, len(rows) + omitted, source_scan
+        f"storage/{uuid4()}",
+        summary,
+        rows,
+        diagnostic_paths,
+        len(rows) + omitted,
+        source_scan,
+        header_scan,
+        header_names_complete,
+        summary.history_coverage == "complete" and not unsupported_names,
     )

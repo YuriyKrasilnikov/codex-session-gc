@@ -156,6 +156,9 @@ def _storage_diagnostic_arguments(parser: argparse.ArgumentParser) -> None:
     lookup.add_argument("--rollout", type=RolloutId.parse)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument(
+        "--providers", action="store_true", help="Inspect verified history headers for providers"
+    )
 
 
 def _parser() -> argparse.ArgumentParser:  # noqa: PLR0915
