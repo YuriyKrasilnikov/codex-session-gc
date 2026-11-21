@@ -30,7 +30,7 @@ from codex_session_gc.compatibility.store import (
     read_support,
     recorded_origin,
 )
-from codex_session_gc.domain import RolloutId, ThreadId, UtcCutoff
+from codex_session_gc.domain import ExactIds, RolloutId, ThreadId, UtcCutoff
 from codex_session_gc.execution.resource_policy import READ_BYTES, TIMEOUT_SECONDS
 from codex_session_gc.execution.timing import TimingObserver, observe
 from codex_session_gc.installation.__main__ import InstallerError
@@ -70,7 +70,7 @@ def _parse_thread(value: str) -> ThreadId:
 def _selection_arguments(parser: argparse.ArgumentParser) -> None:
     """Declare the explicit work roots, age and optional exact subset."""
     parser.add_argument("--home", type=Path, required=True)
-    parser.add_argument("--cutoff", type=_parse_cutoff, required=True)
+    parser.add_argument("--cutoff", type=_parse_cutoff)
     parser.add_argument("--closed-work", type=_parse_thread, action="append", required=True)
     parser.add_argument("--select-thread", type=_parse_thread, action="append")
 
@@ -256,9 +256,12 @@ def _parser() -> argparse.ArgumentParser:  # noqa: PLR0915
 def _preview(arguments: argparse.Namespace) -> tuple[dict[str, Any], int]:
     """Use the same scoped preview as the terminal and MCP interfaces."""
     try:
+        if arguments.cutoff is None and not arguments.select_thread:
+            message = "Without --cutoff, explicit --select-thread IDs are required."
+            raise ValueError(message)  # noqa: TRY301
         report = preview_selection(
             arguments.home.expanduser().resolve(),
-            arguments.cutoff,
+            arguments.cutoff or ExactIds(frozenset(arguments.select_thread)),
             frozenset(arguments.closed_work),
             frozenset(arguments.select_thread) if arguments.select_thread is not None else None,
         )

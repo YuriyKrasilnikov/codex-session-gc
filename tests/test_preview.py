@@ -16,7 +16,7 @@ import pytest
 from codex_session_gc.cli import console_tasks
 from codex_session_gc.cli.console_tasks import Intent, PreviewMode, confirmed_intent, preview
 from codex_session_gc.cli.main import main
-from codex_session_gc.domain import ThreadId, UtcCutoff
+from codex_session_gc.domain import ExactIds, ThreadId, UtcCutoff
 from codex_session_gc.execution.closed_work_facts import read_closed_work_facts
 from codex_session_gc.execution.closed_work_request import PreparationRefused
 from codex_session_gc.execution.resource_policy import collection_limits
@@ -276,3 +276,19 @@ def test_malformed_spawn_source_refuses_shared_facts_preview_and_public_plan(
     assert result["errors"] == [str(refused.value)]
     assert result["executable"] is False
     assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before
+
+
+def test_exact_policy_worker_payload_requires_explicit_cutoff(tmp_path: Path) -> None:
+    """Worker input cannot silently interpret an absent boundary as null."""
+    intent = work_home(tmp_path)
+    exact = Intent(intent.home, ExactIds(frozenset(intent.selected)), intent.roots, intent.selected)
+    assert exact.payload()["cutoff"] is None
+    report = preview(exact)
+    assert report["cutoff"] is None
+    assert report["deletions"] == [str(AGENT.value)]
+    payload = exact.payload()
+    del payload["cutoff"]
+    payload["mode"] = "observe"
+    (tmp_path / "input.json").write_text(json.dumps(payload))
+    console_tasks._worker(tmp_path)  # noqa: SLF001
+    assert "error" in json.loads((tmp_path / "result.json").read_text())

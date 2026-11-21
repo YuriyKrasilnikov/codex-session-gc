@@ -22,7 +22,7 @@ from codex_session_gc.execution.closed_work_request import (
 )
 from codex_session_gc.recovery import Payload
 
-WIRE_VERSION = 6
+WIRE_VERSION = 7
 CONTRACT_CONTENT_TYPE = "application/vnd.codex-session-gc.closed-work-contract+json"
 
 

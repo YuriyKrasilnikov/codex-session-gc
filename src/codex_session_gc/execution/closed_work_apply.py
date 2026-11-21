@@ -20,11 +20,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from codex_session_gc.domain import ExactIds
 from codex_session_gc.execution.closed_work_request import (
     ClosedWorkFacts,
     CollectionLimits,
     QualifiedHelperContract,
     prepare_request,
+    review_targets,
+)
+from codex_session_gc.execution.confirmed_declaration import (
+    saved_declaration,
+    validate_current_declaration,
 )
 from codex_session_gc.execution.launch import LaunchBinding
 from codex_session_gc.execution.one_shot import (
@@ -136,6 +142,8 @@ def _validate_apply_inputs(
     for path in paths:
         if not path.is_absolute():
             raise ValueError("All execution paths must be absolute.")
+    if isinstance(facts.cutoff, ExactIds) and paths[0] != paths[1]:
+        raise ValueError("Exact-ID apply requires the declared home for SQLite.")
     if not isinstance(default_provider, str) or not default_provider:
         raise ValueError("The store-default provider is required.")
     seen: set[ThreadId] = set()
@@ -154,6 +162,41 @@ def _validate_apply_inputs(
         if seen & selection.ownership_scope:
             raise ValueError("Work ownership scopes must be disjoint.")
         seen.update(selection.ownership_scope)
+
+
+def _validate_exact_declaration(  # noqa: PLR0917
+    facts: ClosedWorkFacts,
+    selections: tuple[ClosedWorkSelection, ...],
+    home: Path,
+    helper: QualifiedHelperContract,
+    limits: CollectionLimits,
+    attempt: AttemptId | None,
+    value: dict[str, object] | None,
+) -> None:
+    """Bind direct exact-ID dispatch to recoverable reviewed effects before launch."""
+    if not isinstance(facts.cutoff, ExactIds):
+        return
+    if attempt is None or value is None:
+        raise ValueError("Exact-ID apply requires its bound attempt and declaration.")
+    declaration = saved_declaration(value, attempt.value, helper)
+    metadata = home.stat()
+    validate_current_declaration(declaration, (metadata.st_dev, metadata.st_ino), helper)
+    approved = {str(item.value) for item in facts.cutoff.ids}
+    if declaration.cutoff is not None or not set(declaration.selected) <= approved:
+        raise ValueError("Exact-ID declaration differs from the caller's policy.")
+    targets = {item.thread_id: item for item in declaration.physical_manifest}
+    associations = {binding.association for binding in declaration.guardian_associations}
+    for selection in selections:
+        root = str(next(iter(selection.roots)).value)
+        if root not in declaration.roots or not {
+            str(item.value) for item in selection.requested_threads
+        } <= set(declaration.selected):
+            raise ValueError("Exact-ID unit exceeds its declaration.")
+        if not set(selection.guardian_associations) <= associations:
+            raise ValueError("Exact-ID Guardian associations differ from its declaration.")
+        for target in review_targets(facts, selection, home, limits):
+            if targets.get(target.thread_id) != target:
+                raise ValueError("Exact-ID physical target differs from its declaration.")
 
 
 def _validate_helper_descriptor(descriptor: int, helper: QualifiedHelperContract) -> None:
@@ -203,6 +246,9 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
                 (codex_home, sqlite_home, journal, helper_executable),
                 default_provider,
             )
+            _validate_exact_declaration(
+                facts, selections, codex_home, helper, collection_limits, attempt_id, declaration
+            )
             descriptor = os.open(helper_executable, os.O_RDONLY | os.O_NOFOLLOW)
             _validate_helper_descriptor(descriptor, helper)
             attempt = attempt_id or AttemptId(uuid4())
@@ -219,7 +265,11 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
                     "helper_sha256": helper.binary_sha256.hex(),
                     "source_identity": helper.source_identity,
                     "provider": default_provider,
-                    "cutoff": facts.cutoff.timestamp.isoformat(),
+                    "cutoff": (
+                        facts.cutoff.timestamp.isoformat()
+                        if hasattr(facts.cutoff, "timestamp")
+                        else None
+                    ),
                     "collection_limits": asdict(collection_limits),
                     "dispatch_limits": asdict(dispatch_limits),
                     "scopes": scopes,

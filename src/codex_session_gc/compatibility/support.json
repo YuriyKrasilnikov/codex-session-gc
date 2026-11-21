@@ -34,24 +34,28 @@
       "description": "Ordinary cache, plugin, process and output paths do not alias selected storage locations."
     }
   ],
-  "coverage_complete": true,
-  "coverage_gaps": [],
+  "coverage_complete": false,
+  "coverage_gaps": [
+    {
+      "description": "This record covers fixture evidence for the wire 7 helper. Stock lifecycle and installed-client qualification require separate evidence."
+    }
+  ],
   "execution": {
-    "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-    "native_inputs_sha256": "e254868253af0e6ff4ae459628a4d59b96f51e7489daf3a4334d27911ca91cb1",
-    "profile_sha256": "6ac727487130177d5a57e9b28fa497214c718b03bc51604717d0dba53cf367e3"
+    "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+    "native_inputs_sha256": "cc9d36f7590234d5bf619d7fac8852ed7a9a815d26617ea1c7cc2f119926a03c",
+    "profile_sha256": "ea5c41f89d0e1eddcdfe1b17a0aca45dc6a24555a6a2393d3c5605d0316762eb"
   },
   "record_version": 1,
-  "report_sha256": "496172df63121c685df2fbb818aac5da865d86145bc1e97684500e210a7dd6ab",
+  "report_sha256": "41ab03b18770aaa91f0edb9fc0a29192be889ca797dadae6d811539e7ae40e59",
   "review": {
-    "scope": "Selected technically stopped work in the qualified local persistent stock Codex 0.171.0 workflows on matching state and companion storage, after related metadata updates and history-reference publication finish. The observed cases cover a V1 legacy parent with a paginated child, V2 paginated and V2 legacy, and an excluded retained-fork provider.",
-    "source": "scoped-source-assessment:sha256:c323866791c57435efe5633dab591baddfc49966f19c49a95a0d4a0abaad8e58"
+    "scope": "The current record binds the exact wire-7 helper to native fixture observations. A new-binary stock lifecycle and installed-client assessment remains pending.",
+    "source": "native-fixture-evidence:sha256:41ab03b18770aaa91f0edb9fc0a29192be889ca797dadae6d811539e7ae40e59"
   },
   "source_origin": {
     "scope": "Selected technically stopped work in the qualified local persistent stock Codex 0.171.0 workflows on matching state and companion storage, after related metadata updates and history-reference publication finish. The observed cases cover a V1 legacy parent with a paginated child, V2 paginated and V2 legacy, and an excluded retained-fork provider.",
     "source": "https://github.com/openai/codex/tree/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e"
   },
-  "status": "supported_within_scope",
+  "status": "review_required",
   "target": {
     "observed_binary_sha256": null,
     "repository": "openai/codex",
@@ -62,32 +66,32 @@
   },
   "witnesses": [
     {
-      "reference": "native-qualification-id:sha256:7eb502ff2471ed4faeb701157f4490fe1b962b1130c33a140b57597e316850db",
-      "scope": "Exact helper, profile and native-input binding on the named local checks."
+      "reference": "native-qualification-id:sha256:d5bb5f2f864bef0cfa52ca92f9d8174d46b14ee4ef64adcbd7db1e9fc815bcf8",
+      "scope": "Exact wire-7 helper, profile, source inputs and bounded native fixture evidence."
     },
     {
       "reference": "stock-trace:sha256:56d2586336857f08f5320d117bb87c632e43b7b0243b6c7b68a86a1e446dbe36",
-      "scope": "Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session."
+      "scope": "Historical helper evidence: Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session."
     },
     {
       "reference": "stock-trace:sha256:860a9ec5af378bd1efb876855a829f930ccd42b6fa1602f7d6d9c35501919312",
-      "scope": "Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session."
+      "scope": "Historical helper evidence: Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session."
     },
     {
       "reference": "stock-retained-fork:sha256:3fa69d9913eb5f3deebfc20ff92de341fa3e52aed0b8ce4a0b2c4fbeed450ab5",
-      "scope": "Actual stock paginated fork creation and retained provider dependency at rest."
+      "scope": "Historical helper evidence: Actual stock paginated fork creation and retained provider dependency at rest."
     },
     {
       "reference": "installed-provider-plan:sha256:e46a94cbeb7b80dd33d01260237cb876fb0c6514b2708eb92cecbc1025b54081",
-      "scope": "Installed plan excluded the provider required by the retained fork before effects."
+      "scope": "Historical helper evidence: Installed plan excluded the provider required by the retained fork before effects."
     },
     {
       "reference": "installed-interface-checks:sha256:5e3d110c57408b85b447e927a219b111d6ee37eedb5f07a2a01436ae830474e5",
-      "scope": "Named installed CLI, Textual and MCP cleanup and receipt behavior with the final execution profile."
+      "scope": "Historical helper evidence: Named installed CLI, Textual and MCP cleanup and receipt behavior with the final execution profile."
     },
     {
       "reference": "scoped-source-assessment:sha256:c323866791c57435efe5633dab591baddfc49966f19c49a95a0d4a0abaad8e58",
-      "scope": "Selected technically stopped work in the qualified local persistent stock Codex 0.171.0 workflows on matching state and companion storage, after related metadata updates and history-reference publication finish. The observed cases cover a V1 legacy parent with a paginated child, V2 paginated and V2 legacy, and an excluded retained-fork provider."
+      "scope": "Historical helper evidence: Selected technically stopped work in the qualified local persistent stock Codex 0.171.0 workflows on matching state and companion storage, after related metadata updates and history-reference publication finish. The observed cases cover a V1 legacy parent with a paginated child, V2 paginated and V2 legacy, and an excluded retained-fork provider."
     }
   ]
 }

@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from codex_session_gc.domain import GuardianAssociation, ThreadId, UtcCutoff
+from codex_session_gc.domain import ExactIds, GuardianAssociation, ThreadId, UtcCutoff
 from codex_session_gc.execution.closed_work_apply import (
     ApplyPreflightRefusedError,
     DispatchLimits,
@@ -72,7 +72,7 @@ class ExecutionRequest:
     command: str
     receipt: Path
     home: Path | None = None
-    cutoff: UtcCutoff | None = None
+    cutoff: UtcCutoff | ExactIds | None = None
     closed_work: tuple[ThreadId, ...] = ()
     select_thread: tuple[ThreadId, ...] | None = None
     helper: Path | None = None
@@ -117,6 +117,14 @@ class ExecutionRequest:
         if not self.home.is_absolute() or not self.helper.is_absolute() or not self.home.is_dir():
             message = "Apply requires an existing absolute home and an absolute helper path."
             raise ValueError(message)
+        if type(self.cutoff) not in (UtcCutoff, ExactIds):
+            message = "Apply requires a typed age policy."
+            raise TypeError(message)
+        if isinstance(self.cutoff, ExactIds) and (
+            self.select_thread is None or frozenset(self.select_thread) != self.cutoff.ids
+        ):
+            message = "Exact IDs require the same explicit caller selection."
+            raise ValueError(message)
         if self.default_provider == "":
             message = "The default provider must be nonempty."
             raise ValueError(message)
@@ -134,7 +142,11 @@ def confirmed_execution_request(
         command="apply",
         receipt=receipt,
         home=home,
-        cutoff=UtcCutoff(datetime.fromisoformat(declaration.cutoff)),
+        cutoff=(
+            UtcCutoff(datetime.fromisoformat(declaration.cutoff))
+            if declaration.cutoff is not None
+            else ExactIds(frozenset(ThreadId.parse(value) for value in declaration.selected))
+        ),
         closed_work=tuple(ThreadId.parse(value) for value in declaration.roots),
         select_thread=tuple(ThreadId.parse(value) for value in declaration.selected),
         helper=helper,
@@ -158,11 +170,22 @@ def _limits(arguments: ExecutionRequest) -> tuple[CollectionLimits, DispatchLimi
     )
 
 
-def _selection(selection: ClosedWorkSelection) -> dict[str, Any]:
+def _selection(selection: ClosedWorkSelection, combined: ClosedWorkSelection) -> dict[str, Any]:
+    """Report the caller's scope while preserving the narrowed dispatch selection."""
+    retained = {item.thread_id: item for item in selection.retained}
+    retained.update(
+        {
+            item.thread_id: item
+            for item in combined.retained
+            if item.thread_id in selection.ownership_scope
+        }
+    )
     return {
         "root": str(next(iter(selection.roots)).value),
         "ownershipScope": sorted(str(x.value) for x in selection.ownership_scope),
-        "requestedThreads": sorted(str(x.value) for x in selection.requested_threads),
+        "requestedThreads": sorted(
+            str(x.value) for x in combined.requested_threads & selection.ownership_scope
+        ),
         "selectedThreads": sorted(str(x.value) for x in selection.conditional_candidates),
         "retained": [
             {
@@ -170,7 +193,7 @@ def _selection(selection: ClosedWorkSelection) -> dict[str, Any]:
                 "reason": x.reason.value,
                 "witness": str(x.witness.value) if x.witness else None,
             }
-            for x in selection.retained
+            for x in sorted(retained.values(), key=lambda item: item.thread_id)
         ],
         "selectionErrors": list(selection.errors),
         "unitId": None,
@@ -301,18 +324,18 @@ def _apply(  # noqa: PLR0915
                 facts.snapshot,
                 facts.cutoff,
                 frozenset({root}),
+                selected_threads=frozenset() if isinstance(facts.cutoff, ExactIds) else None,
                 physical_inventory=facts.physical_inventory,
             )
-            if selected is not None:
-                one = select_closed_work(
-                    facts.snapshot,
-                    facts.cutoff,
-                    one.roots,
-                    selected_threads=selected & one.ownership_scope,
-                    physical_inventory=facts.physical_inventory,
-                )
+            one = select_closed_work(
+                facts.snapshot,
+                facts.cutoff,
+                one.roots,
+                selected_threads=combined.conditional_candidates & one.ownership_scope,
+                physical_inventory=facts.physical_inventory,
+            )
             selections.append(one)
-        rows = [_selection(selection) for selection in selections]
+        rows = [_selection(selection, combined) for selection in selections]
         report["roots"] = rows
         eligible = tuple(x for x in selections if not x.errors and x.conditional_candidates)
         count(Count.ROOTS, len(roots))
@@ -531,7 +554,9 @@ def _fresh_binding(
         ReviewedSelection(
             roots=tuple(str(value.value) for value in sorted(selection.roots)),
             selected=tuple(target.thread_id for target in targets),
-            cutoff=facts.cutoff.timestamp.isoformat(),
+            cutoff=(
+                facts.cutoff.timestamp.isoformat() if isinstance(facts.cutoff, UtcCutoff) else None
+            ),
             physical_manifest=targets,
             guardian_associations=selection.guardian_associations,
         ),
@@ -555,7 +580,16 @@ def _confirmed_context(arguments: ExecutionRequest, helper: QualifiedHelperContr
         declaration.roots != tuple(str(value.value) for value in sorted(arguments.closed_work))
         or declaration.selected
         != tuple(str(value.value) for value in sorted(arguments.select_thread or ()))
-        or declaration.cutoff != arguments.cutoff.timestamp.isoformat()
+        or declaration.cutoff
+        != (
+            arguments.cutoff.timestamp.isoformat()
+            if isinstance(arguments.cutoff, UtcCutoff)
+            else None
+        )
+        or (
+            isinstance(arguments.cutoff, ExactIds)
+            and arguments.cutoff.ids != frozenset(arguments.select_thread or ())
+        )
         or manifest_bytes(declaration.physical_manifest) != arguments.reviewed_physical_manifest
         or tuple(binding.association for binding in declaration.guardian_associations)
         != arguments.reviewed_guardian_associations

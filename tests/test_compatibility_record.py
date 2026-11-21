@@ -266,9 +266,9 @@ def test_bundled_record_is_exact_scoped_unverified_claim() -> None:
         raise AssertionError
     checks = {item.field: item.state for item in observed.bindings.checks}
     if (
-        record.status is not SupportStatus.SUPPORTED_WITHIN_SCOPE
-        or not record.coverage_complete
-        or record.coverage_gaps
+        record.status is not SupportStatus.REVIEW_REQUIRED
+        or record.coverage_complete
+        or not record.coverage_gaps
         or not record.conditions
         or not record.witnesses
         or record.review is None

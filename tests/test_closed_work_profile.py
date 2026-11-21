@@ -24,7 +24,7 @@ def _document() -> dict[str, object]:
     """Synthetic decoder data, explicitly not helper/schema qualification."""
     return {
         "version": 1,
-        "wire_version": 6,
+        "wire_version": loader.WIRE_VERSION,
         "request_content_type": CONTENT_TYPE,
         "binary_sha256": list(bytes(range(32))),
         "source_identity": "synthetic-unqualified-loader-test",
@@ -46,7 +46,7 @@ def _document() -> dict[str, object]:
 
 def test_decode_exact_typed_contract_and_bind_all_resource_bytes() -> None:
     document = _document()
-    current_version = 6
+    current_version = 7
     assert document["wire_version"] == current_version
     raw = json.dumps(document).encode()
     contract = loader._decode_contract(raw)
@@ -86,7 +86,8 @@ def test_public_loader_uses_only_fixed_package_resource(
     [
         lambda d: d.update(version=True),
         lambda d: d.update(version=2),
-        lambda d: d.update(wire_version=2),
+        lambda d: d.update(wire_version=6),
+        lambda d: d.update(wire_version=8),
         lambda d: d.update(wire_version=True),
         lambda d: d.update(request_content_type="application/json"),
         lambda d: d.update(binary_sha256=[0] * 31),
@@ -143,7 +144,7 @@ def test_fresh_observation_requires_exact_current_profile() -> None:
         )
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 7])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 8])
 def test_retired_and_unknown_request_versions_are_refused(version: int) -> None:
     document = _document()
     document["wire_version"] = version

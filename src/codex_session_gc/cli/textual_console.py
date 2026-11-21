@@ -11,7 +11,6 @@ import signal
 import sys
 import time
 from contextlib import suppress
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
@@ -38,7 +37,7 @@ from codex_session_gc.cli.console_tasks import (
 from codex_session_gc.cli.storage_screen import StorageScreen
 from codex_session_gc.cli.storage_service import StorageService
 from codex_session_gc.cli.timing_display import terminal as timing_terminal
-from codex_session_gc.domain import ArchiveState, ThreadId, UtcCutoff
+from codex_session_gc.domain import ArchiveState, ExactIds, ThreadId, UtcCutoff
 from codex_session_gc.execution.progress import ProgressChannel, ProgressEvent, ProgressKind
 from codex_session_gc.execution.timing import TimingObserver, measured_to_thread, observe
 from codex_session_gc.inventory.catalogue import SessionCatalogue, read_session_catalogue
@@ -131,7 +130,9 @@ class SessionApp(App[tuple[str, int]]):
     .reviewing #project-summary { display: none; }
     """
 
-    def __init__(self, home: Path, cutoff: UtcCutoff, helper: Path | None, receipts: Path) -> None:
+    def __init__(
+        self, home: Path, cutoff: UtcCutoff | None, helper: Path | None, receipts: Path
+    ) -> None:
         """Bind one home and frozen selection without storage I/O."""
         super().__init__()
         self.home, self.cutoff, self.helper, self.receipts = home, cutoff, helper, receipts
@@ -175,7 +176,7 @@ class SessionApp(App[tuple[str, int]]):
             with Horizontal(classes="filters"):
                 yield Input(placeholder="Search full title / directory / ID", id="search")
                 yield Input(
-                    self.cutoff.timestamp.isoformat(),
+                    self.cutoff.timestamp.isoformat() if self.cutoff else "",
                     placeholder="Activity strictly before UTC",
                     id="before",
                 )
@@ -414,8 +415,7 @@ class SessionApp(App[tuple[str, int]]):
         try:
             date = self.query_one("#before", Input).value.strip()
             before = parse_cutoff(date).timestamp if date else None
-            if before is not None:
-                self.cutoff = UtcCutoff(before)
+            self.cutoff = UtcCutoff(before) if before is not None else None
             work = self.query_one("#work", Select).value
             roots = (self.work_roots[str(work)],) if str(work) in self.work_roots else ()
             directory = _directory(self.query_one("#cwd", Select).value)
@@ -673,16 +673,12 @@ class SessionApp(App[tuple[str, int]]):
     def _start_preview(self) -> None:
         if self.review_open or self.dispatching:
             return
-        if (
-            not self.selected
-            or not self.valid_filters
-            or not self.query_one("#before", Input).value.strip()
-        ):
-            self._notice("Select exact histories and a valid UTC cutoff before preview.")
+        if not self.selected or not self.valid_filters:
+            self._notice("Select exact histories and use a valid UTC cutoff if supplied.")
             return
         intent = Intent(
             self.home,
-            self.cutoff,
+            self.cutoff or ExactIds(frozenset(self.selected)),
             tuple(sorted(set(self.selected.values()))),
             tuple(sorted(self.selected)),
         )
@@ -843,7 +839,7 @@ def run(arguments: argparse.Namespace) -> int:
     state = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser()
     app = SessionApp(
         home,
-        arguments.cutoff or UtcCutoff(datetime.now(UTC)),
+        arguments.cutoff,
         arguments.helper.expanduser().resolve() if arguments.helper else discover_helper(),
         arguments.receipt_dir or state / "codex-session-gc/receipts",
     )

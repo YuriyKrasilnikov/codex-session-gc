@@ -173,3 +173,9 @@ reported by activation. The old launcher and existing client registrations are
 not switched by this operation. Retain the old installation and its receipt
 consumers while unresolved receipts depend on them; inspect those receipts using
 their original consumer as described above.
+
+Version 7 binds the tagged age policy to the saved declaration and apply context.
+A null declaration cutoff means the exact-ID policy, whose per-unit ceiling must
+remain within the confirmed selection. Completed older receipts remain observable;
+unresolved older effects need their exact original consumer and are never retried
+by a newer consumer.

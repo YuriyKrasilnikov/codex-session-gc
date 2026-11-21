@@ -4,6 +4,7 @@
 
 from codex_session_gc.domain.cutoff import (
     CutoffError,
+    ExactIds,
     InvalidActivityError,
     InvalidCutoffError,
     NaiveActivityError,
@@ -11,6 +12,7 @@ from codex_session_gc.domain.cutoff import (
     NonUtcCutoffError,
     UnknownActivityError,
     UtcCutoff,
+    epoch_milliseconds,
 )
 from codex_session_gc.domain.model import (
     ActivityState,
@@ -55,6 +57,7 @@ __all__ = [
     "CurrentRolloutPointer",
     "CutoffError",
     "DomainValidationError",
+    "ExactIds",
     "FileStatIdentity",
     "GraphSnapshot",
     "GuardianAssociation",
@@ -88,4 +91,5 @@ __all__ = [
     "ThreadRecord",
     "UnknownActivityError",
     "UtcCutoff",
+    "epoch_milliseconds",
 ]

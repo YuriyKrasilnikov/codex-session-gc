@@ -145,3 +145,14 @@ class MutableUtcTimezone(tzinfo):
     def utcoffset(self, _datetime: datetime | None) -> timedelta:
         """Return the current caller-owned offset."""
         return self._offset
+
+
+def test_fractional_and_pre_epoch_comparison_uses_integer_milliseconds() -> None:
+    """Apply the same millisecond floor before and after the epoch."""
+    cutoff = UtcCutoff(datetime(1969, 12, 31, 23, 59, 59, 999500, tzinfo=UTC))
+    _expect_false(
+        result=cutoff.is_strictly_before(datetime(1969, 12, 31, 23, 59, 59, 999000, tzinfo=UTC))
+    )
+    _expect_true(
+        result=cutoff.is_strictly_before(datetime(1969, 12, 31, 23, 59, 59, 998999, tzinfo=UTC))
+    )

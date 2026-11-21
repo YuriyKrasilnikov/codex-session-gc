@@ -83,7 +83,7 @@ class ConfirmedOperations:
         self,
         roots: tuple[str, ...],
         selected: tuple[str, ...],
-        cutoff: str,
+        cutoff: str | None,
         physical_manifest: object,
         guardian_associations: tuple[GuardianAssociation, ...] = (),
     ) -> Declaration:

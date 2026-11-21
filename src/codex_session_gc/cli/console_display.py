@@ -88,7 +88,11 @@ def preview_lines(report: dict[str, Any]) -> list[str]:
     return [
         "CONDITIONAL PREVIEW - not proof that work is closed or deletable",
         f"Home: {report['home']}",
-        f"UTC upper boundary: {report['cutoff']}",
+        (
+            f"UTC upper boundary: {report['cutoff']}"
+            if report["cutoff"] is not None
+            else "Selection policy: exact IDs (no date filter)"
+        ),
         f"Deletion candidates: {len(report['deletions'])}; retained: {len(report['retained'])}",
         (
             f"Observed stored candidate bytes: {sum(x for x in sizes if x is not None)}; "

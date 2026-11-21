@@ -5,6 +5,8 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from codex_session_gc.domain.model import ThreadId
+
 
 class CutoffError(ValueError):
     """Base class for cutoff and activity validation failures."""
@@ -46,7 +48,9 @@ class UtcCutoff:
 
     def is_strictly_before(self, activity: object) -> bool:
         """Return whether known timezone-aware activity precedes this cutoff."""
-        return _require_aware_activity(activity) < self.timestamp
+        return epoch_milliseconds(_require_aware_activity(activity)) < epoch_milliseconds(
+            self.timestamp
+        )
 
 
 def _canonicalize_utc_cutoff(value: object) -> datetime:
@@ -73,3 +77,26 @@ def _require_aware_activity(value: object) -> datetime:
         msg = "Activity must include timezone information."
         raise NaiveActivityError(msg)
     return value
+
+
+@dataclass(frozen=True, slots=True)
+class ExactIds:
+    """Explicit nonempty caller selection that omits only the age threshold."""
+
+    ids: frozenset[ThreadId]
+
+    def __post_init__(self) -> None:
+        """Require a nonempty immutable set of validated IDs."""
+        if (
+            type(self.ids) is not frozenset
+            or not self.ids
+            or any(type(item) is not ThreadId for item in self.ids)
+        ):
+            message = "Exact IDs require a nonempty immutable set of thread IDs."
+            raise ValueError(message)
+
+
+def epoch_milliseconds(value: datetime) -> int:
+    """Floor an aware instant to its integer epoch millisecond."""
+    elapsed = value.astimezone(UTC) - datetime(1970, 1, 1, tzinfo=UTC)
+    return elapsed.days * 86400000 + elapsed.seconds * 1000 + elapsed.microseconds // 1000

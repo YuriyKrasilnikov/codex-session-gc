@@ -1,4 +1,4 @@
-"""Isolated wire-6/state-64/history-9 closed-work effects through native storage and journal APIs."""
+"""Isolated wire-7/state-64/history-9 closed-work effects through native storage and journal APIs."""
 
 import concurrent.futures
 import fcntl
@@ -277,14 +277,14 @@ def prepare(directory, schema_version=64):
     )
     ownership = sorted((manifest["main"], manifest["target"]))
     request = dict(
-        version=6,
+        version=7,
         journal=str(receipt),
         attempt_id=str(aid.value),
         unit_id=str(uid.value),
         codex_home=str(home),
         sqlite_home=str(home),
         provider="openai",
-        cutoff="2026-08-01T00:00:00Z",
+        age_policy={"kind": "before", "cutoff": "2026-08-01T00:00:00+00:00"},
         ownership_scope=dict(root_thread_id=manifest["main"], thread_ids=list(ownership)),
         deletion_scope=list(ownership),
         targets=[],
@@ -502,7 +502,44 @@ def run_case(name):
             name_peer = peer("metadata", home, root, manifest["main_path"])
             assert command(name_peer, "index-name") == "named"
             stop(name_peer)
+        if name in ("before-negative-accept", "before-negative-reject"):
+            with s.sqlite_context(home / "state_5.sqlite") as db:
+                db.execute("UPDATE threads SET updated_at_ms=-1 WHERE id IN (?,?)", (root, child))
         refresh(request)
+        if name in ("exact-all", "exact-subset", "exact-stale-activity", "exact-target-mismatch"):
+            request["age_policy"] = {"kind": "exact_ids", "ids": sorted([root, child])}
+        if name == "exact-subset":
+            request["deletion_scope"] = [child]
+            refresh(request)
+        if name == "exact-target-mismatch":
+            request["deletion_scope"] = [child]
+        if name == "exact-stale-activity":
+            with s.sqlite_context(home / "state_5.sqlite") as db:
+                db.execute("UPDATE threads SET updated_at_ms=updated_at_ms+1 WHERE id=?", (child,))
+        if name == "exact-outside-ownership":
+            request["age_policy"] = {"kind": "exact_ids", "ids": sorted([root, child, unrelated["id"]])}
+        if name == "exact-outside-ceiling":
+            request["age_policy"] = {"kind": "exact_ids", "ids": [root]}
+        if name == "exact-duplicate":
+            request["age_policy"] = {"kind": "exact_ids", "ids": [root, root]}
+        if name == "exact-empty":
+            request["age_policy"] = {"kind": "exact_ids", "ids": []}
+        if name == "exact-unsorted":
+            request["age_policy"] = {"kind": "exact_ids", "ids": sorted([root, child], reverse=True)}
+        if name == "exact-noncanonical":
+            request["age_policy"] = {"kind": "exact_ids", "ids": [root.upper()]}
+        if name == "policy-unknown":
+            request["age_policy"] = {"kind": "other"}
+        if name == "policy-extra":
+            request["age_policy"]["extra"] = True
+        if name == "policy-missing":
+            del request["age_policy"]
+        if name in ("wire-old", "wire-future"):
+            request["version"] = 6 if name == "wire-old" else 8
+        if name == "before-noncanonical":
+            request["age_policy"]["cutoff"] = "2026-08-01T00:00:00Z"
+        if name in ("before-negative-accept", "before-negative-reject"):
+            request["age_policy"]["cutoff"] = ("1970-01-01T00:00:00+00:00" if name.endswith("accept") else "1969-12-31T23:59:59.999999+00:00")
         if name == "board-late-template":
             with s.sqlite_context(home / "agent_message_board_1.sqlite") as db:
                 db.execute("INSERT INTO board_templates VALUES(?,?)", (root, "late:not-json"))
@@ -784,6 +821,9 @@ def run_case(name):
             assert temporary_namespace.is_symlink()
             assert list(outside.iterdir()) == []
         refused = {
+            "exact-target-mismatch", "exact-stale-activity", "exact-outside-ownership", "exact-outside-ceiling", "exact-duplicate", "exact-empty",
+            "exact-unsorted", "exact-noncanonical", "policy-unknown", "policy-extra", "policy-missing",
+            "wire-old", "wire-future", "before-noncanonical", "before-negative-reject",
             "board-late-template", "board-missing-template-bound", "board-wrong-template-bound",
             "board-old-schema", "board-extra-trigger", "sqlite-busy",
             "absent-temp-invalid-guard",
@@ -976,6 +1016,10 @@ def run_case(name):
 
 if __name__ == "__main__":
     cases = [
+        "exact-all", "exact-subset", "exact-target-mismatch", "exact-stale-activity", "exact-outside-ownership", "exact-outside-ceiling",
+        "exact-duplicate", "exact-empty", "exact-unsorted", "exact-noncanonical", "policy-unknown",
+        "policy-extra", "policy-missing", "wire-old", "wire-future", "before-noncanonical",
+        "before-negative-accept", "before-negative-reject",
         "absent-temp",
         "absent-temp-invalid-guard",
         "temp-file",

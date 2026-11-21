@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from codex_session_gc import sqlite_engine as sqlite3
-from codex_session_gc.domain import GuardianAssociation, ThreadId
+from codex_session_gc.domain import GuardianAssociation, ThreadId, UtcCutoff, epoch_milliseconds
 from codex_session_gc.execution import closed_work_request as collector
 from codex_session_gc.execution.closed_work_apply import DispatchLimits
 from codex_session_gc.execution.confirmed_declaration import Declaration, saved_declaration
@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 
-_REQUEST_VERSION = 6
+_REQUEST_VERSION = 7
 
 
 class FinalState(StrEnum):
@@ -268,7 +268,7 @@ def _confirmed_scope(declaration: Declaration, context: dict[str, object]) -> No
             raise ValueError("The saved Guardian association differs from confirmation.")
 
 
-def _declaration(  # noqa: C901, PLR0912
+def _declaration(  # noqa: C901, PLR0912, PLR0915
     attempt: AttemptStatus,
     unit: UnitStatus,
     request: Payload,
@@ -316,10 +316,20 @@ def _declaration(  # noqa: C901, PLR0912
             if confirmed_targets.get(target.thread_id) != target:
                 raise ValueError("Saved physical effects differ from the confirmed manifest.")
     if any(
-        context[key] != raw[key]
-        for key in ("codex_home", "sqlite_home", "journal", "provider", "cutoff")
+        context[key] != raw[key] for key in ("codex_home", "sqlite_home", "journal", "provider")
     ):
         raise ValueError("Saved storage context disagrees with the request.")
+    policy = raw["age_policy"]
+    if context["cutoff"] is None:
+        if (
+            "operation_declaration" not in context
+            or not isinstance(policy, dict)
+            or policy.get("kind") != "exact_ids"
+            or not set(_ids(policy.get("ids"))).issubset(declaration.selected)
+        ):
+            raise ValueError("Saved exact ID policy disagrees with confirmation.")
+    elif policy != {"kind": "before", "cutoff": context["cutoff"]}:
+        raise ValueError("Saved age policy disagrees with the apply context.")
     if (
         context["helper_sha256"] != helper.binary_sha256.hex()
         or context["source_identity"] != helper.source_identity
@@ -560,7 +570,7 @@ def _request(  # noqa: C901, PLR0912, PLR0915
         "codex_home",
         "sqlite_home",
         "provider",
-        "cutoff",
+        "age_policy",
         "ownership_scope",
         "deletion_scope",
         "targets",
@@ -580,11 +590,21 @@ def _request(  # noqa: C901, PLR0912, PLR0915
     ):
         raise ValueError("Request identities disagree with its saved intent.")
     _text(value["provider"])
-    cutoff = datetime.fromisoformat(_text(value["cutoff"]))
-    if cutoff.tzinfo is None:
-        raise ValueError("Cutoff must have an explicit timezone.")
-    elapsed = cutoff.astimezone(UTC) - datetime(1970, 1, 1, tzinfo=UTC)
-    cutoff_ms = elapsed.days * 86400000 + elapsed.seconds * 1000 + elapsed.microseconds // 1000
+    policy = value["age_policy"]
+    if not isinstance(policy, dict):
+        raise TypeError("Age policy must be an object.")
+    cutoff_ms = None
+    if set(policy) == {"kind", "cutoff"} and policy["kind"] == "before":
+        cutoff = UtcCutoff(datetime.fromisoformat(_text(policy["cutoff"])))
+        if cutoff.timestamp.isoformat() != policy["cutoff"]:
+            raise ValueError("Cutoff must be canonical UTC.")
+        cutoff_ms = epoch_milliseconds(cutoff.timestamp)
+    elif set(policy) == {"kind", "ids"} and policy["kind"] == "exact_ids":
+        ids = _ids(policy["ids"])
+        if ids != tuple(sorted(ids)):
+            raise ValueError("Exact IDs must be sorted.")
+    else:
+        raise ValueError("Unsupported age policy.")
     home, sqlite_home = Path(_text(value["codex_home"])), Path(_text(value["sqlite_home"]))
     collector._absolute(home)
     collector._absolute(sqlite_home)
@@ -596,12 +616,14 @@ def _request(  # noqa: C901, PLR0912, PLR0915
     selected = _ids(value["deletion_scope"])
     if type(root) is not str or root not in owners or not set(selected).issubset(owners):
         raise ValueError("Deletion exceeds the saved ownership scope.")
+    if cutoff_ms is None and tuple(policy["ids"]) != selected:
+        raise ValueError("Exact ID ceiling disagrees with the saved selection.")
     targets = decode_targets(value["targets"])
     if tuple(target.thread_id for target in targets) != selected:
         raise ValueError("Exact logical target identities disagree with selection.")
     paths = []
     for target in targets:
-        if target.updated_at_ms >= cutoff_ms:
+        if cutoff_ms is not None and target.updated_at_ms >= cutoff_ms:
             raise ValueError("The saved target activity is not before cutoff.")
         for physical in target.rollouts:
             path = Path(physical.rollout_path)

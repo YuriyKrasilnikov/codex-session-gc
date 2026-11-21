@@ -1,4 +1,4 @@
-"""Attachment refusal and selected-child behavior through the native wire-6 operation."""
+"""Attachment refusal and selected-child behavior through the native wire-7 operation."""
 import concurrent.futures
 import fcntl
 import importlib.util

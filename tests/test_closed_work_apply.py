@@ -12,16 +12,19 @@ from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
+from codex_session_gc.domain import ExactIds
 from codex_session_gc.execution import closed_work_apply, one_shot, process_identity
 from codex_session_gc.execution.closed_work_apply import (
     ApplyPreflightRefusedError,
     DispatchLimits,
     apply_closed_work,
 )
+from codex_session_gc.execution.closed_work_request import review_targets
+from codex_session_gc.execution.confirmed_declaration import ReviewedSelection, create_declaration
 from codex_session_gc.execution.operation_status import project_operation_status
 from codex_session_gc.execution.progress import ProgressChannel, ProgressKind
 from codex_session_gc.planning.closed_work import select_closed_work
@@ -423,3 +426,90 @@ def test_proven_pre_spawn_refusal_settles_without_a_launch_generation(
     projected = project_operation_status(stored)
     assert projected.outcome is TerminalKind.REFUSED
     assert not projected.lifecycle_unresolved
+
+
+def test_exact_apply_without_declaration_refuses_before_helper_or_receipt(tmp_path: Path) -> None:
+    facts, _, options, observed = _setup(tmp_path)
+    ids = frozenset({_id(2)})
+    facts = replace(facts, cutoff=ExactIds(ids))
+    selection = select_closed_work(
+        facts.snapshot,
+        facts.cutoff,
+        frozenset({_id(1)}),
+        selected_threads=ids,
+        physical_inventory=facts.physical_inventory,
+    )
+    options["helper_executable"].unlink()
+    with pytest.raises(ApplyPreflightRefusedError, match="bound attempt and declaration"):
+        apply_closed_work(facts, (selection,), **options)
+    assert not options["journal"].exists()
+    assert not observed.exists()
+
+
+def test_exact_apply_requires_matching_reviewed_targets(tmp_path: Path) -> None:
+    facts, _, options, observed = _setup(tmp_path)
+    options["dispatch_limits"] = replace(options["dispatch_limits"], deadline_seconds=30)
+    ids = frozenset({_id(2)})
+    facts = replace(facts, cutoff=ExactIds(ids))
+    selection = select_closed_work(
+        facts.snapshot,
+        facts.cutoff,
+        frozenset({_id(1)}),
+        selected_threads=ids,
+        physical_inventory=facts.physical_inventory,
+    )
+    targets = review_targets(facts, selection, options["codex_home"], _LIMITS)
+    metadata = options["codex_home"].stat()
+    attempt = AttemptId(uuid4())
+    declaration = create_declaration(
+        ReviewedSelection(
+            roots=(str(_id(1).value),),
+            selected=(str(_id(2).value),),
+            cutoff=None,
+            physical_manifest=targets,
+        ),
+        operation_id=attempt.value,
+        home_identity=(metadata.st_dev, metadata.st_ino),
+        helper=options["helper"],
+    )
+    foreign_options = {**options, "sqlite_home": tmp_path / "foreign"}
+    with pytest.raises(ApplyPreflightRefusedError, match="declared home for SQLite"):
+        apply_closed_work(
+            facts,
+            (selection,),
+            **foreign_options,
+            attempt_id=attempt,
+            declaration=declaration.model_dump(mode="json"),
+        )
+    assert not options["journal"].exists()
+    assert not observed.exists()
+    malformed = declaration.model_dump(mode="json")
+    malformed["cutoff"] = "2026-08-01T00:00:00+00:00"
+    with pytest.raises(ApplyPreflightRefusedError):
+        apply_closed_work(facts, (selection,), **options, attempt_id=attempt, declaration=malformed)
+    assert not options["journal"].exists()
+    assert not observed.exists()
+    changed = targets[0].model_copy(update={"updated_at_ms": targets[0].updated_at_ms + 1})
+    changed_declaration = declaration.model_copy(update={"physical_manifest": (changed,)})
+    changed_declaration = changed_declaration.model_copy(
+        update={"digest": changed_declaration.calculated_digest()}
+    )
+    with pytest.raises(ApplyPreflightRefusedError, match="physical target"):
+        apply_closed_work(
+            facts,
+            (selection,),
+            **options,
+            attempt_id=attempt,
+            declaration=changed_declaration.model_dump(mode="json"),
+        )
+    assert not options["journal"].exists()
+    assert not observed.exists()
+    result = apply_closed_work(
+        facts,
+        (selection,),
+        **options,
+        attempt_id=attempt,
+        declaration=declaration.model_dump(mode="json"),
+    )
+    assert result.outcome is TerminalKind.CONFIRMED
+    assert observed.exists()

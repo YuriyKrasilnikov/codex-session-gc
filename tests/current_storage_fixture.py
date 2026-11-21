@@ -297,7 +297,7 @@ def _prepare(  # noqa: PLR0913
     return prepare_request(
         observation,
         selection,
-        cutoff=_CUTOFF,
+        cutoff=observation.cutoff,
         codex_home=tmp_path / "home",
         sqlite_home=tmp_path / "home",
         journal=tmp_path / "receipt.sqlite",

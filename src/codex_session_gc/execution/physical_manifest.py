@@ -1,6 +1,6 @@
 # Copyright (c) 2026
 
-"""One exhaustive wire-6 physical manifest codec for review, dispatch and observation."""
+"""One exhaustive physical manifest codec for review, dispatch and observation."""
 
 from __future__ import annotations
 

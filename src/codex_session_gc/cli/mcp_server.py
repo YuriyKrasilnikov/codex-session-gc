@@ -24,12 +24,12 @@ from mcp.types import ToolAnnotations
 
 from codex_session_gc import diagnostics
 from codex_session_gc.cli.console_display import discover_helper
-from codex_session_gc.cli.console_tasks import Intent, async_preview, parse_cutoff
+from codex_session_gc.cli.console_tasks import Intent, async_preview, cutoff_text, parse_cutoff
 from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.cli.storage_service import StorageService
 from codex_session_gc.cli.summary_display import cwd_label
 from codex_session_gc.compatibility.observation import ImportedSupport
-from codex_session_gc.domain import ArchiveState, ThreadId
+from codex_session_gc.domain import ArchiveState, ExactIds, ThreadId
 from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
 from codex_session_gc.execution.selection_provenance import reviewed_associations
 from codex_session_gc.execution.timing import TimingObserver, observe, worker_wakeup
@@ -438,16 +438,17 @@ class CatalogueService(CatalogueObservation):
         }
 
     async def prepare_cleanup(
-        self, snapshot_id: str, thread_ids: list[str], cutoff: str
+        self, snapshot_id: str, thread_ids: list[str], cutoff: str | None = None
     ) -> dict[str, Any]:
         """Preview scoped metadata for exact IDs without dispatch or journal creation."""
         if not thread_ids or len(thread_ids) > _SELECTION:
             raise ValueError("Preparation requires a bounded nonempty exact selection.")
-        identity, index = await self._snapshot(snapshot_id)
         selected = tuple(ThreadId.parse(value) for value in thread_ids)
-        if len(set(selected)) != len(selected) or any(
-            value not in index.entries for value in selected
-        ):
+        if len(set(selected)) != len(selected):
+            raise ValueError("Selection contains duplicate histories.")
+        policy = parse_cutoff(cutoff) if cutoff is not None else ExactIds(frozenset(selected))
+        identity, index = await self._snapshot(snapshot_id)
+        if any(value not in index.entries for value in selected):
             raise ValueError("Selection contains duplicate or unknown histories.")
         roots = set()
         for identifier in selected:
@@ -455,7 +456,7 @@ class CatalogueService(CatalogueObservation):
             if entry.root_id is None or entry.root_id not in index.entries:
                 raise ValueError("Selection has unresolved catalogue ownership.")
             roots.add(entry.root_id)
-        intent = Intent(self.home, parse_cutoff(cutoff), tuple(sorted(roots)), selected)
+        intent = Intent(self.home, policy, tuple(sorted(roots)), selected)
         report = await async_preview(intent)
         encoded = json.dumps(report, ensure_ascii=False, sort_keys=True).encode()
         if len(encoded) > _REPORT_BYTES:
@@ -467,16 +468,20 @@ class CatalogueService(CatalogueObservation):
             "preview_sha256": hashlib.sha256(encoded).hexdigest(),
             "report": report,
             "conditional": True,
-            "can_apply_via_mcp": self.capability is McpCapability.CLEANUP,
+            "can_apply_via_mcp": (
+                self.capability is McpCapability.CLEANUP
+                and bool(report["deletions"])
+                and not report["errors"]
+            ),
             "source_changed": index.catalogue.source_changed,
             "physical_complete": index.catalogue.physical_complete,
         }
-        if self.capability is McpCapability.CLEANUP:
+        if prepared["can_apply_via_mcp"]:
             declaration = await asyncio.to_thread(
                 self.operations.prepare,
                 tuple(str(root.value) for root in sorted(roots)),
                 tuple(report["deletions"]),
-                intent.cutoff.timestamp.isoformat(),
+                cutoff_text(intent.cutoff),
                 report["physical_manifest"],
                 reviewed_associations(report["guardian_associations"]),
             )
@@ -585,7 +590,7 @@ def create_server(
     )
 
     async def prepare_cleanup(
-        snapshot_id: str, thread_ids: list[str], cutoff: str, ctx: Context[Any, Any]
+        snapshot_id: str, thread_ids: list[str], ctx: Context[Any, Any], cutoff: str | None = None
     ) -> dict[str, Any]:
         """Preview scoped metadata for exact IDs without dispatch or journal creation."""
         return await _observed_call(
