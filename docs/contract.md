@@ -106,6 +106,11 @@ local server operator.
 
 ## Native execution
 
+The 0.6.0 contract uses wire 7 and the bundled exact state, thread history
+and companion schemas. Its current support record is `review_required`: bounded
+disposable fixture qualification does not establish a stock live lifecycle for
+the new helper. See [compatibility](compatibility.md).
+
 The 0.5.2 contract uses the exact state schema through migration 64
 and thread history schema through migration 9, with its bundled companion
 schemas. Its Python application and native helper use SQLite 3.54.1. The

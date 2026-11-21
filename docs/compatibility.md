@@ -11,6 +11,16 @@ The pinned native source is OpenAI Codex commit
 source profile uses wire 7 for dated and exact-ID selections. Its qualification
 covers the separate helper and the documented storage boundaries.
 
+## 0.6.0 contract
+
+The wire-7 helper and profile are qualified against bounded disposable native
+fixtures, including cleanup and Keep. The bundled support record for Codex
+0.171.0 is `review_required`: stock lifecycle observations for the earlier
+helper do not establish the current helper's stock lifecycle. The exact helper,
+profile, source inputs and qualification identity are bound by the bundled
+contract and support record. The tested host is Ubuntu 26.04 LTS x86_64 with
+glibc 2.43; other environments require qualification.
+
 ## 0.5.2 contract
 
 The locally verified 0.5.2 package supports selected stopped local stock Codex
@@ -31,8 +41,7 @@ Related selected-thread metadata updates and dependency-reference publication
 must finish before cleanup; writer acquisition does not certify their completion.
 Unknown Guardian sources, including `Internal`, remain protected.
 
-Local artifacts have been verified. Publication, official GitHub attestations and
-public installation remain separate prerequisites. Preserve the consumer named
+Preserve the consumer named
 by any unresolved older receipt; changing profiles does not migrate receipts.
 
 ## 0.5.0 and 0.5.1 contract
@@ -425,10 +434,13 @@ PRs and eligible main pushes take a staged source-only route. Main pushes that
 change only the support record still skip the artifact workflow. Staged runs
 validate the source qualification but neither acquire nor upload a native component, assemble release outputs, or
 attest an assembly or support record. This route does not qualify native or
-installed interfaces. A declared locator must be well formed and its exact public
-release asset must be available and match its size and digest; failure is an
-error, never a reason to switch to staged checks. The normal public qualified
-route remains in place when the locator is present.
+installed interfaces. A declared locator must identify an available release asset in this repository.
+Pull requests acquire it anonymously. An isolated acquisition job on the
+canonical main branch can read an asset from a draft release using a repository
+token with contents write permission. Push and pull request jobs check the
+downloaded size and digest before transferring the component. Manual support
+runs on main check asset availability with a HEAD request. A malformed locator
+or failed acquisition fails the run.
 
 Before a future unpublished release archive is used to establish native and
 installed qualification for a staged change, a trusted maintainer must run the
@@ -449,7 +461,7 @@ wheel before behavioral tests. Installed tests remove the source import path,
 verify the installed module origin, and exercise doctor, CLI, Textual, MCP and
 receipt observation without replay.
 Each run uses disposable test homes and temporary caches, bounded job timeouts,
-read-only repository permissions and short-lived result artifacts. It does not
+and short-lived result artifacts. Build and test jobs have read-only repository permissions. It does not
 publish a release. A successful hosted run qualifies only its recorded source,
 artifacts and named interfaces; local container compatibility probes do not
 substitute for that run or establish the full upstream application lifecycle.
