@@ -69,11 +69,13 @@ def _parse_thread(value: str) -> ThreadId:
         raise argparse.ArgumentTypeError(str(error)) from error
 
 
-def _selection_arguments(parser: argparse.ArgumentParser) -> None:
+def _selection_arguments(parser: argparse.ArgumentParser, *, rule_allowed: bool = False) -> None:
     """Declare the explicit work roots, age and optional exact subset."""
     parser.add_argument("--home", type=Path, required=True)
     parser.add_argument("--cutoff", type=_parse_cutoff)
-    parser.add_argument("--closed-work", type=_parse_thread, action="append", required=True)
+    parser.add_argument(
+        "--closed-work", type=_parse_thread, action="append", required=not rule_allowed
+    )
     parser.add_argument("--select-thread", type=_parse_thread, action="append")
 
 
@@ -222,7 +224,9 @@ def _parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     ui = commands.add_parser("ui", help="Browse and select histories with Textual")
     ui.add_argument("--home", type=Path)
     ui.add_argument("--helper", type=Path)
-    ui.add_argument("--cutoff", type=_parse_cutoff)
+    ui_selection = ui.add_mutually_exclusive_group()
+    ui_selection.add_argument("--cutoff", type=_parse_cutoff)
+    ui_selection.add_argument("--rule", type=Path)
     ui.add_argument("--receipt-dir", type=Path)
     keep = commands.add_parser("keep", help="Inspect or change protection for exact histories")
     keep_actions = keep.add_subparsers(dest="keep_action", required=True)
@@ -248,7 +252,8 @@ def _parser() -> argparse.ArgumentParser:  # noqa: PLR0915
         help="Expose browsing, preview and saved status without cleanup or receipt updates",
     )
     plan = commands.add_parser("plan", help="Preview selected closed work without deletion")
-    _selection_arguments(plan)
+    _selection_arguments(plan, rule_allowed=True)
+    plan.add_argument("--rule", type=Path)
     apply = commands.add_parser("apply", help="Delete an explicit selection once")
     _selection_arguments(apply)
     _execution_arguments(apply)
@@ -267,6 +272,23 @@ def _parser() -> argparse.ArgumentParser:  # noqa: PLR0915
 def _preview(arguments: argparse.Namespace) -> tuple[dict[str, Any], int]:
     """Use the same scoped preview as the terminal and MCP interfaces."""
     try:
+        if arguments.rule is not None:
+            if arguments.cutoff is not None or arguments.select_thread or arguments.closed_work:
+                message = "--rule cannot be combined with manual selection options."
+                raise ValueError(message)  # noqa: TRY301
+            from codex_session_gc.cli.policy_preview import preview_policy  # noqa: PLC0415
+            from codex_session_gc.inventory.selection_rule import parse_rule_json  # noqa: PLC0415
+
+            home = arguments.home.expanduser().resolve(strict=True)
+            rule_path = arguments.rule.expanduser().resolve(strict=True)
+            if rule_path == home or home in rule_path.parents:
+                message = "Rule file must be outside the selected home."
+                raise ValueError(message)  # noqa: TRY301
+            report = preview_policy(home, parse_rule_json(rule_path.read_text(encoding="utf-8")))
+            return report, UNAVAILABLE_GRAPH_EXIT if report["errors"] else 0
+        if not arguments.closed_work:
+            message = "Manual selection requires --closed-work."
+            raise ValueError(message)  # noqa: TRY301
         if arguments.cutoff is None and not arguments.select_thread:
             message = "Without --cutoff, explicit --select-thread IDs are required."
             raise ValueError(message)  # noqa: TRY301
@@ -288,6 +310,18 @@ def _preview(arguments: argparse.Namespace) -> tuple[dict[str, Any], int]:
 
 def _print_preview(report: dict[str, Any]) -> str:
     """Display preparation errors or the exact conditional declaration."""
+    if report.get("kind") == "policy_preview":
+        lines = [
+            "Rule: " + json.dumps(report["rule"], ensure_ascii=True, sort_keys=True),
+            f"Rule evaluated at {report['evaluated_at']}; cutoff: {report['cutoff'] or 'none'}.",
+            "Rule matches: " + (", ".join(report["rule_matches"]) or "none"),
+            "Work roots: " + (", ".join(report["roots"]) or "none"),
+        ]
+        if report["errors"]:
+            return "\n".join([*lines, *(str(error) for error in report["errors"])])
+        if not report["rule_matches"]:
+            return "\n".join(lines)
+        return "\n".join([*lines, *preview_lines(report), *attachment_plan_lines(report)])
     if report["errors"]:
         return "\n".join(str(error) for error in report["errors"])
     return "\n".join([*preview_lines(report), *attachment_plan_lines(report)])

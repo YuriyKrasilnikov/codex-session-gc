@@ -1355,3 +1355,77 @@ def test_console_rejects_replacement_before_any_review(
             assert "Home changed" in str(browser.query_one("#notice", Static).render())
 
     asyncio.run(scenario())
+
+
+def test_rule_review_refresh_cannot_expand_prior_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rule_path = tmp_path.parent / f"{tmp_path.name}-rule.json"
+    rule_path.write_text('{"version":1,"history_kind":"all"}')
+    monkeypatch.setattr(ui, "read_session_catalogue", lambda _home: catalogue())
+    calls: list[frozenset[ThreadId] | None] = []
+
+    def evaluate(
+        home: Path, _rule: object, *, prior_ids: frozenset[ThreadId] | None, prior_cutoff: object
+    ) -> dict[str, Any]:
+        assert prior_cutoff is None if prior_ids is None else prior_cutoff == CUTOFF.timestamp
+        calls.append(prior_ids)
+        matches = (
+            [ROOT, AGENT]
+            if prior_ids is None
+            else [item for item in (ROOT, AGENT) if item in prior_ids and item != AGENT]
+        )
+        metadata = home.stat()
+        return {
+            "home_identity": [metadata.st_dev, metadata.st_ino],
+            "rule_matches": [str(x.value) for x in matches],
+            "match_roots": {str(x.value): str(ROOT.value) for x in matches},
+            "cutoff": CUTOFF.timestamp.isoformat(),
+            "evaluated_at": "2030-02-01T00:00:00+00:00",
+            "removed_ids": [str(AGENT.value)] if prior_ids else [],
+            "errors": [],
+            "unresolved_ids": [],
+        }
+
+    monkeypatch.setattr(ui, "evaluate_policy", evaluate)
+
+    async def direct(function: Any, *args: object, **kwargs: object) -> Any:  # noqa: ANN401
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(ui.asyncio, "to_thread", direct)
+    browser = ui.SessionApp(tmp_path, None, Path("/helper"), tmp_path / "receipts", rule_path)
+    monkeypatch.setattr(browser, "query_one", lambda *_args, **_kwargs: SimpleNamespace(value=""))
+    monkeypatch.setattr(browser, "_render_rows", lambda: None)
+    monkeypatch.setattr(browser, "_notice", lambda _message: None)
+    monkeypatch.setattr(browser, "_review_mode", lambda **_kwargs: None)
+    captured: list[Intent] = []
+
+    async def preview(intent: Intent) -> None:
+        captured.append(intent)
+
+    monkeypatch.setattr(browser, "_preview", preview)
+
+    async def exercise() -> None:
+        await browser._run_rule(fresh=True)
+        assert set(browser.selected) == {ROOT, AGENT}
+        await browser._rule_review()
+        assert calls == [None, frozenset({ROOT, AGENT})]
+        assert set(captured[0].selected) == {ROOT}
+        assert captured[0].cutoff == CUTOFF
+        assert str(AGENT.value) in browser.rule_observation
+
+    asyncio.run(asyncio.wait_for(exercise(), 3))
+
+
+def test_rule_rechecks_resolved_location_before_read(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    outside = tmp_path / "rule.json"
+    inside = home / "rule.json"
+    outside.write_text('{"version":1,"history_kind":"all"}')
+    inside.write_text('{"version":1,"history_kind":"all"}')
+    assert ui._read_rule_file(outside, home)
+    outside.unlink()
+    outside.symlink_to(inside)
+    with pytest.raises(ValueError, match="outside"):
+        ui._read_rule_file(outside, home)

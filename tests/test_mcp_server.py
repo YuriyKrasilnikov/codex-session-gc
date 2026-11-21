@@ -24,7 +24,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from codex_session_gc import diagnostics
-from codex_session_gc.cli import console_tasks
+from codex_session_gc.cli import console_tasks, mcp_server
 from codex_session_gc.cli.console_tasks import (
     Intent,
     PreviewMode,
@@ -176,6 +176,7 @@ def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> N
                 "query_catalogue",
                 "catalogue_summary",
                 "session_details",
+                "preview_policy",
                 "prepare_cleanup",
                 "apply_cleanup",
                 "cleanup_status",
@@ -297,11 +298,35 @@ def test_read_only_sdk_exposes_observation_without_cleanup_operation_or_receipt(
                 "query_catalogue",
                 "catalogue_summary",
                 "session_details",
+                "preview_policy",
                 "prepare_cleanup",
                 "cleanup_status",
                 "compatibility_status",
                 "keep_status",
             }
+            policy_tool = next(tool for tool in tools.tools if tool.name == "preview_policy")
+            assert policy_tool.annotations is not None
+            assert policy_tool.annotations.read_only_hint
+            fresh = _data(
+                await session.call_tool(
+                    "preview_policy",
+                    {"rule": {"version": 1, "work_roots": [ROOT]}},
+                )
+            )
+            assert ROOT in fresh["rule_matches"]
+            assert "confirmation" not in fresh
+            carried = _data(
+                await session.call_tool(
+                    "preview_policy",
+                    {
+                        "rule": {"version": 1, "work_roots": [ROOT]},
+                        "prior_ids": [ROOT],
+                        "prior_cutoff": "2030-01-01T00:00:00Z",
+                    },
+                )
+            )
+            assert set(carried["rule_matches"]) <= {ROOT}
+            assert "confirmation" not in carried
             diagnostic_tool = next(
                 tool for tool in tools.tools if tool.name == "compatibility_status"
             )
@@ -494,7 +519,7 @@ def test_actual_adapter_cancellation_reaps_owned_worker_and_removes_copies(tmp_p
 import asyncio,json,os,sys
 from pathlib import Path
 from codex_session_gc import diagnostics
-from codex_session_gc.cli import console_tasks
+from codex_session_gc.cli import console_tasks, mcp_server
 from codex_session_gc.cli.mcp_server import run
 original=asyncio.create_subprocess_exec
 async def slow_worker(*args,**kwargs):
@@ -1499,3 +1524,30 @@ def test_empty_survivors_never_create_confirmation(
         assert prepared["report"]["cutoff"] is None
 
     asyncio.run(check())
+
+
+def test_policy_preview_read_only_and_prior_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def evaluate(_home: Path, _rule: object, **kwargs: object) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"rule_matches": [], "removed_ids": [], "cutoff": None}
+
+    monkeypatch.setattr(mcp_server, "evaluate_policy", evaluate)
+    service = CatalogueService(tmp_path, capability=McpCapability.READ_ONLY)
+
+    async def exercise() -> None:
+        result = await service.preview_policy(
+            {"version": 1, "history_kind": "all"},
+            [str(QUERY_ROOT.value)],
+            "2030-01-01T00:00:00+00:00",
+        )
+        assert result["rule_matches"] == []
+        assert calls[0]["prior_ids"] == frozenset({QUERY_ROOT})
+        with pytest.raises(ValueError):
+            await service.preview_policy({"version": 1, "history_kind": "all"}, None, "2030-01-01")
+        assert not (tmp_path / "receipts").exists()
+
+    asyncio.run(exercise())

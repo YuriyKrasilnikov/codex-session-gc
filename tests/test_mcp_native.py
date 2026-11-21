@@ -658,3 +658,47 @@ def test_guardian_ui_reviewed_apply_exact_effects_with_parent_writer(
         assert paths[OTHER].read_bytes() == other_before
 
     asyncio.run(asyncio.wait_for(check(), 60))
+
+
+def test_read_only_policy_observes_native_keep_and_carried_selection(
+    tmp_path: Path, native_helper: Path
+) -> None:
+    """Policy remains advice while native Keep changes across separate processes."""
+    home, receipts = tmp_path / "home", tmp_path / "receipts"
+    paths = make_home(home)
+    before = logical_rows(home)
+    rule = {"version": 1, "work_roots": [ROOT]}
+
+    async def check() -> None:
+        async with server(home, native_helper, receipts) as writer:
+            assert (await call(writer, "keep_set", {"thread_id": CHILD}))["status"] == "confirmed"
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            env=dict(os.environ),
+            args=["-m", "codex_session_gc.cli.mcp_server", "--home", str(home), "--read-only"],
+        )
+        async with stdio_client(parameters) as (read, write), ClientSession(read, write) as reader:
+            await reader.initialize()
+            marked = await call(reader, "preview_policy", {"rule": rule})
+            assert CHILD in marked["rule_matches"]
+            assert CHILD not in marked["deletions"]
+            assert {"id": CHILD, "reason": "keep", "witness": None} in marked["retained"]
+            assert "confirmation" not in marked
+        async with server(home, native_helper, receipts) as writer:
+            assert (await call(writer, "keep_clear", {"thread_id": CHILD}))["status"] == "confirmed"
+        async with stdio_client(parameters) as (read, write), ClientSession(read, write) as reader:
+            await reader.initialize()
+            carried = await call(
+                reader,
+                "preview_policy",
+                {"rule": rule, "prior_ids": [CHILD], "prior_cutoff": "2030-01-01T00:00:00Z"},
+            )
+            assert carried["rule_matches"] == [CHILD]
+            assert carried["cutoff"] == "2030-01-01T00:00:00+00:00"
+            assert "confirmation" not in carried
+            assert not carried["executable"]
+        assert paths[CHILD].is_file()
+        assert logical_rows(home) == before
+        assert not receipts.exists() or not list(receipts.glob("*.sqlite"))
+
+    asyncio.run(asyncio.wait_for(check(), 120))

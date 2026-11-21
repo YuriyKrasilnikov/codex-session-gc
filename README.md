@@ -346,6 +346,44 @@ Upgrade and restart any older cleanup processes first. Keep is in
 when preserving or restoring the home. Offline replacement with a valid older
 copy can roll marks back.
 
+### Reuse a cleanup selection rule
+
+Save a JSON document outside the Codex home. This example selects closed
+ordinary agents whose last activity was more than 90 days before evaluation.
+
+```json
+{
+  "version": 1,
+  "cwd": "/example/project",
+  "history_kind": "ordinary_agents",
+  "agent_status": "closed",
+  "older_than_days": 90
+}
+```
+
+Use `work_roots` for a list of exact root UUIDs. Combine it with `cwd` to
+restrict histories to both conditions. Choose `before` with a UTC-aware
+timestamp for a fixed boundary, or omit age. A positive `older_than_days`
+uses 24-hour days and displays the effective UTC boundary in each report.
+
+```console
+codex-session-gc plan --online --home /absolute/codex-home --rule /absolute/rule.json --json
+codex-session-gc ui --home /absolute/codex-home --rule /absolute/rule.json
+```
+
+The report shows exact matches, retained histories and conditional deletion
+candidates. Textual uses `r` to start a new evaluation. When proceeding from a
+rule selection to review, Textual refreshes the observed facts and narrows
+the original IDs using the frozen cutoff. Press `r` to review newly eligible
+histories with a new clock reference.
+
+MCP `preview_policy` takes the same JSON object as its `rule` argument. To
+refresh a prior evaluation, supply its `prior_ids` and, for an age rule, its
+resolved `prior_cutoff`. Review the surviving IDs before separate exact
+preparation and authorization. An independent manual preparation makes no
+claim about whether those IDs still satisfy a rule. All cleanup uses current
+Keep marks in the matched native helper.
+
 Pass `--timings` to `plan` or `apply` to see elapsed time and observed work
 counts. An interactive terminal shows the current measured stage while the
 command runs. With `--json`, the final response includes a `timings` object.
