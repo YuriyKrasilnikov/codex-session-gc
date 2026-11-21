@@ -29,6 +29,7 @@ def test_current_component_selects_only_qualified_helper(
 ) -> None:
     """A matching component selects the exact helper and fixed-repository locator."""
     root, component, helper, _ = candidate
+    _equal(ci_native.route(root), "qualified")
     qualification, transport = ci_native.describe(root)
     output = tmp_path / "selected-helper"
     evidence = ci_native.select_helper(root, component, output)
@@ -56,6 +57,7 @@ def test_source_check_does_not_require_or_interpret_transport(
     del native["transport"]
     path.write_text(json.dumps(provenance))
     _equal(ci_native.verify_source(root)["qualification_identity"], "e" * 64)
+    _equal(ci_native.route(root), "staged")
     with pytest.raises(ci_native.ReuseError, match="transport is not configured"):
         ci_native.describe(root)
     with pytest.raises(native_candidate.CandidateError, match="transport is not configured"):
@@ -64,6 +66,8 @@ def test_source_check_does_not_require_or_interpret_transport(
     native["transport"] = {"asset_id": None, "sha256": "a" * 64, "bytes": 123}
     path.write_text(json.dumps(provenance))
     _equal(ci_native.verify_source(root)["qualification_identity"], "e" * 64)
+    with pytest.raises(native_candidate.CandidateError):
+        ci_native.route(root)
     with pytest.raises(native_candidate.CandidateError):
         ci_native.describe(root)
     with pytest.raises(native_candidate.CandidateError):

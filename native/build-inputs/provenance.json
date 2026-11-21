@@ -14,12 +14,7 @@
     "helper_bytes": 82253056,
     "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
     "native_candidate": {
-      "summary_sha256": "6c0361c8fdc9af311dbbb4ce314a3d78fddbb0737d5f3150bcf3c741a0feb125",
-      "transport": {
-        "asset_id": 773428151,
-        "bytes": 15786709,
-        "sha256": "16dec370d25336ece76d84c26997bb9d26f6d2b373436b1e9bca4f6223ee9ea7"
-      }
+      "summary_sha256": "6c0361c8fdc9af311dbbb4ce314a3d78fddbb0737d5f3150bcf3c741a0feb125"
     },
     "partitions": [
       {

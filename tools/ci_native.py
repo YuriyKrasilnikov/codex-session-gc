@@ -45,6 +45,16 @@ def describe(root: Path) -> tuple[Qualification, Transport]:
     return qualified, transport
 
 
+def route(root: Path) -> str:
+    """Validate source and distinguish absent transport from a declared locator."""
+    qualified = verify_qualification_source(root)
+    current, transport = load_qualification(root)
+    if current != qualified:
+        message = "Native qualification changed during routing."
+        raise ReuseError(message)
+    return "qualified" if transport is not None else "staged"
+
+
 def select_helper(root: Path, component: Path, helper: Path) -> dict[str, object]:
     """Verify the pinned component and publish only its exact qualified helper."""
     qualified, selected = select_qualified_candidate(root, component, helper)
@@ -55,18 +65,24 @@ def main() -> None:
     """Expose source checking and component selection without identity override flags."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--describe", action="store_true")
+    parser.add_argument("--route", action="store_true")
     parser.add_argument("--component", type=Path)
     parser.add_argument("--helper", type=Path)
     arguments = parser.parse_args()
     if (arguments.component is None) != (arguments.helper is None):
         parser.error("--component and --helper must be supplied together")
+    if arguments.route and (arguments.describe or arguments.component is not None):
+        parser.error("--route cannot be combined with other operations")
     if arguments.describe and arguments.component is not None:
         parser.error("--describe cannot be combined with component selection")
     root = Path(__file__).resolve().parents[1]
     try:
-        if arguments.describe:
+        result: dict[str, object]
+        if arguments.route:
+            result = {"route": route(root)}
+        elif arguments.describe:
             qualified, transport = describe(root)
-            result: dict[str, object] = {
+            result = {
                 "qualification": asdict(qualified),
                 "transport": {**asdict(transport), "api_url": transport.api_url},
             }

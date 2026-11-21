@@ -420,6 +420,28 @@ qualified helper to `test_mcp_native.py`, `test_mcp_disconnect.py` and
 lane. The CI pytest observer makes skipped cases fail their declared partition.
 Rust qualification fixtures are not rebuilt or rerun for Python-only changes.
 
+When the source declares no native transport locator, hosted artifact runs for
+PRs and eligible main pushes take a staged source-only route. Main pushes that
+change only the support record still skip the artifact workflow. Staged runs
+validate the source qualification but neither acquire nor upload a native component, assemble release outputs, or
+attest an assembly or support record. This route does not qualify native or
+installed interfaces. A declared locator must be well formed and its exact public
+release asset must be available and match its size and digest; failure is an
+error, never a reason to switch to staged checks. The normal public qualified
+route remains in place when the locator is present.
+
+Before a future unpublished release archive is used to establish native and
+installed qualification for a staged change, a trusted maintainer must run the
+native qualification off the hosted workflow against the exact intended head,
+base and resulting tree. The maintainer verifies the privately staged archive
+against the locally qualified bytes and records the scoped results for those
+Git identities on the PR. Requalify when any of the identities changes. To
+demonstrate the staged control,
+run a PR and a main push containing an absent locator in a permitted test context;
+inspect each run's acquisition and staged-source summaries and confirm that no
+native component or matched-artifact upload, assembly, or attestation occurred.
+Also exercise malformed and unavailable declared locators and verify failure.
+
 The artifact lane builds the sdist, builds its wheel, checks the matched bundle,
 and installs that bundle into a separate environment outside the checkout.
 The installed-file gate compares project bytes against the selected source and
