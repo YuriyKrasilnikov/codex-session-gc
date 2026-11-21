@@ -10,6 +10,7 @@ import pytest
 from codex_session_gc.domain import (
     ActivityState,
     ArchiveState,
+    ExactIds,
     GraphSnapshot,
     GuardianAssociation,
     HistoryProviderReference,
@@ -24,6 +25,7 @@ from codex_session_gc.domain import (
     ThreadRecord,
     UtcCutoff,
 )
+from codex_session_gc.execution.closed_work_operation import _selection
 from codex_session_gc.planning.closed_work import ClosedWorkReason, select_closed_work
 
 CUTOFF = UtcCutoff(datetime(2026, 8, 1, tzinfo=UTC))
@@ -344,3 +346,59 @@ def test_guardian_missing_association_or_actual_spawn_parent_is_not_selected() -
         assert not selected.conditional_candidates
         if root != guardian:
             assert guardian not in selected.ownership_scope
+
+
+def test_exact_ids_omit_age_only_and_require_explicit_selection() -> None:
+    graph = _graph()
+    graph = replace(
+        graph,
+        threads=tuple(
+            replace(item, last_activity=LastActivity(datetime(2030, 1, 1, tzinfo=UTC)))
+            if item.id == _thread(2)
+            else item
+            for item in graph.threads
+        ),
+    )
+    ids = frozenset({_thread(2)})
+    policy = ExactIds(ids)
+    assert select_closed_work(graph, policy, frozenset({_thread(1)})).errors
+    result = select_closed_work(graph, policy, frozenset({_thread(1)}), selected_threads=ids)
+    assert result.conditional_candidates == ids
+    unknown = replace(
+        graph,
+        threads=tuple(
+            replace(item, last_activity=LastActivity(None)) if item.id == _thread(2) else item
+            for item in graph.threads
+        ),
+    )
+    assert not select_closed_work(
+        unknown, policy, frozenset({_thread(1)}), selected_threads=ids
+    ).conditional_candidates
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_projected_report_preserves_caller_scope_and_combined_retention(exact: bool) -> None:  # noqa: FBT001
+
+    graph = _graph()
+    graph = replace(
+        graph,
+        threads=tuple(
+            replace(item, last_activity=LastActivity(None)) if item.id == _thread(3) else item
+            for item in graph.threads
+        ),
+    )
+    requested = frozenset({_thread(1), _thread(2), _thread(3)})
+    policy = ExactIds(requested) if exact else CUTOFF
+    combined = select_closed_work(
+        graph, policy, frozenset({_thread(1)}), selected_threads=requested
+    )
+    narrowed = select_closed_work(
+        graph, policy, frozenset({_thread(1)}), selected_threads=combined.conditional_candidates
+    )
+    row = _selection(narrowed, combined)
+    assert row["requestedThreads"] == [str(item.value) for item in sorted(requested)]
+    assert row["selectedThreads"] == [str(_thread(2).value)]
+    reasons = {item["threadId"]: item for item in row["retained"]}
+    assert reasons[str(_thread(3).value)]["reason"] == ClosedWorkReason.AGE
+    assert reasons[str(_thread(1).value)]["reason"] == ClosedWorkReason.DESCENDANT
+    assert reasons[str(_thread(1).value)]["witness"] == str(_thread(3).value)

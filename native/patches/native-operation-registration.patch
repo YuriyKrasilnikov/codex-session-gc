@@ -30,7 +30,7 @@
  pub use types::UpdateThreadMetadataParams;
 +
 +pub use local::{
-+    CleanupOutcome, CleanupOwnershipScope, CleanupStatus, CleanupWireVersion,
++    CleanupAgePolicy, CleanupOutcome, CleanupOwnershipScope, CleanupStatus, CleanupWireVersion,
 +    ClosedWorkCleanupRequest, ClosedWorkPhysicalIdentity, ClosedWorkTarget, DatabaseEffectBound,
 +};
 --- a/codex-rs/rollout/src/maintenance.rs

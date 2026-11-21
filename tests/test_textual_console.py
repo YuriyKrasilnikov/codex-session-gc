@@ -437,7 +437,12 @@ def test_viewport_keeps_chrome_visible_while_content_scrolls_and_resizes(
             details = browser.query_one("#details").region
             assert details.bottom <= content.region.bottom
             assert details.bottom > content.region.y
+            browser.query_one("#quit").focus()
+            await pilot.pause()
+            assert browser.focused is browser.query_one("#quit")
             browser.query_one("#search").focus()
+            await pilot.pause()
+            await browser.animator.wait_for_idle()
             await pilot.pause()
             search = browser.query_one("#search").region
             assert search.y >= content.region.y
@@ -1205,5 +1210,44 @@ def test_project_summary_refuses_pending_load(
                 assert browser.screen is browser.screen_stack[0]
             finally:
                 pending.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_clearing_date_previews_exact_selected_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codex_session_gc.domain import ExactIds  # noqa: PLC0415
+
+    async def scenario() -> None:
+        browser = app(tmp_path, monkeypatch)
+        captured = []
+
+        async def observe(intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
+            assert mode is PreviewMode.CONFIRM
+            captured.append(intent)
+            return {
+                **intent.payload(),
+                "errors": ["test stop"],
+                "deletions": [],
+                "retained": [],
+                "sizes": [],
+                "guardian_associations": [],
+                "shared_retained_bytes": 0,
+                "conditional_reclaim_bytes": 0,
+            }
+
+        monkeypatch.setattr(ui, "async_preview", observe)
+        async with browser.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            browser.query_one("#before", Input).value = ""
+            await pilot.pause()
+            assert browser.cutoff is None
+            await pilot.click("#select")
+            await pilot.click("#preview")
+            await pilot.pause()
+            assert captured
+            assert isinstance(captured[0].cutoff, ExactIds)
+            assert captured[0].cutoff.ids == frozenset(captured[0].selected)
 
     asyncio.run(scenario())

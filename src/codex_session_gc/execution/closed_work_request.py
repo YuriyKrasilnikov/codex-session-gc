@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 from codex_session_gc import sqlite_engine as sqlite3
 from codex_session_gc.domain import (
+    ExactIds,
     GraphSnapshot,
     PhysicalInventory,
     PhysicalRepresentation,
@@ -36,6 +37,7 @@ from codex_session_gc.domain import (
     SelectedPhysicalManifest,
     ThreadId,
     UtcCutoff,
+    epoch_milliseconds,
 )
 from codex_session_gc.execution.bounded_header import (
     HeaderReadError,
@@ -183,7 +185,7 @@ class ClosedWorkFacts:
 
     snapshot: GraphSnapshot
     rollouts: tuple[RolloutObservation, ...]
-    cutoff: UtcCutoff
+    cutoff: UtcCutoff | ExactIds
     physical_inventory: PhysicalInventory
     headers: tuple[HeaderObservation, ...] = ()
     incoming_references_complete: bool = False
@@ -192,7 +194,7 @@ class ClosedWorkFacts:
         """Keep the finite fact boundary typed and immutable."""
         if (
             type(self.snapshot) is not GraphSnapshot
-            or type(self.cutoff) is not UtcCutoff
+            or type(self.cutoff) not in (UtcCutoff, ExactIds)
             or type(self.physical_inventory) is not PhysicalInventory
             or type(self.rollouts) is not tuple
             or any(type(item) is not RolloutObservation for item in self.rollouts)
@@ -301,7 +303,7 @@ def prepare_request(  # noqa: C901, PLR0912, PLR0915
     observation: ClosedWorkFacts,
     selection: ClosedWorkSelection,
     *,
-    cutoff: UtcCutoff,
+    cutoff: UtcCutoff | ExactIds,
     codex_home: Path,
     sqlite_home: Path,
     journal: Path,
@@ -425,14 +427,18 @@ def prepare_request(  # noqa: C901, PLR0912, PLR0915
         guards.update(guardian_guards)
         raw = json.dumps(
             {
-                "version": 6,
+                "version": 7,
                 "journal": str(journal),
                 "attempt_id": str(attempt_id.value),
                 "unit_id": str(unit_id.value),
                 "codex_home": str(codex_home),
                 "sqlite_home": str(sqlite_home),
                 "provider": default_provider,
-                "cutoff": cutoff.timestamp.isoformat(),
+                "age_policy": (
+                    {"kind": "before", "cutoff": cutoff.timestamp.isoformat()}
+                    if isinstance(cutoff, UtcCutoff)
+                    else {"kind": "exact_ids", "ids": list(selected)}
+                ),
                 "ownership_scope": {
                     "root_thread_id": str(root.value),
                     "thread_ids": sorted(str(item.value) for item in selection.ownership_scope),
@@ -649,7 +655,9 @@ def prepare_targets(  # noqa: C901
             "rollouts": [encode_rollout(item) for item in items],
         }
         parsed = WireTarget.model_validate(target)
-        if parsed.updated_at_ms >= int(observation.cutoff.timestamp.timestamp() * 1000):
+        if isinstance(observation.cutoff, UtcCutoff) and parsed.updated_at_ms >= epoch_milliseconds(
+            observation.cutoff.timestamp
+        ):
             raise PreparationRefused("Current selected SQL activity is not before the cutoff.")
         expected_root = home / ("archived_sessions" if parsed.archived else "sessions")
         if not current_header.path.is_relative_to(expected_root):

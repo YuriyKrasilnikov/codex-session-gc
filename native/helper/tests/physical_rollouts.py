@@ -63,7 +63,7 @@ def run_case(name):
         prepare_and_release(home, identity)
         before_read = native_json("read-lineage", home, identity)
         assert before_read["readable"] and before_read["source_marker_present"], before_read
-        request.update(version=6, cutoff="2100-01-01T00:00:00Z", deletion_scope=[identity],
+        request.update(version=7, age_policy={"kind": "before", "cutoff": "2100-01-01T00:00:00+00:00"}, deletion_scope=[identity],
             ownership_scope=dict(root_thread_id=identity, thread_ids=[identity]),
             guard_paths=sorted([str(home / ".tmp/rollout-maintenance.lock"),
                 str(home / "thread-writer-locks/.coordination.lock"),

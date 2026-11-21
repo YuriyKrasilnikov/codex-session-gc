@@ -1,11 +1,11 @@
 --- /dev/null
 +++ b/codex-rs/thread-store/src/local/bounded_cleanup.rs
-@@ -0,0 +1,1882 @@
+@@ -0,0 +1,1978 @@
 +#![deny(unsafe_op_in_unsafe_fn, clippy::unwrap_used, clippy::as_conversions)]
 +//! A single guarded physical-manifest cleanup operation for independently qualified callers.
 +
 +use super::LocalThreadStore;
-+use chrono::{DateTime, Utc};
++use chrono::{DateTime, Datelike, Utc};
 +use codex_agent_message_board_extension::LocalAgentMessageBoard;
 +use codex_protocol::protocol::{SessionSource, SubAgentSource, ThreadHistoryMode};
 +use codex_protocol::{SessionId, ThreadId};
@@ -137,7 +137,7 @@
 +    type Error = String;
 +    fn try_from(value: u32) -> std::result::Result<Self, Self::Error> {
 +        match value {
-+            6 => Ok(Self::Current),
++            7 => Ok(Self::Current),
 +            value => Err(format!("unsupported closed-work request version: {value}")),
 +        }
 +    }
@@ -145,9 +145,91 @@
 +impl From<CleanupWireVersion> for u32 {
 +    fn from(value: CleanupWireVersion) -> Self {
 +        match value {
-+            CleanupWireVersion::Current => 6,
++            CleanupWireVersion::Current => 7,
 +        }
 +    }
++}
++
++/// The immutable eligibility bound approved for this unit.
++#[derive(Clone, Debug, Serialize, Deserialize)]
++#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
++pub enum CleanupAgePolicy {
++    Before {
++        #[serde(
++            deserialize_with = "canonical_cutoff",
++            serialize_with = "serialize_cutoff"
++        )]
++        cutoff: DateTime<Utc>,
++    },
++    ExactIds {
++        #[serde(deserialize_with = "canonical_ids")]
++        ids: Vec<ThreadId>,
++    },
++}
++
++fn serialize_cutoff<S: serde::Serializer>(
++    value: &DateTime<Utc>,
++    serializer: S,
++) -> std::result::Result<S::Ok, S::Error> {
++    use serde::ser::Error;
++    if !(1..=9999).contains(&value.year())
++        || value.timestamp_subsec_nanos() >= 1_000_000_000
++        || value.timestamp_subsec_nanos() % 1000 != 0
++    {
++        return Err(S::Error::custom("cutoff is not canonical UTC"));
++    }
++    let text = if value.timestamp_subsec_nanos() == 0 {
++        value.format("%Y-%m-%dT%H:%M:%S+00:00").to_string()
++    } else {
++        value.format("%Y-%m-%dT%H:%M:%S%.6f+00:00").to_string()
++    };
++    serializer.serialize_str(&text)
++}
++
++fn canonical_cutoff<'de, D: serde::Deserializer<'de>>(
++    d: D,
++) -> std::result::Result<DateTime<Utc>, D::Error> {
++    use serde::de::Error;
++    let text = String::deserialize(d)?;
++    let parsed = DateTime::parse_from_rfc3339(&text).map_err(D::Error::custom)?;
++    let utc = parsed.with_timezone(&Utc);
++    let canonical = if utc.timestamp_subsec_nanos() == 0 {
++        utc.format("%Y-%m-%dT%H:%M:%S+00:00").to_string()
++    } else {
++        utc.format("%Y-%m-%dT%H:%M:%S%.6f+00:00").to_string()
++    };
++    if text != canonical
++        || !(1..=9999).contains(&utc.year())
++        || utc.timestamp_subsec_nanos() >= 1_000_000_000
++        || utc.timestamp_subsec_nanos() % 1000 != 0
++        || text.len() < 25
++    {
++        return Err(D::Error::custom("cutoff is not canonical UTC"));
++    }
++    Ok(utc)
++}
++
++fn canonical_ids<'de, D: serde::Deserializer<'de>>(
++    d: D,
++) -> std::result::Result<Vec<ThreadId>, D::Error> {
++    use serde::de::Error;
++    let strings = Vec::<String>::deserialize(d)?;
++    if strings.is_empty() || !strings.windows(2).all(|pair| pair[0] < pair[1]) {
++        return Err(D::Error::custom(
++            "exact IDs must be nonempty, unique and ascending",
++        ));
++    }
++    strings
++        .into_iter()
++        .map(|text| {
++            let id: ThreadId = serde_json::from_value(serde_json::Value::String(text.clone()))
++                .map_err(D::Error::custom)?;
++            if id.to_string() != text {
++                return Err(D::Error::custom("noncanonical exact ID"));
++            }
++            Ok(id)
++        })
++        .collect()
 +}
 +
 +/// Removes one explicitly selected closed-work batch under full ownership.
@@ -162,7 +244,7 @@
 +    pub sqlite_home: PathBuf,
 +    /// Store default only; each target provider is independently validated.
 +    pub provider: String,
-+    pub cutoff: DateTime<Utc>,
++    pub age_policy: CleanupAgePolicy,
 +    pub ownership_scope: CleanupOwnershipScope,
 +    pub deletion_scope: Vec<ThreadId>,
 +    pub targets: Vec<ClosedWorkTarget>,
@@ -1201,6 +1283,14 @@
 +        targets == selected && selected.iter().all(|id| ownership_set.contains(id)),
 +        "targets and deletion/ownership scope disagree",
 +    )?;
++    if let CleanupAgePolicy::ExactIds { ids } = &request.age_policy {
++        let ceiling: HashSet<_> = ids.iter().copied().collect();
++        require(
++            ids.iter().all(|id| ownership_set.contains(id))
++                && selected.iter().all(|id| ceiling.contains(id)),
++            "exact ID ceiling disagrees with ownership or deletion scope",
++        )?;
++    }
 +    let paths: HashSet<_> = request
 +        .targets
 +        .iter()
@@ -1260,7 +1350,13 @@
 +            "target origin is not a known typed native source",
 +        )?;
 +        require(
-+            !target.provider.is_empty() && target.updated_at_ms < request.cutoff.timestamp_millis(),
++            !target.provider.is_empty()
++                && match &request.age_policy {
++                    CleanupAgePolicy::Before { cutoff } => {
++                        target.updated_at_ms < cutoff.timestamp_millis()
++                    }
++                    CleanupAgePolicy::ExactIds { .. } => true,
++                },
 +            "target provider or strictly-before-cutoff activity is unqualified",
 +        )?;
 +    }

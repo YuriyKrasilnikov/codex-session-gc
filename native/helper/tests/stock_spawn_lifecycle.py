@@ -356,9 +356,9 @@ def apply_child(native: Path, fixture: Path, home: Path, root: Path,
     semantic.j.create(journal, semantic.j.StartEnvelope(aid, payload, payload, payload, payload),
                       (semantic.j.Unit(uid, 0, payload),))
     ownership = sorted((parent, child, *siblings))
-    request = dict(version=6, journal=str(journal), attempt_id=str(aid.value),
+    request = dict(version=7, journal=str(journal), attempt_id=str(aid.value),
                    unit_id=str(uid.value), codex_home=str(home), sqlite_home=str(home),
-                   provider='inert', cutoff='2099-01-01T00:00:00Z',
+                   provider='inert', age_policy={'kind': 'before', 'cutoff': '2099-01-01T00:00:00+00:00'},
                    ownership_scope=dict(root_thread_id=parent, thread_ids=ownership),
                    deletion_scope=[child], targets=[], databases=[], guard_paths=sorted([
                        str(home / '.tmp/rollout-maintenance.lock'),

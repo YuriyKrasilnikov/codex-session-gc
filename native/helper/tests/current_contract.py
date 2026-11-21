@@ -163,7 +163,7 @@ if __name__ == "__main__":
     results = malformed_cases() + [replay_case(), commit_unknown_case()]
     for result in results:
         print(json.dumps(result), flush=True)
-    for name in ("wire1", "wire2", "wire3", "wire4", "wire5", "wire7", "unknown-request-field",
+    for name in ("wire1", "wire2", "wire3", "wire4", "wire5", "wire6", "wire8", "unknown-request-field",
                  "unknown-target-field", "missing-identity", "null-header", "schema59",
                  "schema61", "schema62", "unexpected-table", "migration-checksum", "migration-success", "archive-integer", "selected-root-feedback", "selected-root-receipt", "expanded-ownership", "contracted-ownership",
                  "duplicate-ownership", "wrong-deletion", "missing-root-guard", "leaf-as-root", "root-cycle"):

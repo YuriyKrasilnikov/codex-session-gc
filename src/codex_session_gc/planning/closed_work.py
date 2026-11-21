@@ -11,6 +11,7 @@ from enum import StrEnum
 from codex_session_gc.domain import (
     ActivityState,
     ArchiveState,
+    ExactIds,
     GraphSnapshot,
     GuardianAssociation,
     PhysicalInventory,
@@ -62,9 +63,9 @@ class ClosedWorkSelection:
     guardian_associations: tuple[GuardianAssociation, ...] = ()
 
 
-def select_closed_work(
+def select_closed_work(  # noqa: C901
     snapshot: GraphSnapshot,
-    cutoff: UtcCutoff,
+    cutoff: UtcCutoff | ExactIds,
     roots: frozenset[ThreadId],
     *,
     selected_threads: frozenset[ThreadId] | None = None,
@@ -100,6 +101,8 @@ def select_closed_work(
     if any(parents[root] for root in roots if root in records):
         errors.append("closed_work_root_has_spawn_parent")
     requested = scope if selected_threads is None else selected_threads
+    if isinstance(cutoff, ExactIds) and (selected_threads is None or not requested <= cutoff.ids):
+        errors.append("exact_ids_require_explicit_selection")
     if requested - scope:
         errors.append("selected_thread_outside_closed_work")
     if errors:
@@ -220,7 +223,7 @@ def _guardian_reason(
 
 def _local_reason(
     record: ThreadRecord,
-    cutoff: UtcCutoff,
+    cutoff: UtcCutoff | ExactIds,
     *,
     selected: bool,
     has_history: bool,
@@ -233,8 +236,9 @@ def _local_reason(
         return ClosedWorkReason.PROTECTED_ORIGIN
     if record.archive_state is ArchiveState.UNKNOWN or unknown_rollout_archive:
         return ClosedWorkReason.ARCHIVE
-    if record.last_activity.timestamp is None or not cutoff.is_strictly_before(
-        record.last_activity.timestamp
+    if record.last_activity.timestamp is None or (
+        isinstance(cutoff, UtcCutoff)
+        and not cutoff.is_strictly_before(record.last_activity.timestamp)
     ):
         return ClosedWorkReason.AGE
     if not has_history:

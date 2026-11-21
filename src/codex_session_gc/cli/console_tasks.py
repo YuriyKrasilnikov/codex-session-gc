@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from codex_session_gc.domain import GuardianAssociation, ThreadId, UtcCutoff
+from codex_session_gc.domain import ExactIds, GuardianAssociation, ThreadId, UtcCutoff
 from codex_session_gc.execution.closed_work_operation import confirmed_execution_request, execute
 from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
 from codex_session_gc.execution.closed_work_request import review_targets
@@ -68,7 +68,7 @@ class Intent:
     """Exact reviewed selection; refreshes may retain members but never add deletions."""
 
     home: Path
-    cutoff: UtcCutoff
+    cutoff: UtcCutoff | ExactIds
     roots: tuple[ThreadId, ...]
     selected: tuple[ThreadId, ...]
     reviewed_guardian_associations: tuple[GuardianAssociation, ...] | None = None
@@ -77,6 +77,8 @@ class Intent:
 
     def __post_init__(self) -> None:
         """Reject ambiguous duplicate inputs before any storage observation."""
+        if isinstance(self.cutoff, ExactIds) and self.cutoff.ids != frozenset(self.selected):
+            raise ValueError("Exact policy must match the selected histories.")
         if len(set(self.roots)) != len(self.roots) or len(set(self.selected)) != len(self.selected):
             raise ValueError("Selected work and history identifiers must be unique.")
         if self.reviewed_physical_manifest is not None:
@@ -90,7 +92,7 @@ class Intent:
                 or declaration.roots != tuple(str(value.value) for value in sorted(self.roots))
                 or declaration.selected
                 != tuple(str(value.value) for value in sorted(self.selected))
-                or declaration.cutoff != self.cutoff.timestamp.isoformat()
+                or declaration.cutoff != cutoff_text(self.cutoff)
                 or manifest_bytes(declaration.physical_manifest) != self.reviewed_physical_manifest
                 or tuple(binding.association for binding in declaration.guardian_associations)
                 != self.reviewed_guardian_associations
@@ -101,7 +103,7 @@ class Intent:
         """Serialize only explicit inputs to the private read-only worker."""
         return {
             "home": str(self.home),
-            "cutoff": self.cutoff.timestamp.isoformat(),
+            "cutoff": cutoff_text(self.cutoff),
             "roots": [str(x.value) for x in sorted(self.roots)],
             "selected": [str(x.value) for x in sorted(self.selected)],
         }
@@ -111,6 +113,11 @@ class Intent:
         if self.declaration is None:
             raise ValueError("Apply requires the reviewed confirmation binding.")
         return self.declaration
+
+
+def cutoff_text(cutoff: UtcCutoff | ExactIds) -> str | None:
+    """Return the canonical declared boundary, or null for exact IDs."""
+    return cutoff.timestamp.isoformat() if isinstance(cutoff, UtcCutoff) else None
 
 
 def parse_cutoff(text: str) -> UtcCutoff:
@@ -139,7 +146,7 @@ def preview(intent: Intent, *, mode: PreviewMode = PreviewMode.OBSERVE) -> dict[
             ReviewedSelection(
                 roots=tuple(str(value.value) for value in sorted(reviewed.roots)),
                 selected=tuple(str(value.value) for value in sorted(reviewed.selected)),
-                cutoff=reviewed.cutoff.timestamp.isoformat(),
+                cutoff=cutoff_text(reviewed.cutoff),
                 physical_manifest=decode_targets(report["physical_manifest"]),
                 guardian_associations=reviewed.reviewed_guardian_associations or (),
             ),
@@ -153,7 +160,7 @@ def preview(intent: Intent, *, mode: PreviewMode = PreviewMode.OBSERVE) -> dict[
 
 def preview_selection(
     home: Path,
-    cutoff: UtcCutoff,
+    cutoff: UtcCutoff | ExactIds,
     roots: frozenset[ThreadId],
     selected: frozenset[ThreadId] | None,
 ) -> dict[str, Any]:
@@ -266,7 +273,7 @@ def _reviewed_intent(original: Intent, report: dict[str, Any]) -> Intent:
         raise ValueError("Preview association exceeds the confirmed exact selection.")
     return Intent(
         original.home,
-        original.cutoff,
+        ExactIds(frozenset(selected)) if isinstance(original.cutoff, ExactIds) else original.cutoff,
         original.roots,
         selected,
         associations,
@@ -412,7 +419,9 @@ def _worker(directory: Path) -> None:
     try:
         intent = Intent(
             Path(data["home"]),
-            parse_cutoff(data["cutoff"]),
+            parse_cutoff(data["cutoff"])
+            if data["cutoff"] is not None
+            else ExactIds(frozenset(ThreadId.parse(x) for x in data["selected"])),
             tuple(ThreadId.parse(x) for x in data["roots"]),
             tuple(ThreadId.parse(x) for x in data["selected"]),
         )

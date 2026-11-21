@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any
 
+from codex_session_gc.domain import ExactIds
 from codex_session_gc.execution.closed_work_operation import ExecutionRequest
 from codex_session_gc.execution.closed_work_operation import execute as execute_operation
 
@@ -35,8 +36,10 @@ def validate_arguments(arguments: argparse.Namespace) -> None:
 
 def _validate_apply(arguments: argparse.Namespace) -> None:
     """Require the exact source, helper and work roots for one dispatch."""
-    if any(getattr(arguments, name) is None for name in ("home", "cutoff", "helper")):
-        raise ValueError("Online apply requires --home, --cutoff and --helper.")
+    if any(getattr(arguments, name) is None for name in ("home", "helper")):
+        raise ValueError("Online apply requires --home and --helper.")
+    if arguments.cutoff is None and not arguments.select_thread:
+        raise ValueError("Without --cutoff, explicit --select-thread IDs are required.")
     if not arguments.closed_work:
         raise ValueError("Online apply requires explicit --closed-work roots.")
     if any(not path.is_absolute() for path in (arguments.home, arguments.helper)):
@@ -54,7 +57,11 @@ def execute(arguments: argparse.Namespace) -> tuple[dict[str, Any], int]:
             command=arguments.command,
             receipt=arguments.receipt,
             home=getattr(arguments, "home", None),
-            cutoff=getattr(arguments, "cutoff", None),
+            cutoff=(
+                getattr(arguments, "cutoff", None) or ExactIds(frozenset(arguments.select_thread))
+                if arguments.command == "apply"
+                else None
+            ),
             closed_work=tuple(getattr(arguments, "closed_work", ()) or ()),
             select_thread=tuple(arguments.select_thread)
             if getattr(arguments, "select_thread", None) is not None

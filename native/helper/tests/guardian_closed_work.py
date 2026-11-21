@@ -1,4 +1,4 @@
-"""Bounded wire-6 guardian association and retained-writer qualification.
+"""Bounded wire-7 guardian association and retained-writer qualification.
 
 Only disposable native-produced homes are used. Guard declarations authorize
 writer coordination, never an additional deletion target or SQL effect.
@@ -47,7 +47,7 @@ def case(name, schema=64):
             db.execute("UPDATE threads SET source=? WHERE id=?", (json.dumps(source), guardian["id"]))
         if schema == 64:
             d.upgrade(home)
-        request["version"] = 6
+        request["version"] = 7
         request["deletion_scope"] = [parent]
         d.targets(request)
         guardian_lock = home / "thread-writer-locks" / f'{guardian["id"]}.lock'

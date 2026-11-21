@@ -20,6 +20,7 @@ import pytest
 from codex_session_gc import sqlite_engine
 from codex_session_gc.domain import (
     ArchiveState,
+    ExactIds,
     RolloutMetadata,
 )
 from codex_session_gc.execution import closed_work_request as adapter
@@ -54,7 +55,7 @@ def test_v6_exact_scope_targets_rows_and_immutable_bytes(tmp_path: Path) -> None
     payload = _prepare(tmp_path, observation, selection, helper)
     value = json.loads(payload.data)
     assert payload.version == 1
-    assert value["version"] == 6
+    assert value["version"] == 7
     assert value["provider"] == "store-default"
     assert {target["provider"] for target in value["targets"]} == {"openai"}
     assert value["ownership_scope"]["thread_ids"] == [str(_id(i).value) for i in (1, 2)]
@@ -597,7 +598,7 @@ def test_guardian_target_has_separate_tagged_association_without_parent_closure(
     selection = select_closed_work(facts.snapshot, _CUTOFF, frozenset({_id(3)}))
     before = _before(home)
     value = json.loads(_prepare(tmp_path, facts, selection, helper).data)
-    assert value["version"] == 6
+    assert value["version"] == 7
     assert value["ownership_scope"]["thread_ids"] == [str(_id(3).value)]
     assert value["targets"][0]["parent_relation"] == {
         "kind": "guardian_association",
@@ -749,3 +750,20 @@ def test_unqualified_board_schema_refuses_before_collecting_rows(
     with pytest.raises(PreparationRefused, match="schema"):
         _prepare(tmp_path, observation, selection, helper)
     assert _before(tmp_path / "home") == before
+
+
+def test_exact_ids_request_binds_per_unit_ceiling(tmp_path: Path) -> None:
+    observation, _, helper = _fixture(tmp_path)
+    ids = frozenset({_id(2)})
+    policy = ExactIds(ids)
+    observation = replace(observation, cutoff=policy)
+    selection = select_closed_work(
+        observation.snapshot,
+        policy,
+        frozenset({_id(1)}),
+        selected_threads=ids,
+        physical_inventory=observation.physical_inventory,
+    )
+    value = json.loads(_prepare(tmp_path, observation, selection, helper).data)
+    assert value["age_policy"] == {"kind": "exact_ids", "ids": [str(_id(2).value)]}
+    assert value["deletion_scope"] == value["age_policy"]["ids"]

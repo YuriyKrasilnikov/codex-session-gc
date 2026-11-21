@@ -430,6 +430,7 @@ def test_actual_adapters_remove_all_owned_revert_formats_and_preserve_provider( 
     request = saved.units[0].request
     assert request is not None
     payload: dict[str, Any] = json.loads(request.data)
-    assert payload["version"] == 6
+    assert payload["version"] == 7
+    assert payload["age_policy"] == {"kind": "before", "cutoff": "2030-01-01T00:00:00+00:00"}
     assert payload["deletion_scope"] == [CHILD]
     assert {item["rollout_path"] for item in payload["targets"][0]["rollouts"]} == owned

@@ -163,6 +163,25 @@ writer.close()
 """
 
 
+async def prepare_exact_after_date_boundary(session: ClientSession) -> dict[str, Any]:
+    """The same child is held by the strict boundary and admitted without a date."""
+    catalogue = await call(session, "query_catalogue", {})
+    selection = {"snapshot_id": catalogue["snapshot_id"], "thread_ids": [CHILD]}
+    held = await call(session, "prepare_cleanup", {**selection, "cutoff": "2026-06-01T00:00:00Z"})
+    assert held["report"]["selected"] == [CHILD]
+    assert held["report"]["deletions"] == []
+    assert not held["can_apply_via_mcp"]
+    assert "confirmation" not in held
+    exact = await call(session, "prepare_cleanup", selection)
+    assert exact["report"]["cutoff"] is None
+    assert exact["report"]["selected"] == [CHILD]
+    assert exact["report"]["deletions"] == [CHILD]
+    assert exact["can_apply_via_mcp"]
+    declaration = exact["confirmation"]
+    assert set(declaration) == {"operation_id", "digest"}
+    return declaration
+
+
 def test_native_confirmed_effects_writer_continuity_and_restart_duplicate(
     tmp_path: Path, native_helper: Path
 ) -> None:
@@ -188,7 +207,7 @@ def test_native_confirmed_effects_writer_continuity_and_restart_duplicate(
         try:
             assert await peer.stdout.readline() == b"ready\n"
             async with server(home, native_helper, receipts) as session:
-                declaration = await prepare(session)
+                declaration = await prepare_exact_after_date_boundary(session)
                 applying = asyncio.create_task(call(session, "apply_cleanup", declaration))
                 peer.stdin.write(b"append\n")
                 await peer.stdin.drain()

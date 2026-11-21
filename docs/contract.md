@@ -6,7 +6,10 @@ execution boundary. Age is an operator-supplied filter, never evidence of inacti
 
 ## Selection and retention
 
-The caller supplies an explicit UTC cutoff. Known last activity must be strictly
+The caller supplies either an explicit UTC cutoff or a nonempty exact set of thread IDs.
+The exact-ID policy omits the age threshold only; unknown or changed activity and
+all ownership, closure, dependency, and selection guards still retain or refuse work.
+With a cutoff, known last activity must be strictly
 before that instant. MAIN histories and archived histories may be selected when
 the qualified native contract supports their exact effects. Unknown origin, age,
 archive state, missing history and ambiguous topology retain or refuse affected
@@ -174,3 +177,8 @@ including newline, and combined helper output at most 1 MiB. SQLite deadlines do
 not count exact physical I/O. A blocked filesystem call has no finite completion
 guarantee. History-body integrity, business success, an empty runtime heap and
 perpetual absence of later auxiliary rows are not guaranteed. See [compatibility](compatibility.md).
+
+Wire version 7 carries a required tagged age policy. `before` carries a canonical UTC
+cutoff; `exact_ids` carries the sorted unique approved per-unit ID ceiling. Deletion
+remains bounded by that ceiling and the reviewed physical targets. An empty admitted
+selection is advisory and creates no receipt.

@@ -23,6 +23,7 @@ from codex_session_gc.domain import (
     ActivityState,
     ArchiveState,
     Attachment,
+    ExactIds,
     GraphSnapshot,
     GuardianAssociation,
     LastActivity,
@@ -118,7 +119,7 @@ def _sql_attachment(identifier: ThreadId, value: object) -> Attachment | None:
 
 def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
     home: Path,
-    cutoff: UtcCutoff,
+    cutoff: UtcCutoff | ExactIds,
     roots: frozenset[ThreadId],
     selected: frozenset[ThreadId] | None,
     limits: collector.CollectionLimits,

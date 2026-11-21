@@ -2,173 +2,114 @@
   "archive_sha256": "79c8ea8547e1dd9969f63ef6b76a4fb0d1a024ef36c0c627fbcd2ffb658d9312",
   "archive_url": "https://codeload.github.com/openai/codex/tar.gz/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
   "build_qualification": {
-    "build_observations_sha256": "97b2f9c35143a36aee4710013f90101b27cebd74fade1cc121a13b4f7ab19bb7",
-    "contract_sha256": "6ac727487130177d5a57e9b28fa497214c718b03bc51604717d0dba53cf367e3",
+    "build_observations_sha256": "99ea4bb8f734566be3c501ddb3e0bf1e41a18f8cdb1d364f66c264c84327c6b3",
+    "contract_sha256": "ea5c41f89d0e1eddcdfe1b17a0aca45dc6a24555a6a2393d3c5605d0316762eb",
     "dynamic_libraries": [
       "libgcc_s.so.1",
       "libm.so.6",
       "libc.so.6",
       "ld-linux-x86-64.so.2"
     ],
-    "fixture_helper_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
-    "helper_bytes": 82253056,
-    "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+    "fixture_helper_sha256": "7c8683f5ce034224812007c1ac5b49470138c0e1e679d9ae3371cd6ae7e54867",
+    "helper_bytes": 82443424,
+    "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
     "native_candidate": {
-      "summary_sha256": "6c0361c8fdc9af311dbbb4ce314a3d78fddbb0737d5f3150bcf3c741a0feb125",
-      "transport": {
-        "asset_id": 773428151,
-        "bytes": 15786709,
-        "sha256": "16dec370d25336ece76d84c26997bb9d26f6d2b373436b1e9bca4f6223ee9ea7"
-      }
+      "summary_sha256": "b7bc644107b3477a0cf61b5e2972eb8e0694acd67eceeace4657a13b21e5afb0"
     },
     "partitions": [
       {
-        "cases": 64,
-        "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "native-contract",
-        "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
-        "receipt_sha256": "c8a9a4f87213cb4b5a4b9475346eb65a623a4e6375197b84b2d5a1816d7f96f1",
-        "result_sha256": "42186570aa3485d3fdde6f7c27fc88f6a7f166ccce5b5007ec410056d278d450",
-        "scope": "Whole harness with its recorded fixture revision. Before the historical DDL formatting correction.",
-        "test_source": "native/helper/tests/current_contract.py",
-        "test_source_sha256": "5f7691a34eb7d41f5d5bb3d7e5a5c62b5fe618c4e576a29ae77541454b9e43f5"
+        "cases": 70,
+        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "kind": "batch-full",
+        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+        "result_sha256": "7077afba233cf01e86daf56ebf713faa35734f3d2459d041ff079b1ce9f003a2",
+        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+        "test_source": "native/helper/tests/closed_work_batch.py",
+        "test_source_sha256": "a6df76aa2da7ba2f3360911b50a0e0c17da69e86e58239baaf67e9d2451f0ab7"
       },
       {
-        "cases": 28,
-        "fixture_source_sha256": "df48f0f8fa5580ffc7b386e8ea2980c78fb18289abccacdcbc2a665c396e250b",
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "supplemental-storage",
-        "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
-        "receipt_sha256": "dbc26ddf1926107a7db2edbd74b6d21104faa90ebc3154fa5b45ee2a676cac49",
-        "result_sha256": "e75ffda41ab2ab985e6aecb2f34434ba69d444287fc04798c72fbbd2be75d617",
-        "scope": "Full isolated host run after earlier launcher exits; no inferred cause for prior exits.",
-        "test_source": "native/helper/tests/supplemental_state.py",
-        "test_source_sha256": "82202257d7f777f4a5020e4e4d490bf3e56b43b00c91de2f6caf270998882333"
+        "cases": 65,
+        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "kind": "current",
+        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+        "result_sha256": "b07d937910f74b504084ae6165a5e37ebe0da449c55a27ecde4ce08a462e4d0f",
+        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+        "test_source": "native/helper/tests/current_contract.py",
+        "test_source_sha256": "b6b0acf20cf3ee07e86bfb8bbbc3fdbead83924ed32a55096f9c6203412cf1e1"
       },
       {
         "cases": 24,
-        "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "physical-storage",
-        "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
-        "result_sha256": "5da24a0ee32ce06ab2cbedf6cdd56f5211c2489842f075483798b3e339f55ccd",
-        "scope": "Controlled isolated storage and exact effect witnesses.",
+        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "kind": "physical",
+        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+        "result_sha256": "fb5bb58cafaf64bc8a9232e54236fac3674ee171f1ce0cd7a52753bd5ed70ea4",
+        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
         "test_source": "native/helper/tests/physical_rollouts.py",
-        "test_source_sha256": "fa0aa0b13e9a0d2175a32c8b8f1ef8acc9f6527ecd1a902fa0bd65f9089e3bad"
+        "test_source_sha256": "b69917f4c114082b2d4d4efce260af9ee5b9137968be71589cbe4362ec2ae662"
       },
       {
         "cases": 22,
-        "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "direct-closed-work",
-        "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
-        "result_sha256": "1270bda99d6d2b2d390b38413ef317c4c9e402b87d1ac44a3641ffb7595dcc09",
-        "scope": "Controlled isolated storage and exact effect witnesses.",
+        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "kind": "direct",
+        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+        "result_sha256": "9a454ecb2e8751697c7fb94a0cfb8fa32066953b7a7cc19358d29251cd93a72b",
+        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
         "test_source": "native/helper/tests/direct_closed_work.py",
-        "test_source_sha256": "698a8c6b5b0c5d0ab437d61a894af28eab3c72a310524cd2395b87b148aa4430"
-      },
-      {
-        "cases": 20,
-        "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "guardian-retention",
-        "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
-        "result_sha256": "bdf3351ec517ea4b9e8ef0022548ae89523ca8e80aef596574aa07288a1b38a0",
-        "scope": "Controlled isolated storage and exact effect witnesses.",
-        "test_source": "native/helper/tests/guardian_closed_work.py",
-        "test_source_sha256": "935eb49372d85178157923d61fbb68f9f95b6bb62fd0324317f1a34c1b8cddfc"
+        "test_source_sha256": "4556ac76aeacb92f8bef45f473aae99091ee9533449b8e44d15b5e0ac8141a43"
       },
       {
         "cases": 13,
-        "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "attached-retention",
-        "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
+        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "kind": "attached",
+        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
         "result_sha256": "3ba457e5af13bb531f8396b34d1b8ce63d9dff3415e398f00cefe056838bf991",
-        "scope": "Controlled isolated storage and exact effect witnesses.",
+        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
         "test_source": "native/helper/tests/attached_cleanup.py",
-        "test_source_sha256": "5ca30a2ff7bfe8af0f3501a3ee8829ffe41c8f5761778088b1de72b821ac3a5c"
+        "test_source_sha256": "2028b111ac522ac0f6baa5764f023a6ce41920a5bbb01f88939e358eb4df614f"
+      },
+      {
+        "cases": 20,
+        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "kind": "guardian",
+        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+        "result_sha256": "005c9b6341dd7d7c20dc2b770ffa474d86d3b085e7e9c09dd0ac0bb1939742e0",
+        "scope": "Disposable native fixtures; Guardian integration used a private provisional profile.",
+        "test_source": "native/helper/tests/guardian_closed_work.py",
+        "test_source_sha256": "c8b36f0e1141e8e8094c464f081232a6a4f7dc15ca1bc4a3bf3ccd0b94dd50de"
       },
       {
         "cases": 12,
-        "fixture_source_sha256": "53bfe02526cd6ac646631b3eae8a6711fcd4b1335bb9a65e5d75a3f5f606331d",
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "current-namespace",
-        "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
-        "result_sha256": "49bd766e309932457caf1761690fc5e388f77285d542442fd88e0a871147d55d",
-        "scope": "New model-ID effects and retained consumer protection. Controlled isolated fixture.",
+        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "kind": "session_model_ids",
+        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+        "result_sha256": "b3b5efe7378fa943af46bdf1a69d849f68971ddc3f9b0df88d60234003bac88e",
+        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
         "test_source": "native/helper/tests/session_model_ids.py",
         "test_source_sha256": "a84d48ecfbd9f50895a4bc9237fddf3b7c9d02bf195c62f398a55ead332ebf6a"
       },
       {
-        "cases": 3,
-        "fixture_source_sha256": "df48f0f8fa5580ffc7b386e8ea2980c78fb18289abccacdcbc2a665c396e250b",
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "historical_state_probe_sha256": "1ccb7b24dc3bba8245b9e554f942aa70fbe9d95381b0c842480d5d6090768b15",
-        "kind": "historical-state-negative",
-        "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
-        "result_sha256": "2f1ff1eef836b82be4da54c440837e18e02c5c7af7ddf2f3cd7465f87a62cf64",
-        "scope": "Exact state62 separately matched old profile, all three refuse without any effect.",
-        "test_source": "native/helper/tests/current_contract.py",
-        "test_source_sha256": "5f7691a34eb7d41f5d5bb3d7e5a5c62b5fe618c4e576a29ae77541454b9e43f5"
+        "cases": 28,
+        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "kind": "supplemental_state",
+        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+        "result_sha256": "cc1064c2d3bc9326048b1b49d3064a9aceea6afe6174500d50f322067854bc39",
+        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+        "test_source": "native/helper/tests/supplemental_state.py",
+        "test_source_sha256": "82202257d7f777f4a5020e4e4d490bf3e56b43b00c91de2f6caf270998882333"
       },
       {
-        "cases": 63,
-        "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
-        "helper_sha256": "f50f22deada3b1ecb2734981be8b4cb7fbca9c145ebab84115d11b6801ea91d9",
-        "kind": "controlled-scheduling",
-        "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
-        "result_sha256": "9ae34dd696a1db0e79ef421d360f67d7ab50719a8d03c48c8ec23a7489005579",
-        "scope": "Fixture-feature debug helper only; test hook schedule witness. Separate from compact artifact.",
+        "cases": 11,
+        "helper_sha256": "7c8683f5ce034224812007c1ac5b49470138c0e1e679d9ae3371cd6ae7e54867",
+        "kind": "hook",
+        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+        "result_sha256": "7cd76210b70bc0f18b4dac78586abc531cd16ad0c585a3a0b35abad52958ec0c",
+        "scope": "Fixtures-enabled helper controlled hooks; distinct from production.",
         "test_source": "native/helper/tests/closed_work_batch.py",
-        "test_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727"
-      },
-      {
-        "cases": 1,
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "stock-0.171.0-v1-legacy",
-        "producer_sha256": "b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0",
-        "scope": "Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session.",
-        "script_sha256": "40a975f471f3c09dc6ba6144b4e8d155fb974292001bfe914bce4bec5a98dc91",
-        "trace_sha256": "56d2586336857f08f5320d117bb87c632e43b7b0243b6c7b68a86a1e446dbe36"
-      },
-      {
-        "cases": 1,
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "stock-0.171.0-v2-paginated",
-        "producer_sha256": "b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0",
-        "scope": "Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session.",
-        "script_sha256": "40a975f471f3c09dc6ba6144b4e8d155fb974292001bfe914bce4bec5a98dc91",
-        "trace_sha256": "860a9ec5af378bd1efb876855a829f930ccd42b6fa1602f7d6d9c35501919312"
-      },
-      {
-        "cases": 1,
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "eof",
-        "report_sha256": "32a1f7b45e6a97c1bf64dc76709db461739dbd3e32cf94faa53034334d8476a6",
-        "scope": "Process and receipt witness on disposable current schema with the provisional local application profile.",
-        "test_source_sha256": "7fb7644c7073013cfc66b5d15c2777ff4b728d2a4862833419df66d06372cfa1"
-      },
-      {
-        "cases": 1,
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "sdk-cancellation",
-        "report_sha256": "a5fe90b7681fdcc5d67dc8a90b9f138b5a9469e9ea9a0c12cc70e357dda87b8a",
-        "scope": "Process and receipt witness on disposable current schema with the provisional local application profile.",
-        "test_source_sha256": "7fb7644c7073013cfc66b5d15c2777ff4b728d2a4862833419df66d06372cfa1"
-      },
-      {
-        "cases": 1,
-        "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
-        "kind": "terminal-observer",
-        "report_sha256": "5e65224d40f93b555f2d89dd9a7a6d3bdf1c2b897e200bf76b99ca35ecb4a4fc",
-        "scope": "Process and receipt witness on disposable current schema with the provisional local application profile.",
-        "test_source_sha256": "7fb7644c7073013cfc66b5d15c2777ff4b728d2a4862833419df66d06372cfa1"
+        "test_source_sha256": "a6df76aa2da7ba2f3360911b50a0e0c17da69e86e58239baaf67e9d2451f0ab7"
       }
     ],
-    "qualification_boundary": "Selected stopped local work in the observed stock Codex 0.171.0 modes and exact storage contract. Related metadata and history-reference publication must have finished. Fixture and live witnesses retain their individual scopes. Local material preparation only.",
-    "qualification_identity": "7eb502ff2471ed4faeb701157f4490fe1b962b1130c33a140b57597e316850db"
+    "qualification_boundary": "Disposable native fixture evidence for wire 7 on the observed local host and exact storage contract. No new-binary stock lifecycle, installed-client, or off-host qualification is asserted. Historical witnesses remain attributed to their original binaries.",
+    "qualification_identity": "d5bb5f2f864bef0cfa52ca92f9d8174d46b14ee4ef64adcbd7db1e9fc815bcf8"
   },
   "commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
   "compatibility_backports": [
@@ -323,9 +264,9 @@
           "sha256": "3d944025ce7d600d204efeb27a796a4e1d36ba75c831fc3a979bb6c19e820d5f"
         },
         {
-          "bytes": 2155,
+          "bytes": 2173,
           "path": "native/patches/existing-cleanup-store.patch",
-          "sha256": "8fd463236a450d33ead9e0f26f7347f662f82721c6cdbe93fe3f9490e1d24f71"
+          "sha256": "0916a6d940207c1703c6372b3bbe9b87686ecfa1f37bdcd25d8af018c68e9cec"
         },
         {
           "bytes": 540,
@@ -333,14 +274,14 @@
           "sha256": "a362e2fb2408afe3093d11352072df42a3a9ba5c18f5d2d771825549c6051a49"
         },
         {
-          "bytes": 5836,
+          "bytes": 5854,
           "path": "native/patches/native-operation-registration.patch",
-          "sha256": "355c89553267b7fb218b200c91251e3bc8ea279854664b4df10c7565fc372fcb"
+          "sha256": "f9f371845cd4ec8125ea3be319c9f4072da7fb71d9e064a0334921d6ae5a9b54"
         },
         {
-          "bytes": 75918,
+          "bytes": 79323,
           "path": "native/patches/native-operation.patch",
-          "sha256": "2b8520bd3a06ab0442afbaf6a00209178b88e2185289cc816e39451c153da927"
+          "sha256": "91a2dd51e13ee3e615e133d26f546d20137daedf27af25c1757d96ceed953713"
         },
         {
           "bytes": 586,
@@ -400,9 +341,180 @@
       ]
     },
     "manifest_encoding": "UTF-8 JSON with sorted keys, indent 2 and one trailing newline; provenance, qualification and distribution metadata are sealed separately.",
-    "manifest_sha256": "e254868253af0e6ff4ae459628a4d59b96f51e7489daf3a4334d27911ca91cb1",
+    "manifest_sha256": "cc9d36f7590234d5bf619d7fac8852ed7a9a815d26617ea1c7cc2f119926a03c",
     "scope": "Exact helper source, Cargo, toolchain and patch inputs used for the qualified production executable."
   },
+  "historical_build_qualifications": [
+    {
+      "build_observations_sha256": "97b2f9c35143a36aee4710013f90101b27cebd74fade1cc121a13b4f7ab19bb7",
+      "contract_sha256": "6ac727487130177d5a57e9b28fa497214c718b03bc51604717d0dba53cf367e3",
+      "dynamic_libraries": [
+        "libgcc_s.so.1",
+        "libm.so.6",
+        "libc.so.6",
+        "ld-linux-x86-64.so.2"
+      ],
+      "fixture_helper_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
+      "helper_bytes": 82253056,
+      "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+      "native_candidate": {
+        "summary_sha256": "6c0361c8fdc9af311dbbb4ce314a3d78fddbb0737d5f3150bcf3c741a0feb125",
+        "transport": {
+          "asset_id": 773428151,
+          "bytes": 15786709,
+          "sha256": "16dec370d25336ece76d84c26997bb9d26f6d2b373436b1e9bca4f6223ee9ea7"
+        }
+      },
+      "partitions": [
+        {
+          "cases": 64,
+          "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "native-contract",
+          "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
+          "receipt_sha256": "c8a9a4f87213cb4b5a4b9475346eb65a623a4e6375197b84b2d5a1816d7f96f1",
+          "result_sha256": "42186570aa3485d3fdde6f7c27fc88f6a7f166ccce5b5007ec410056d278d450",
+          "scope": "Whole harness with its recorded fixture revision. Before the historical DDL formatting correction.",
+          "test_source": "native/helper/tests/current_contract.py",
+          "test_source_sha256": "5f7691a34eb7d41f5d5bb3d7e5a5c62b5fe618c4e576a29ae77541454b9e43f5"
+        },
+        {
+          "cases": 28,
+          "fixture_source_sha256": "df48f0f8fa5580ffc7b386e8ea2980c78fb18289abccacdcbc2a665c396e250b",
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "supplemental-storage",
+          "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
+          "receipt_sha256": "dbc26ddf1926107a7db2edbd74b6d21104faa90ebc3154fa5b45ee2a676cac49",
+          "result_sha256": "e75ffda41ab2ab985e6aecb2f34434ba69d444287fc04798c72fbbd2be75d617",
+          "scope": "Full isolated host run after earlier launcher exits; no inferred cause for prior exits.",
+          "test_source": "native/helper/tests/supplemental_state.py",
+          "test_source_sha256": "82202257d7f777f4a5020e4e4d490bf3e56b43b00c91de2f6caf270998882333"
+        },
+        {
+          "cases": 24,
+          "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "physical-storage",
+          "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
+          "result_sha256": "5da24a0ee32ce06ab2cbedf6cdd56f5211c2489842f075483798b3e339f55ccd",
+          "scope": "Controlled isolated storage and exact effect witnesses.",
+          "test_source": "native/helper/tests/physical_rollouts.py",
+          "test_source_sha256": "fa0aa0b13e9a0d2175a32c8b8f1ef8acc9f6527ecd1a902fa0bd65f9089e3bad"
+        },
+        {
+          "cases": 22,
+          "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "direct-closed-work",
+          "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
+          "result_sha256": "1270bda99d6d2b2d390b38413ef317c4c9e402b87d1ac44a3641ffb7595dcc09",
+          "scope": "Controlled isolated storage and exact effect witnesses.",
+          "test_source": "native/helper/tests/direct_closed_work.py",
+          "test_source_sha256": "698a8c6b5b0c5d0ab437d61a894af28eab3c72a310524cd2395b87b148aa4430"
+        },
+        {
+          "cases": 20,
+          "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "guardian-retention",
+          "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
+          "result_sha256": "bdf3351ec517ea4b9e8ef0022548ae89523ca8e80aef596574aa07288a1b38a0",
+          "scope": "Controlled isolated storage and exact effect witnesses.",
+          "test_source": "native/helper/tests/guardian_closed_work.py",
+          "test_source_sha256": "935eb49372d85178157923d61fbb68f9f95b6bb62fd0324317f1a34c1b8cddfc"
+        },
+        {
+          "cases": 13,
+          "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "attached-retention",
+          "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
+          "result_sha256": "3ba457e5af13bb531f8396b34d1b8ce63d9dff3415e398f00cefe056838bf991",
+          "scope": "Controlled isolated storage and exact effect witnesses.",
+          "test_source": "native/helper/tests/attached_cleanup.py",
+          "test_source_sha256": "5ca30a2ff7bfe8af0f3501a3ee8829ffe41c8f5761778088b1de72b821ac3a5c"
+        },
+        {
+          "cases": 12,
+          "fixture_source_sha256": "53bfe02526cd6ac646631b3eae8a6711fcd4b1335bb9a65e5d75a3f5f606331d",
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "current-namespace",
+          "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
+          "result_sha256": "49bd766e309932457caf1761690fc5e388f77285d542442fd88e0a871147d55d",
+          "scope": "New model-ID effects and retained consumer protection. Controlled isolated fixture.",
+          "test_source": "native/helper/tests/session_model_ids.py",
+          "test_source_sha256": "a84d48ecfbd9f50895a4bc9237fddf3b7c9d02bf195c62f398a55ead332ebf6a"
+        },
+        {
+          "cases": 3,
+          "fixture_source_sha256": "df48f0f8fa5580ffc7b386e8ea2980c78fb18289abccacdcbc2a665c396e250b",
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "historical_state_probe_sha256": "1ccb7b24dc3bba8245b9e554f942aa70fbe9d95381b0c842480d5d6090768b15",
+          "kind": "historical-state-negative",
+          "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
+          "result_sha256": "2f1ff1eef836b82be4da54c440837e18e02c5c7af7ddf2f3cd7465f87a62cf64",
+          "scope": "Exact state62 separately matched old profile, all three refuse without any effect.",
+          "test_source": "native/helper/tests/current_contract.py",
+          "test_source_sha256": "5f7691a34eb7d41f5d5bb3d7e5a5c62b5fe618c4e576a29ae77541454b9e43f5"
+        },
+        {
+          "cases": 63,
+          "fixture_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727",
+          "helper_sha256": "f50f22deada3b1ecb2734981be8b4cb7fbca9c145ebab84115d11b6801ea91d9",
+          "kind": "controlled-scheduling",
+          "producer_fixture_sha256": "dcf57623ffbc0835736129ee38b25ce05d3f77973aa6d18a37c4e766681860a6",
+          "result_sha256": "9ae34dd696a1db0e79ef421d360f67d7ab50719a8d03c48c8ec23a7489005579",
+          "scope": "Fixture-feature debug helper only; test hook schedule witness. Separate from compact artifact.",
+          "test_source": "native/helper/tests/closed_work_batch.py",
+          "test_source_sha256": "986a27b65892c140a4f4c63379c3c5bf0a00c0638accfcf9b1f562c75e828727"
+        },
+        {
+          "cases": 1,
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "stock-0.171.0-v1-legacy",
+          "producer_sha256": "b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0",
+          "scope": "Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session.",
+          "script_sha256": "40a975f471f3c09dc6ba6144b4e8d155fb974292001bfe914bce4bec5a98dc91",
+          "trace_sha256": "56d2586336857f08f5320d117bb87c632e43b7b0243b6c7b68a86a1e446dbe36"
+        },
+        {
+          "cases": 1,
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "stock-0.171.0-v2-paginated",
+          "producer_sha256": "b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0",
+          "scope": "Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session.",
+          "script_sha256": "40a975f471f3c09dc6ba6144b4e8d155fb974292001bfe914bce4bec5a98dc91",
+          "trace_sha256": "860a9ec5af378bd1efb876855a829f930ccd42b6fa1602f7d6d9c35501919312"
+        },
+        {
+          "cases": 1,
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "eof",
+          "report_sha256": "32a1f7b45e6a97c1bf64dc76709db461739dbd3e32cf94faa53034334d8476a6",
+          "scope": "Process and receipt witness on disposable current schema with the provisional local application profile.",
+          "test_source_sha256": "7fb7644c7073013cfc66b5d15c2777ff4b728d2a4862833419df66d06372cfa1"
+        },
+        {
+          "cases": 1,
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "sdk-cancellation",
+          "report_sha256": "a5fe90b7681fdcc5d67dc8a90b9f138b5a9469e9ea9a0c12cc70e357dda87b8a",
+          "scope": "Process and receipt witness on disposable current schema with the provisional local application profile.",
+          "test_source_sha256": "7fb7644c7073013cfc66b5d15c2777ff4b728d2a4862833419df66d06372cfa1"
+        },
+        {
+          "cases": 1,
+          "helper_sha256": "cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc",
+          "kind": "terminal-observer",
+          "report_sha256": "5e65224d40f93b555f2d89dd9a7a6d3bdf1c2b897e200bf76b99ca35ecb4a4fc",
+          "scope": "Process and receipt witness on disposable current schema with the provisional local application profile.",
+          "test_source_sha256": "7fb7644c7073013cfc66b5d15c2777ff4b728d2a4862833419df66d06372cfa1"
+        }
+      ],
+      "qualification_boundary": "Selected stopped local work in the observed stock Codex 0.171.0 modes and exact storage contract. Related metadata and history-reference publication must have finished. Fixture and live witnesses retain their individual scopes. Local material preparation only.",
+      "qualification_identity": "7eb502ff2471ed4faeb701157f4490fe1b962b1130c33a140b57597e316850db"
+    }
+  ],
   "repository": "https://github.com/openai/codex",
   "retained_sources": [
     {

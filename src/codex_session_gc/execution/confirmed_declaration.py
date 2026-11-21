@@ -32,7 +32,7 @@ class Declaration(BaseModel):
     home_identity: tuple[StrictInt, StrictInt]
     roots: tuple[str, ...]
     selected: tuple[str, ...]
-    cutoff: str
+    cutoff: str | None
     profile_sha256: str
     schema_version: StrictInt
     guardian_associations: tuple[GuardianBinding, ...]
@@ -75,9 +75,12 @@ class Declaration(BaseModel):
 
     @field_validator("cutoff")
     @classmethod
-    def canonical_cutoff(cls, value: str) -> str:
+    def canonical_cutoff(cls, value: str | None) -> str | None:
         """Keep the UTC instant identical across preparation, dispatch and observation."""
-        if UtcCutoff(datetime.fromisoformat(value)).timestamp.isoformat() != value:
+        if (
+            value is not None
+            and UtcCutoff(datetime.fromisoformat(value)).timestamp.isoformat() != value
+        ):
             message = "The confirmed cutoff must be a canonical UTC instant."
             raise ValueError(message)
         return value
@@ -113,7 +116,7 @@ class ReviewedSelection:
 
     roots: tuple[str, ...]
     selected: tuple[str, ...]
-    cutoff: str
+    cutoff: str | None
     physical_manifest: tuple[WireTarget, ...]
     guardian_associations: tuple[GuardianAssociation, ...] = ()
 

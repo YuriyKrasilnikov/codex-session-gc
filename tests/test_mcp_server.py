@@ -154,7 +154,6 @@ def test_cache_exact_pages_refresh_and_bounded_details(tmp_path: Path) -> None:
 def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> None:
     home = tmp_path / "home"
     make_home(home)
-    main = ROOT
 
     async def check() -> None:
         parameters = StdioServerParameters(
@@ -222,10 +221,23 @@ def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> N
             prepared = _data(
                 await session.call_tool(
                     "prepare_cleanup",
-                    {"snapshot_id": snapshot, "thread_ids": [main], "cutoff": "2030-01-01"},
+                    {"snapshot_id": snapshot, "thread_ids": [CHILD], "cutoff": "2030-01-01"},
                 )
             )
-            assert prepared["report"]["selected"] == [main]
+            for cutoff_argument in ({}, {"cutoff": None}):
+                exact = _data(
+                    await session.call_tool(
+                        "prepare_cleanup",
+                        {"snapshot_id": snapshot, "thread_ids": [CHILD], **cutoff_argument},
+                    )
+                )
+                assert exact["report"]["cutoff"] is None
+                assert exact["report"]["selected"] == [CHILD]
+                assert exact["report"]["deletions"] == [CHILD]
+                assert exact["confirmation"]
+            assert (await session.call_tool("prepare_cleanup", {"snapshot_id": snapshot})).is_error
+            assert prepared["report"]["selected"] == [CHILD]
+            assert prepared["report"]["deletions"] == [CHILD]
             assert prepared["conditional"]
             assert prepared["can_apply_via_mcp"]
             assert len(prepared["preview_sha256"]) == 64
@@ -538,11 +550,12 @@ def test_changed_advisory_still_prepares_exact_fresh_selection(tmp_path: Path) -
         listed = await service.query_catalogue()
         assert service.index is not None
         service.index = CatalogueIndex(replace(service.index.catalogue, source_changed=True))
-        prepared = await service.prepare_cleanup(listed["snapshot_id"], [ROOT], "2030-01-01")
+        prepared = await service.prepare_cleanup(listed["snapshot_id"], [CHILD], "2030-01-01")
         assert prepared["source_changed"]
-        assert prepared["report"]["selected"] == [ROOT]
-        assert set(prepared["report"]["deletions"]) <= {ROOT}
+        assert prepared["report"]["selected"] == [CHILD]
+        assert prepared["report"]["deletions"] == [CHILD]
         assert prepared["can_apply_via_mcp"]
+        assert set(prepared["confirmation"]) == {"operation_id", "digest"}
 
     asyncio.run(asyncio.wait_for(check(), timeout=45))
 
@@ -1450,5 +1463,34 @@ def test_worker_summary_wakes_request_sender() -> None:
 
         result = await _observed_call(Receiver(), parent, backend())  # type: ignore[arg-type]
         assert result == {"outcome": "confirmed"}
+
+    asyncio.run(check())
+
+
+def test_empty_survivors_never_create_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codex_session_gc.cli import mcp_server  # noqa: PLC0415
+
+    _home(tmp_path)
+
+    async def no_candidates(intent: Intent) -> dict[str, Any]:
+        return {
+            **intent.payload(),
+            "deletions": [],
+            "errors": [],
+            "physical_manifest": [],
+            "guardian_associations": [],
+        }
+
+    async def check() -> None:
+        service = CatalogueService(tmp_path, receipts=tmp_path.parent / "receipts")
+        listed = await service.query_catalogue()
+        monkeypatch.setattr(mcp_server, "async_preview", no_candidates)
+        monkeypatch.setattr(service.operations, "prepare", lambda *_args: pytest.fail("allocated"))
+        prepared = await service.prepare_cleanup(listed["snapshot_id"], [_B])
+        assert not prepared["can_apply_via_mcp"]
+        assert "confirmation" not in prepared
+        assert prepared["report"]["cutoff"] is None
 
     asyncio.run(check())

@@ -127,8 +127,9 @@ Building the helper alone does not qualify it for cleanup. The Python adapter
 loads `src/codex_session_gc/execution/closed_work_contract.json` and accepts only
 its qualified production binary SHA-256, wire version, and exact schema and
 migration identities. The supported production helper uses Rust 1.99.1, edition
-2024 and wire 6. The matching binary identity is recorded in the bundled contract
-and release manifest. The release bundle names the executable
+2024 and wire 7. The matching fixture-qualified binary identity is recorded in the
+bundled contract. Stock lifecycle and installed-client evidence for this helper
+remain separate qualification steps. The release bundle names the executable
 `codex-session-gc-native`; supply its absolute path with `--helper`.
 A digest becomes selectable
 only when the Python contract resource records its qualification. Source profile
@@ -278,7 +279,7 @@ See [the compatibility procedure](../docs/compatibility.md) for deciding which
 checks and producer witnesses a Codex update actually changes.
 
 The journal envelope identity, including its historical MIME label and payload
-version 1, is preserved; execution accepts only wire 6. Completed old receipt
+version 1, is preserved; execution accepts only wire 7. Completed old receipt
 metadata remains readable without decoding or replaying a retired request.
 Unresolved old-profile requests require their named qualified consumer. There is
 no fallback to a retired request format or another schema. The helper may create

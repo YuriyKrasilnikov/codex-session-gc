@@ -171,7 +171,7 @@ def _setup(  # noqa: C901, PLR0912, PLR0913, PLR0915
         helper_sha256=helper.binary_sha256.hex(),
         source_identity=helper.source_identity,
         provider=raw["provider"],
-        cutoff=raw["cutoff"],
+        cutoff=raw["age_policy"]["cutoff"],
         collection_limits=asdict(_LIMITS),
         dispatch_limits=asdict(DispatchLimits(5, 1000000, 4096, 1)),
         scopes=[scope],

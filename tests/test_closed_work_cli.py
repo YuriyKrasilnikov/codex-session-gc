@@ -172,3 +172,32 @@ def test_keyboard_interruption_reports_only_partial_timings(
     (record,) = records
     assert record["counts_completion"] == "interrupted"
     assert record["phases"][0]["name"] == "sql_projection"
+
+
+def test_module_cli_requires_exact_ids_without_cutoff(tmp_path: Path) -> None:
+    import subprocess  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    _native_home(tmp_path)
+    base = [
+        sys.executable,
+        "-m",
+        "codex_session_gc",
+        "plan",
+        "--online",
+        "--home",
+        str(tmp_path),
+        "--closed-work",
+        _MAIN,
+        "--json",
+    ]
+    refused = subprocess.run(base, capture_output=True, text=True, check=False)  # noqa: S603
+    assert refused.returncode != 0
+    assert "select-thread" in refused.stdout + refused.stderr
+    result = subprocess.run(  # noqa: S603
+        [*base, "--select-thread", _GRANDCHILD], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    report = json.loads(result.stdout)
+    assert report["cutoff"] is None
+    assert report["selected"] == report["deletions"] == [_GRANDCHILD]

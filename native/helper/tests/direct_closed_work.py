@@ -116,7 +116,7 @@ def case(name, schema_version=64, body_size=None):
         home = pathlib.Path(manifest["home"])
         root, child = manifest["main"], manifest["target"]
         path = pathlib.Path(manifest["target_path"])
-        request["version"] = 6
+        request["version"] = 7
         request["deletion_scope"] = [child]
         if schema_version == 64:
             upgrade(home)

@@ -9,11 +9,11 @@ not a fixed retention policy.
 
 ## What is new in 0.5.2
 
-The locally verified 0.5.2 package supports selected stopped local Codex 0.171.0
+The published 0.5.2 package supports selected stopped local Codex 0.171.0
 work within the boundaries described in [compatibility](docs/compatibility.md).
 It uses state migration 64, thread history migration 9 and SQLite 3.54.1 in the
 application and helper. Keep older receipt consumers while their unresolved
-operations require them. Publication and public installation remain to be verified.
+operations require them.
 
 ## What was new in 0.5.1
 
@@ -34,7 +34,7 @@ its content scrolls in compact windows.
 
 ## Download and install
 
-Once 0.5.2 is published, its installation workflow uses a matched Linux x86_64
+The published 0.5.2 installation workflow uses a matched Linux x86_64
 bundle and a standard-library installer. Obtain the published assets and independently
 verify their attestations before using them. Python 3.14 or newer, `uv` and a
 separately trusted GitHub CLI (`gh`) are prerequisites. The qualified deployment
@@ -270,12 +270,15 @@ include refusal, partial or unknown results; they do not promise reclaimed space
 Native silence remains waiting. Progress is transient, so keep the receipt for
 recovery even if the display closes.
 
+The UI starts with no date filter; select exact histories to preview them. Enter
+a UTC date to restrict eligibility, or clear it to return to exact-ID selection.
 `ui --cutoff` sets the visible initial UTC boundary. `--receipt-dir` chooses the
 durable receipt directory, which must be outside the selected Codex home. Its
 default is the user's state directory. The UI requires an interactive terminal.
 
 ## CLI preview and cleanup
 
+The current source uses a matching wire 7 helper for the workflows below.
 Choose a stopped session root and an explicit UTC cutoff:
 
 ```console
@@ -294,7 +297,9 @@ codex-session-gc apply --online --home /absolute/codex-home \
   --receipt /absolute/new-cleanup.sqlite --json
 ```
 
-Omitting `--select-thread` considers the selected work's whole membership against
+Omit `--cutoff` only when supplying at least one `--select-thread`; that mode
+requests exactly those IDs without an age filter. All other eligibility and
+retention checks still apply. Omitting `--select-thread` considers the selected work's whole membership against
 the cutoff and retention rules. The cutoff narrows deletion eligibility, not the
 ownership scope. Retained descendants prevent selecting their cascading parent.
 Unknown origin, age, archive state, missing history and ambiguous topology remain
@@ -465,6 +470,9 @@ history/activity/asc. The response echoes `order` with `target`, `field` and
 `direction`. Filtering and ordering cover the full matching history sequence before
 pagination; `total_matches`, offsets and limits count histories in either mode. Contextual parents remain in group summaries and are not matching
 histories unless their own facts match. Changing filters does not reread storage.
+`prepare_cleanup` requires explicit `thread_ids`; its `cutoff` may be omitted or
+null to request exactly those IDs without an age filter. A report with no deletion
+candidates has no confirmation and cannot be applied.
 Preparation reads fresh scoped facts and returns a conditional report without a
 journal or deletion. Pages contain at most 100 histories; preparation accepts at
 most 200 distinct IDs per request. Larger selections can use the terminal UI.

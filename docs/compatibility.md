@@ -7,9 +7,9 @@ resource is `src/codex_session_gc/execution/closed_work_contract.json`; a releas
 manifest must bind that resource's wheel to the delivered native binary.
 
 The pinned native source is OpenAI Codex commit
-`092d3acd6bec3e3a14bdc7e7a2810ab628ab759d` plus the tracked patches. Wire 6 is the
-current request format. Qualification does not turn the helper into the installed
-Codex executable or establish a complete live Core/app-server lifecycle guarantee.
+`092d3acd6bec3e3a14bdc7e7a2810ab628ab759d` plus the tracked patches. The current
+source profile uses wire 7 for dated and exact-ID selections. Its qualification
+covers the separate helper and the documented storage boundaries.
 
 ## 0.5.2 contract
 
