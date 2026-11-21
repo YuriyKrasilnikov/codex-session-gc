@@ -38,10 +38,22 @@ from codex_session_gc.execution.selection_provenance import (
     check_reviewed_associations,
     reviewed_associations,
 )
-from codex_session_gc.execution.timing import Count, Phase, count, interval
+from codex_session_gc.execution.timing import (
+    Count,
+    Phase,
+    TimingObserver,
+    count,
+    current,
+    interval,
+    observe,
+    signal_worker_summary,
+)
 
 if TYPE_CHECKING:
     from codex_session_gc.execution.progress import ProgressChannel
+
+
+_TIMING_BYTES = 16384
 
 
 class PreviewMode(StrEnum):
@@ -308,6 +320,17 @@ def _preview_result(path: Path) -> dict[str, Any]:
     return result
 
 
+def _read_worker_timing(path: Path, observer: TimingObserver) -> None:
+    """Discard malformed optional observations without changing the business result."""
+    try:
+        with (path / "timings.json").open("rb") as stream:
+            raw = stream.read(_TIMING_BYTES + 1)
+        if len(raw) <= _TIMING_BYTES and observer.accept_worker(json.loads(raw)):
+            signal_worker_summary()
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+
 async def async_preview(
     intent: Intent, *, mode: PreviewMode = PreviewMode.OBSERVE
 ) -> dict[str, Any]:
@@ -322,6 +345,7 @@ async def async_preview(
     process: asyncio.subprocess.Process | None = None
     launch: asyncio.Task[asyncio.subprocess.Process] | None = None
     interrupted = False
+    observer = current()
 
     async def cleanup() -> None:
         nonlocal process
@@ -343,7 +367,8 @@ async def async_preview(
 
     try:
         (path / "input.json").write_text(
-            json.dumps({**intent.payload(), "mode": mode.value}), encoding="utf-8"
+            json.dumps({**intent.payload(), "mode": mode.value, "timings": observer is not None}),
+            encoding="utf-8",
         )
         launch = asyncio.create_task(
             asyncio.create_subprocess_exec(
@@ -359,23 +384,31 @@ async def async_preview(
                 start_new_session=True,
             )
         )
-        process = await asyncio.shield(launch)
-        await process.wait()
-        return _preview_result(path)
+        with interval(Phase.PREVIEW_WORKER_WAIT):
+            process = await asyncio.shield(launch)
+            await process.wait()
+        try:
+            result = _preview_result(path)
+        finally:
+            if observer is not None:
+                _read_worker_timing(path, observer)
+        return result
     finally:
-        finishing = asyncio.create_task(cleanup())
-        while not finishing.done():
-            try:
-                await asyncio.shield(finishing)
-            except asyncio.CancelledError:
-                interrupted = True
-        await finishing
+        with interval(Phase.WORKER_CLEANUP):
+            finishing = asyncio.create_task(cleanup())
+            while not finishing.done():
+                try:
+                    await asyncio.shield(finishing)
+                except asyncio.CancelledError:
+                    interrupted = True
+            await finishing
         if interrupted:
             raise asyncio.CancelledError
 
 
 def _worker(directory: Path) -> None:
     data = json.loads((directory / "input.json").read_text(encoding="utf-8"))
+    observer = TimingObserver("preview") if data.get("timings") else None
     try:
         intent = Intent(
             Path(data["home"]),
@@ -383,10 +416,22 @@ def _worker(directory: Path) -> None:
             tuple(ThreadId.parse(x) for x in data["roots"]),
             tuple(ThreadId.parse(x) for x in data["selected"]),
         )
-        result = preview(intent, mode=PreviewMode(data["mode"]))
+        if observer is None:
+            result = preview(intent, mode=PreviewMode(data["mode"]))
+        else:
+            with observe(observer):
+                result = preview(intent, mode=PreviewMode(data["mode"]))
     except Exception as error:  # noqa: BLE001
         result = {"error": str(error)}
     (directory / "result.json").write_text(json.dumps(result), encoding="utf-8")
+    if observer is not None:
+        try:
+            observer.finish(interrupted="error" in result)
+            (directory / "timings.json").write_text(
+                json.dumps(observer.snapshot()), encoding="utf-8"
+            )
+        except OSError, TypeError, ValueError:
+            pass
 
 
 if __name__ == "__main__":

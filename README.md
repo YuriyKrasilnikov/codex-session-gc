@@ -308,6 +308,12 @@ Unreached stages are listed separately from stages measured at zero duration.
 Helper round-trip time measures the caller's wait, including process handling.
 Measurements are separate from selection, confirmation and saved receipts.
 
+Textual shows the current stage while preview or cleanup is running. Preview
+can report both caller wait and work measured inside its read-only subprocess.
+MCP clients that supply a progress token receive request-scoped notifications
+with measured stages and counts. Worker elapsed time is contained within
+caller wait. Missed notifications do not change the returned operation result.
+
 Preview JSON contains `roots`, `selected`, conditional `deletions`, corresponding
 `sizes` in stored bytes, `retained` reasons and `errors`. `physical_manifest` binds
 every selected owner's actual representation, immutable rollout ID, path, stat,

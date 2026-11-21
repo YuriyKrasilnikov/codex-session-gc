@@ -93,12 +93,29 @@ def live(observer: TimingObserver) -> Iterator[None]:
 
 def terminal(summary: dict[str, object]) -> str:
     """Render observed intervals without inferring unmeasured native phases."""
-    lines = [f"timings: {summary['caller_elapsed_ns']} ns elapsed ({summary['counts_completion']})"]
+    elapsed = summary["caller_elapsed_ns"]
+    completion = summary["counts_completion"]
+    lines = [f"timings: {elapsed} ns caller elapsed ({completion})"]
+    if summary.get("worker_elapsed_ns") is not None:
+        lines.append(f"  worker elapsed: {summary['worker_elapsed_ns']} ns")
+    phases = summary.get("phases")
+    if (
+        summary.get("worker_elapsed_ns") is None
+        and summary.get("scope") == "preview"
+        and isinstance(phases, list)
+        and any(phase.get("name") == "preview_worker_wait" for phase in phases)
+    ):
+        lines.append("  worker observations: unavailable")
+    worker_counts = summary.get("worker_counts")
+    if isinstance(worker_counts, dict):
+        completion = summary.get("worker_counts_completion")
+        if completion is not None:
+            lines.append(f"  worker counts ({completion}): {worker_counts}")
     phases = summary["phases"]
     if not isinstance(phases, list):
         return "\n".join(lines)
     lines.extend(
-        f"  {phase['name']}: {phase['elapsed_ns']} ns "
+        f"  {phase['name']} ({phase['clock_domain']}): {phase['elapsed_ns']} ns "
         f"({phase['calls']} calls, {phase['completion']})"
         for phase in phases
     )

@@ -8,7 +8,7 @@ import asyncio
 import hashlib
 import json
 import threading
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -30,12 +30,25 @@ from codex_session_gc.execution.confirmed_declaration import (
 )
 from codex_session_gc.execution.operation_status import project_operation_status
 from codex_session_gc.execution.physical_manifest import decode_targets
+from codex_session_gc.execution.timing import Phase, interval, measured_to_thread
 from codex_session_gc.recovery import RecoveryError, inspect
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from codex_session_gc.domain import GuardianAssociation
+
+
+@contextmanager
+def _admission_lock(lock: threading.Lock) -> Iterator[None]:
+    """Measure lock acquisition without including the protected operation."""
+    with interval(Phase.ADMISSION_LOCK_WAIT):
+        lock.acquire()
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def _identifier(value: str) -> str:
@@ -170,7 +183,7 @@ class ConfirmedOperations:
         if declaration.digest != declaration.calculated_digest():
             message = "Declaration digest does not match the exact payload."
             raise ValueError(message)
-        with self._lock:
+        with _admission_lock(self._lock):
             previous = self._declarations.get(identifier)
             if previous is not None and previous != declaration:
                 message = "Operation identifier is already bound to a different declaration."
@@ -242,7 +255,7 @@ class ConfirmedOperations:
         ):
             message = "Confirmation requires a canonical operation UUID and SHA-256 digest."
             raise ValueError(message)
-        with self._lock:
+        with _admission_lock(self._lock):
             declaration = self._declarations.get(identifier)
             if declaration is None:
                 path = self._receipt(identifier)
@@ -300,7 +313,7 @@ class ConfirmedOperations:
 
     async def apply_owned(self, operation_id: str, digest: str) -> dict[str, Any]:
         """Keep backend ownership through cancellation and join native cleanup."""
-        task = asyncio.create_task(asyncio.to_thread(self.apply_reference, operation_id, digest))
+        task = asyncio.create_task(measured_to_thread(self.apply_reference, operation_id, digest))
         try:
             return await asyncio.shield(task)
         except asyncio.CancelledError:

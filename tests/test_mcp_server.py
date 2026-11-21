@@ -1259,3 +1259,196 @@ def test_project_summary_cache_and_generation_drilldown(
             )
 
     asyncio.run(check())
+
+
+def test_stdio_progress_is_scoped_to_each_request(tmp_path: Path) -> None:
+    """Overlapping progress tokens receive independent monotone observations."""
+    home = tmp_path / "home"
+    make_home(home)
+
+    async def check() -> None:
+        # Coordinate the test-only declaration builder with actual SDK sends.
+        # This witnesses in-flight delivery without requiring a final frame.
+        bootstrap = """
+import json, sys, threading
+from pathlib import Path
+from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
+from codex_session_gc.execution.timing import current
+from codex_session_gc.cli.mcp_server import Context, run
+sent = {count: threading.Event() for count in (1, 2)}
+original_prepare = ConfirmedOperations.prepare
+original_progress = Context.report_progress
+async def observed_progress(self, progress, total=None, message=None):
+    await original_progress(self, progress, total, message)
+    if message is not None:
+        counts = json.loads(message).get("worker_counts")
+        if counts is not None and "selected_requested" in counts:
+            sent[counts["selected_requested"]].set()
+def gated_prepare(self, *args, **kwargs):
+    observer = current()
+    assert observer is not None
+    count = observer.snapshot()["worker_counts"]["selected_requested"]
+    if not sent[count].wait(10):
+        raise RuntimeError("test did not observe the in-flight worker frame")
+    return original_prepare(self, *args, **kwargs)
+Context.report_progress = observed_progress
+ConfirmedOperations.prepare = gated_prepare
+run(Path(sys.argv[1]))
+"""
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=["-c", bootstrap, str(home)],
+            env=dict(os.environ),
+        )
+        async with stdio_client(parameters) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            for tool in tools.tools:
+                assert "ctx" not in tool.input_schema.get("properties", {})
+            snapshot = _data(await session.call_tool("query_catalogue", {}))["snapshot_id"]
+            observations: list[list[tuple[float, str | None]]] = [[], []]
+
+            async def first(value: float, _total: float | None, message: str | None) -> None:
+                observations[0].append((value, message))
+
+            async def second(value: float, _total: float | None, message: str | None) -> None:
+                observations[1].append((value, message))
+
+            args = {"snapshot_id": snapshot, "thread_ids": [ROOT], "cutoff": "2030-01-01"}
+            larger = {**args, "thread_ids": [ROOT, CHILD]}
+            results = await asyncio.gather(
+                session.call_tool("prepare_cleanup", args, progress_callback=first),
+                session.call_tool("prepare_cleanup", larger, progress_callback=second),
+            )
+            for result in results:
+                assert "timings" not in _data(result)["report"]
+            for index, frames in enumerate(observations):
+                assert frames
+                values = [value for value, _ in frames]
+                assert values == sorted(set(values))
+                assert all(str(home) not in (message or "") for _, message in frames)
+                assert all(
+                    json.loads(message or "{}")["scope"] == "preview" for _, message in frames
+                )
+                worker = [
+                    json.loads(message or "{}")
+                    for _, message in frames
+                    if json.loads(message or "{}").get("worker_elapsed_ns") is not None
+                ]
+                assert worker
+                assert worker[-1]["worker_counts"]["selected_requested"] == index + 1
+            ordinary = _data(await session.call_tool("prepare_cleanup", args))
+            assert "timings" not in ordinary["report"]
+
+    asyncio.run(asyncio.wait_for(check(), timeout=60))
+
+
+def test_stalled_progress_sender_does_not_hold_business_result() -> None:
+    """A blocked transport is cancelled and joined independently of the backend."""
+    from codex_session_gc.cli.mcp_server import _observed_call  # noqa: PLC0415
+    from codex_session_gc.execution.timing import TimingObserver  # noqa: PLC0415
+
+    async def check() -> None:
+        entered = asyncio.Event()
+        closed = asyncio.Event()
+
+        class Stalled:
+            async def report_progress(
+                self, _value: float, total: float | None = None, message: str | None = None
+            ) -> None:
+                del total, message
+                entered.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    closed.set()
+
+        async def backend() -> dict[str, Any]:
+            await entered.wait()
+            return {"outcome": "confirmed"}
+
+        result = await asyncio.wait_for(
+            _observed_call(Stalled(), TimingObserver("apply"), backend()),
+            timeout=2,  # type: ignore[arg-type]
+        )
+        assert result == {"outcome": "confirmed"}
+        assert closed.is_set()
+
+    asyncio.run(check())
+
+
+def test_observation_preserves_both_preview_response_bounds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep timing outside the digest and both serialized payload limits."""
+    from codex_session_gc.cli import mcp_server  # noqa: PLC0415
+    from codex_session_gc.cli.mcp_server import _REPORT_BYTES  # noqa: PLC0415
+    from codex_session_gc.execution import timing  # noqa: PLC0415
+
+    home = tmp_path / "home"
+    make_home(home)
+    report = {"detail": ""}
+
+    async def render(_intent: Intent) -> dict[str, str]:
+        timing.count(timing.Count.ROOTS_REQUESTED)
+        return dict(report)
+
+    monkeypatch.setattr(mcp_server, "async_preview", render)
+
+    async def check() -> None:
+        service = CatalogueService(home, capability=McpCapability.READ_ONLY)
+        identity = (await service.query_catalogue())["snapshot_id"]
+        arguments = (identity, [ROOT], "2030-01-01")
+        envelope = await service.prepare_cleanup(*arguments)
+        payload_bytes = len(json.dumps(envelope, ensure_ascii=False).encode())
+        report["detail"] = "x" * (_REPORT_BYTES - payload_bytes)
+        ordinary = await service.prepare_cleanup(*arguments)
+        observer = timing.TimingObserver("preview")
+        with timing.observe(observer):
+            measured = await service.prepare_cleanup(*arguments)
+            assert measured == ordinary
+            assert observer.snapshot()["counts"] == {"roots_requested": 1}
+            report["detail"] += "x"
+            with pytest.raises(ValueError, match="Complete preparation exceeds"):
+                await service.prepare_cleanup(*arguments)
+            report["detail"] = "x" * _REPORT_BYTES
+            with pytest.raises(ValueError, match="Full preview exceeds"):
+                await service.prepare_cleanup(*arguments)
+
+    asyncio.run(check())
+
+
+def test_worker_summary_wakes_request_sender() -> None:
+    """A newly accepted worker snapshot wakes its request's sender while work continues."""
+    from codex_session_gc.cli.mcp_server import _observed_call  # noqa: PLC0415
+    from codex_session_gc.execution.timing import (  # noqa: PLC0415
+        Count,
+        TimingObserver,
+        signal_worker_summary,
+    )
+
+    async def check() -> None:
+        observed = asyncio.Event()
+        parent = TimingObserver("preview")
+        worker = TimingObserver("preview")
+        worker.count(Count.SELECTED_REQUESTED, 2)
+        worker.finish()
+
+        class Receiver:
+            async def report_progress(
+                self, _value: float, total: float | None = None, message: str | None = None
+            ) -> None:
+                del total
+                if json.loads(message or "{}").get("worker_elapsed_ns") is not None:
+                    observed.set()
+
+        async def backend() -> dict[str, Any]:
+            assert parent.accept_worker(worker.snapshot())
+            signal_worker_summary()
+            await asyncio.wait_for(observed.wait(), timeout=1)
+            return {"outcome": "confirmed"}
+
+        result = await _observed_call(Receiver(), parent, backend())  # type: ignore[arg-type]
+        assert result == {"outcome": "confirmed"}
+
+    asyncio.run(check())

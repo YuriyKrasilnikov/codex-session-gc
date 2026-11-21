@@ -511,7 +511,11 @@ def test_review_locks_selection_and_resets_confirmation(
     async def scenario() -> None:
         browser = app(tmp_path, monkeypatch)
 
+        preview_calls = 0
+
         async def preview(intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
+            nonlocal preview_calls
+            preview_calls += 1
             assert mode is PreviewMode.CONFIRM
             return report(intent)
 
@@ -521,6 +525,9 @@ def test_review_locks_selection_and_resets_confirmation(
             await pilot.click("#select")
             await pilot.click("#preview")
             await pilot.pause()
+            first_timing = browser.timing
+            assert first_timing is not None
+            assert "timings:" in str(browser.query_one("#review-text", Static).render())
             browser.query_one("#confirm", Input).value = "DELETE"
             assert browser.query_one("#clear").disabled
             assert browser.query_one("#refresh").disabled
@@ -539,6 +546,9 @@ def test_review_locks_selection_and_resets_confirmation(
             await pilot.click("#preview")
             await pilot.pause()
             assert browser.query_one("#confirm", Input).value == ""
+            assert preview_calls == 2  # noqa: PLR2004
+            assert browser.timing is not first_timing
+            assert not browser.query_one("#progress").display
             assert browser.receipt is None
 
     asyncio.run(scenario())
@@ -636,6 +646,29 @@ def test_missing_postdispatch_result_is_unknown(
     assert "UNKNOWN" in output
     assert "Receipt:" in output
     assert "do not retry" in output
+
+
+def test_console_renders_timings_outside_the_completed_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result = ("Outcome: REFUSED", 3)
+
+    def finish(browser: ui.SessionApp) -> tuple[str, int]:
+        browser.timing = ui.TimingObserver("apply")
+        browser.timing.finish()
+        browser.completed_result = result
+        return result
+
+    monkeypatch.setattr(ui.SessionApp, "run", finish)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    arguments = argparse.Namespace(
+        home=tmp_path, cutoff=CUTOFF, helper=Path("/helper"), receipt_dir=tmp_path.parent
+    )
+    assert ui.run(arguments) == result[1]
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == result[0]
+    assert lines[1].startswith("timings: ")
 
 
 @pytest.mark.parametrize("size", [(80, 24), (120, 40)])
