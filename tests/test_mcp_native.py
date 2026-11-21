@@ -29,6 +29,7 @@ from codex_session_gc.cli.console_tasks import (
     parse_cutoff,
     preview,
 )
+from codex_session_gc.cli.main import main
 from codex_session_gc.domain import ThreadId
 from codex_session_gc.execution.closed_work_profile import load_closed_work_contract
 from codex_session_gc.recovery import LaunchStatus, inspect
@@ -117,6 +118,49 @@ def native_helper() -> Path:
     path = Path(value).resolve(strict=True)
     assert hashlib.sha256(path.read_bytes()).digest() == load_closed_work_contract().binary_sha256
     return path
+
+
+def test_keep_blocks_a_prepared_cleanup_across_cli_and_mcp(
+    tmp_path: Path, native_helper: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An exact cleanup prepared by one process observes another process's mark."""
+    storage, receipts = tmp_path / "home", tmp_path / "receipts"
+    paths = make_home(storage)
+    before = logical_rows(storage)
+
+    async def check() -> None:
+        async with server(storage, native_helper, receipts) as session:
+            declaration = await prepare(session)
+            assert (
+                main(
+                    [
+                        "keep",
+                        "set",
+                        "--home",
+                        str(storage),
+                        "--helper",
+                        str(native_helper),
+                        CHILD,
+                        "--json",
+                    ]
+                )
+                == 0
+            )
+            assert json.loads(capsys.readouterr().out)["status"] == "confirmed"
+            assert (await call(session, "keep_status", {}))["thread_ids"] == [CHILD]
+            applied = await call(session, "apply_cleanup", declaration)
+            assert applied["outcome"] == "refused", applied
+            assert paths[CHILD].is_file()
+            assert logical_rows(storage) == before
+            cleared = await call(session, "keep_clear", {"thread_id": CHILD})
+            assert cleared["status"] == "confirmed"
+            fresh = await prepare(session)
+            assert fresh["operation_id"] != declaration["operation_id"]
+            assert (await call(session, "apply_cleanup", fresh))["outcome"] == "confirmed"
+            assert not paths[CHILD].exists()
+            assert paths[OTHER].is_file()
+
+    asyncio.run(asyncio.wait_for(check(), 120))
 
 
 @asynccontextmanager

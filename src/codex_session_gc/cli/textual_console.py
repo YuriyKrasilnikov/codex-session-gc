@@ -38,6 +38,8 @@ from codex_session_gc.cli.storage_screen import StorageScreen
 from codex_session_gc.cli.storage_service import StorageService
 from codex_session_gc.cli.timing_display import terminal as timing_terminal
 from codex_session_gc.domain import ArchiveState, ExactIds, ThreadId, UtcCutoff
+from codex_session_gc.execution.keep_command import KeepAction, change_keep
+from codex_session_gc.execution.keep_store import read_kept_threads
 from codex_session_gc.execution.progress import ProgressChannel, ProgressEvent, ProgressKind
 from codex_session_gc.execution.timing import TimingObserver, measured_to_thread, observe
 from codex_session_gc.inventory.catalogue import SessionCatalogue, read_session_catalogue
@@ -107,6 +109,8 @@ class SessionApp(App[tuple[str, int]]):
         ("q", "quit", "Quit"),
         ("space", "select_matches", "Select matches"),
         ("escape", "cancel_preview", "Cancel preview"),
+        ("k", "mark_keep", "Keep history"),
+        ("u", "clear_keep", "Clear Keep"),
     ]
     CSS = """
     Screen { layout: vertical; overflow: hidden hidden; }
@@ -145,6 +149,7 @@ class SessionApp(App[tuple[str, int]]):
         self.storage = StorageService(home)
         self.index: CatalogueIndex | None = None
         self.catalogue: SessionCatalogue | None = None
+        self.kept: frozenset[ThreadId] | None = None
         self.groups: tuple[CatalogueGroup, ...] = ()
         self.matching_histories: tuple[SessionEntry, ...] = ()
         self.order_target = "work"
@@ -361,6 +366,7 @@ class SessionApp(App[tuple[str, int]]):
         self.query_one("#heading", Static).update("Loading metadata catalogue…")
         try:
             catalogue = await asyncio.to_thread(read_session_catalogue, self.home)
+            await self._observe_keep()
             if not self._catalogue_is_live():
                 return
             self.catalogue, self.index = catalogue, CatalogueIndex(catalogue)
@@ -481,6 +487,8 @@ class SessionApp(App[tuple[str, int]]):
                 f"[{picked}/{len(group.matching_ids)}] {group.root.title[:120] or 'Untitled'} "
                 f"[{group.root.source.value}]"
             )
+            if self.kept is not None and group.root.id in self.kept:
+                caption += " [Keep]"
             table.add_row(
                 Text(clean(caption)),
                 _size(group.own_known_stored_bytes, group.own_incomplete),
@@ -520,6 +528,8 @@ class SessionApp(App[tuple[str, int]]):
             f"  {'✓' if entry.id in self.selected else '○'} "
             f"{entry.title[:120] or 'Untitled'} [{entry.source.value}]"
         )
+        if self.kept is not None and entry.id in self.kept:
+            caption += " [Keep]"
         if flat:
             caption += f" — {group.root.title[:60] or 'Untitled work'} ({group.root.id.value})"
         table.add_row(
@@ -568,6 +578,13 @@ class SessionApp(App[tuple[str, int]]):
                     else f"≥{entry.known_stored_bytes:,} stored bytes; total unknown"
                 ),
                 f"Source: {entry.source.value}",
+                (
+                    "Keep status unavailable"
+                    if self.kept is None
+                    else "Keep is set"
+                    if entry.id in self.kept
+                    else "Keep is clear"
+                ),
                 f"Physical histories: {len(entry.physical_rollouts)}; formats: "
                 + ", ".join(
                     sorted({item.representation.value for item in entry.physical_rollouts})
@@ -589,6 +606,44 @@ class SessionApp(App[tuple[str, int]]):
                 ),
             ]
             self.query_one("#details", Static).update("\n".join(clean(line) for line in lines))
+
+    async def _observe_keep(self) -> None:
+        try:
+            self.kept = await asyncio.to_thread(read_kept_threads, self.home)
+        except OSError, ValueError:
+            self.kept = None
+
+    async def action_mark_keep(self) -> None:
+        """Set storage-wide protection for the exact highlighted history."""
+        await self._change_keep(KeepAction.MARK)
+
+    async def action_clear_keep(self) -> None:
+        """Explicitly clear storage-wide protection for the highlighted history."""
+        await self._change_keep(KeepAction.CLEAR)
+
+    async def _change_keep(self, action: KeepAction) -> None:
+        if self.review_open or self.dispatching or not isinstance(self.focused, DataTable):
+            return
+        current = self._current()
+        if current is None or self.helper is None or self.startup_home is None:
+            self._notice("Choose a history and a matched helper before changing Keep.")
+            return
+        group, identifier = current
+        try:
+            result = await asyncio.to_thread(
+                change_keep,
+                self.home,
+                self.helper,
+                identifier or group.root.id,
+                action,
+                expected_home=self.startup_home,
+            )
+        except (OSError, ValueError) as error:
+            self._notice(f"Keep change refused: {error}")
+            return
+        await self._observe_keep()
+        self._render_rows()
+        self._notice(f"Keep {result['status']} — {result['detail']}")
 
     def _select(
         self, groups: tuple[CatalogueGroup, ...], identifier: ThreadId | None = None

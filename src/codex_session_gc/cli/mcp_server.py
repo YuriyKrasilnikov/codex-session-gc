@@ -31,6 +31,8 @@ from codex_session_gc.cli.summary_display import cwd_label
 from codex_session_gc.compatibility.observation import ImportedSupport
 from codex_session_gc.domain import ArchiveState, ExactIds, ThreadId
 from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
+from codex_session_gc.execution.keep_command import KeepAction, change_keep
+from codex_session_gc.execution.keep_store import read_kept_threads
 from codex_session_gc.execution.selection_provenance import reviewed_associations
 from codex_session_gc.execution.timing import TimingObserver, observe, worker_wakeup
 from codex_session_gc.installation.model import InstallLayout
@@ -502,6 +504,38 @@ class CatalogueService(CatalogueObservation):
         if (metadata.st_dev, metadata.st_ino) != self.operations.home_identity:
             raise ValueError("The startup home identity has changed; restart the server.")
 
+    async def keep_status(self) -> dict[str, object]:
+        """Read the current storage-wide Keep marks for this server's home."""
+        self._require_startup_home()
+        marked = await asyncio.to_thread(read_kept_threads, self.home)
+        self._require_startup_home()
+        response: dict[str, object] = {"thread_ids": [str(item.value) for item in sorted(marked)]}
+        if len(json.dumps(response).encode()) > _REPORT_BYTES:
+            raise ValueError("Keep status exceeds the response bound; use the local CLI.")
+        return response
+
+    async def keep_set(self, thread_id: str) -> dict[str, object]:
+        """After explicit user authorization, protect one exact history in this home."""
+        return await self._change_keep(thread_id, KeepAction.MARK)
+
+    async def keep_clear(self, thread_id: str) -> dict[str, object]:
+        """After explicit user authorization, clear protection for one exact history."""
+        return await self._change_keep(thread_id, KeepAction.CLEAR)
+
+    async def _change_keep(self, thread_id: str, action: KeepAction) -> dict[str, object]:
+        self._require_cleanup()
+        self._require_startup_home()
+        if self.operations.helper is None:
+            raise ValueError("A matched native helper is required to change Keep.")
+        return await asyncio.to_thread(
+            change_keep,
+            self.home,
+            self.operations.helper,
+            ThreadId.parse(thread_id),
+            action,
+            expected_home=self.operations.home_identity,
+        )
+
     async def apply_cleanup(self, operation_id: str, digest: str) -> dict[str, Any]:
         """Apply the exact server-held preparation referenced by two unchanged strings."""
         self._require_cleanup()
@@ -519,7 +553,7 @@ class CatalogueService(CatalogueObservation):
     def _require_cleanup(self) -> None:
         if self.capability is McpCapability.READ_ONLY:
             raise PermissionError(
-                "Read-only MCP cannot apply cleanup or append reconciliation evidence."
+                "Read-only MCP cannot change Keep, apply cleanup or append reconciliation evidence."
             )
 
 
@@ -627,10 +661,19 @@ def create_server(
         service.session_details,
         prepare_cleanup,
         service.compatibility_status,
+        service.keep_status,
     ):
         server.tool(annotations=annotations)(tool)
     server.tool(annotations=annotations)(service.cleanup_status)
     if service.capability is McpCapability.CLEANUP:
+        for keep_tool in (service.keep_set, service.keep_clear):
+            server.tool(
+                annotations=ToolAnnotations(
+                    read_only_hint=False,
+                    destructive_hint=False,
+                    open_world_hint=False,
+                )
+            )(keep_tool)
         server.tool(
             annotations=ToolAnnotations(
                 read_only_hint=False,

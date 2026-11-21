@@ -18,7 +18,7 @@ from codex_session_gc import diagnostics
 from codex_session_gc import sqlite_engine as sqlite3
 from codex_session_gc.artifacts import ArtifactIdentity, SourceIdentity
 from codex_session_gc.cli import closed_work_execution, timing_display
-from codex_session_gc.cli.console_display import attachment_plan_lines, preview_lines
+from codex_session_gc.cli.console_display import attachment_plan_lines, clean, preview_lines
 from codex_session_gc.cli.console_tasks import preview_selection
 from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.cli.storage_display import run_storage, run_storage_diagnostics
@@ -31,6 +31,8 @@ from codex_session_gc.compatibility.store import (
     recorded_origin,
 )
 from codex_session_gc.domain import ExactIds, RolloutId, ThreadId, UtcCutoff
+from codex_session_gc.execution.keep_command import KeepAction, change_keep
+from codex_session_gc.execution.keep_store import read_kept_threads
 from codex_session_gc.execution.resource_policy import READ_BYTES, TIMEOUT_SECONDS
 from codex_session_gc.execution.timing import TimingObserver, observe
 from codex_session_gc.installation.__main__ import InstallerError
@@ -222,6 +224,15 @@ def _parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     ui.add_argument("--helper", type=Path)
     ui.add_argument("--cutoff", type=_parse_cutoff)
     ui.add_argument("--receipt-dir", type=Path)
+    keep = commands.add_parser("keep", help="Inspect or change protection for exact histories")
+    keep_actions = keep.add_subparsers(dest="keep_action", required=True)
+    for action in ("status", "set", "clear"):
+        command = keep_actions.add_parser(action)
+        command.add_argument("--home", type=Path, required=True)
+        command.add_argument("--json", action="store_true")
+        if action != "status":
+            command.add_argument("--helper", type=Path, required=True)
+            command.add_argument("thread_id", type=_parse_thread)
     mcp = commands.add_parser("mcp", help="Serve catalogue and confirmed cleanup tools")
     mcp.add_argument("--home", type=Path, required=True)
     mcp.add_argument("--helper", type=Path)
@@ -429,6 +440,41 @@ def _catalogue_summary(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _keep(arguments: argparse.Namespace) -> int:
+    try:
+        storage = arguments.home.expanduser().resolve(strict=True)
+        if arguments.keep_action == "status":
+            result: dict[str, object] = {
+                "status": "observed",
+                "thread_ids": [str(item.value) for item in sorted(read_kept_threads(storage))],
+            }
+        else:
+            result = change_keep(
+                storage,
+                arguments.helper.expanduser().absolute(),
+                arguments.thread_id,
+                KeepAction.MARK if arguments.keep_action == "set" else KeepAction.CLEAR,
+            )
+    except (OSError, ValueError) as error:
+        result = {"status": "refused", "detail": str(error)}
+    if arguments.json:
+        sys.stdout.write(json.dumps(result) + "\n")
+    else:
+        status = clean(result["status"])
+        item_ids = result.get("thread_ids")
+        message = (
+            "\n".join(["Kept histories", *(str(item) for item in item_ids)])
+            if isinstance(item_ids, list)
+            else f"{status} — {clean(result['detail'])}"
+        )
+        if result["status"] == "unknown":
+            observed = result.get("observed_marked")
+            label = "set" if observed is True else "clear" if observed is False else "unavailable"
+            message += f"\nObserved Keep status: {label}"
+        sys.stdout.write(message + "\n")
+    return {"observed": 0, "confirmed": 0, "refused": 3, "unknown": 4}[str(result["status"])]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one current command; unsupported commands fail during argument parsing."""
     values = list(sys.argv[1:] if argv is None else argv)
@@ -442,6 +488,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "storage-diagnostics": run_storage_diagnostics,
         "mcp": _mcp,
         "catalogue": _catalogue_summary,
+        "keep": _keep,
     }
     if arguments.command in handlers:
         return handlers[arguments.command](arguments)

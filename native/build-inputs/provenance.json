@@ -2,114 +2,124 @@
   "archive_sha256": "79c8ea8547e1dd9969f63ef6b76a4fb0d1a024ef36c0c627fbcd2ffb658d9312",
   "archive_url": "https://codeload.github.com/openai/codex/tar.gz/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
   "build_qualification": {
-    "build_observations_sha256": "99ea4bb8f734566be3c501ddb3e0bf1e41a18f8cdb1d364f66c264c84327c6b3",
-    "contract_sha256": "ea5c41f89d0e1eddcdfe1b17a0aca45dc6a24555a6a2393d3c5605d0316762eb",
+    "build_observations_sha256": "39f77c56632ff35b71aea7ed5ee1e6e28de782e842873b63a15ba4b3c6e71ab5",
+    "contract_sha256": "15397f1e32ff5630c872bb436b9bf3ec0edf53cb19150b2154c0e174a7bcf117",
     "dynamic_libraries": [
       "libgcc_s.so.1",
       "libm.so.6",
       "libc.so.6",
       "ld-linux-x86-64.so.2"
     ],
-    "fixture_helper_sha256": "7c8683f5ce034224812007c1ac5b49470138c0e1e679d9ae3371cd6ae7e54867",
-    "helper_bytes": 82443424,
-    "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+    "fixture_helper_sha256": "8c710ea5752eb87be3a02449a00280d4e0e8f975406c93daf18f11a712bc1db6",
+    "helper_bytes": 83838544,
+    "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
     "native_candidate": {
-      "summary_sha256": "b7bc644107b3477a0cf61b5e2972eb8e0694acd67eceeace4657a13b21e5afb0"
+      "summary_sha256": "82a0ca010e19e17356e614338b382a30f42a7db29a91eba56aa189c0bff693d5"
     },
     "partitions": [
       {
         "cases": 70,
-        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
         "kind": "batch-full",
-        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
-        "result_sha256": "7077afba233cf01e86daf56ebf713faa35734f3d2459d041ff079b1ce9f003a2",
-        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+        "producer_fixture_sha256": "8c710ea5752eb87be3a02449a00280d4e0e8f975406c93daf18f11a712bc1db6",
+        "result_sha256": "fe44965f8761474e4f05168075a9e80e27bc96e68ddcae8c6662d16f02ee4531",
+        "scope": "Disposable matched native fixtures; Guardian preparation uses the same qualified schema/wire definition.",
         "test_source": "native/helper/tests/closed_work_batch.py",
         "test_source_sha256": "a6df76aa2da7ba2f3360911b50a0e0c17da69e86e58239baaf67e9d2451f0ab7"
       },
       {
         "cases": 65,
-        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
         "kind": "current",
-        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
-        "result_sha256": "b07d937910f74b504084ae6165a5e37ebe0da449c55a27ecde4ce08a462e4d0f",
-        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+        "producer_fixture_sha256": "8c710ea5752eb87be3a02449a00280d4e0e8f975406c93daf18f11a712bc1db6",
+        "result_sha256": "e340e689794e0cb2b212c1ed6c9b5b0ab11c23bff004211793fe9f45f04da771",
+        "scope": "Disposable matched native fixtures; Guardian preparation uses the same qualified schema/wire definition.",
         "test_source": "native/helper/tests/current_contract.py",
         "test_source_sha256": "b6b0acf20cf3ee07e86bfb8bbbc3fdbead83924ed32a55096f9c6203412cf1e1"
       },
       {
         "cases": 24,
-        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
         "kind": "physical",
-        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
-        "result_sha256": "fb5bb58cafaf64bc8a9232e54236fac3674ee171f1ce0cd7a52753bd5ed70ea4",
-        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+        "producer_fixture_sha256": "8c710ea5752eb87be3a02449a00280d4e0e8f975406c93daf18f11a712bc1db6",
+        "result_sha256": "4c32a5a2e3eb8131c933758abf85cefc5ef060bd8b6a7efcd1552e561097c1fb",
+        "scope": "Disposable matched native fixtures; Guardian preparation uses the same qualified schema/wire definition.",
         "test_source": "native/helper/tests/physical_rollouts.py",
         "test_source_sha256": "b69917f4c114082b2d4d4efce260af9ee5b9137968be71589cbe4362ec2ae662"
       },
       {
         "cases": 22,
-        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
         "kind": "direct",
-        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
-        "result_sha256": "9a454ecb2e8751697c7fb94a0cfb8fa32066953b7a7cc19358d29251cd93a72b",
-        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+        "producer_fixture_sha256": "8c710ea5752eb87be3a02449a00280d4e0e8f975406c93daf18f11a712bc1db6",
+        "result_sha256": "c1958f334996bb6c34baf1bfa8a629a79e0117df02523b0723a5a06cb9704233",
+        "scope": "Disposable matched native fixtures; Guardian preparation uses the same qualified schema/wire definition.",
         "test_source": "native/helper/tests/direct_closed_work.py",
         "test_source_sha256": "4556ac76aeacb92f8bef45f473aae99091ee9533449b8e44d15b5e0ac8141a43"
       },
       {
         "cases": 13,
-        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
         "kind": "attached",
-        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+        "producer_fixture_sha256": "8c710ea5752eb87be3a02449a00280d4e0e8f975406c93daf18f11a712bc1db6",
         "result_sha256": "3ba457e5af13bb531f8396b34d1b8ce63d9dff3415e398f00cefe056838bf991",
-        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+        "scope": "Disposable matched native fixtures; Guardian preparation uses the same qualified schema/wire definition.",
         "test_source": "native/helper/tests/attached_cleanup.py",
         "test_source_sha256": "2028b111ac522ac0f6baa5764f023a6ce41920a5bbb01f88939e358eb4df614f"
       },
       {
         "cases": 20,
-        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
         "kind": "guardian",
-        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
-        "result_sha256": "005c9b6341dd7d7c20dc2b770ffa474d86d3b085e7e9c09dd0ac0bb1939742e0",
-        "scope": "Disposable native fixtures; Guardian integration used a private provisional profile.",
+        "producer_fixture_sha256": "8c710ea5752eb87be3a02449a00280d4e0e8f975406c93daf18f11a712bc1db6",
+        "result_sha256": "bfc48c8308512bf6ad43d13396251091a9fbf96430dfe7df42668edd55bf4047",
+        "scope": "Disposable matched native fixtures; Guardian preparation uses the same qualified schema/wire definition.",
         "test_source": "native/helper/tests/guardian_closed_work.py",
         "test_source_sha256": "c8b36f0e1141e8e8094c464f081232a6a4f7dc15ca1bc4a3bf3ccd0b94dd50de"
       },
       {
         "cases": 12,
-        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+        "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
         "kind": "session_model_ids",
-        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
-        "result_sha256": "b3b5efe7378fa943af46bdf1a69d849f68971ddc3f9b0df88d60234003bac88e",
-        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+        "producer_fixture_sha256": "8c710ea5752eb87be3a02449a00280d4e0e8f975406c93daf18f11a712bc1db6",
+        "result_sha256": "375261f09cf49043351ce6054ce926a6f26b5a3590c2b4274e8ce880b6a435e4",
+        "scope": "Disposable matched native fixtures; Guardian preparation uses the same qualified schema/wire definition.",
         "test_source": "native/helper/tests/session_model_ids.py",
         "test_source_sha256": "a84d48ecfbd9f50895a4bc9237fddf3b7c9d02bf195c62f398a55ead332ebf6a"
       },
       {
         "cases": 28,
-        "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
-        "kind": "supplemental_state",
-        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
-        "result_sha256": "cc1064c2d3bc9326048b1b49d3064a9aceea6afe6174500d50f322067854bc39",
-        "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+        "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
+        "kind": "supplemental",
+        "producer_fixture_sha256": "8c710ea5752eb87be3a02449a00280d4e0e8f975406c93daf18f11a712bc1db6",
+        "result_sha256": "e94c026aaf4abd0b8c85d90ce4bcd7973a8a1aed032bdc5d649fead81041e36d",
+        "scope": "Disposable matched native fixtures; Guardian preparation uses the same qualified schema/wire definition.",
         "test_source": "native/helper/tests/supplemental_state.py",
         "test_source_sha256": "82202257d7f777f4a5020e4e4d490bf3e56b43b00c91de2f6caf270998882333"
       },
       {
+        "cases": 4,
+        "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
+        "kind": "keep",
+        "producer_fixture_sha256": "8c710ea5752eb87be3a02449a00280d4e0e8f975406c93daf18f11a712bc1db6",
+        "result_sha256": "dcce3e71b50ec4a37806fb5490ac505401de9089fe1207c61dae996806ff6d5c",
+        "scope": "Disposable matched native fixtures; Guardian preparation uses the same qualified schema/wire definition.",
+        "test_source": "native/helper/tests/keep.py",
+        "test_source_sha256": "25603117ed474f1670d60aeb38de33cafa4c3d5eb42cce8309a7a5d80318e9ce"
+      },
+      {
         "cases": 11,
-        "helper_sha256": "7c8683f5ce034224812007c1ac5b49470138c0e1e679d9ae3371cd6ae7e54867",
+        "helper_sha256": "f4602bd7aceacc65ce572c626ee3991a18b87f479754238d0e9f2fc22e39adf7",
         "kind": "hook",
-        "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
-        "result_sha256": "7cd76210b70bc0f18b4dac78586abc531cd16ad0c585a3a0b35abad52958ec0c",
-        "scope": "Fixtures-enabled helper controlled hooks; distinct from production.",
+        "producer_fixture_sha256": "8c710ea5752eb87be3a02449a00280d4e0e8f975406c93daf18f11a712bc1db6",
+        "result_sha256": "e78bc133471e86d71e1452ec24b3fcc88f03102d4b459f78e36bd8c377fd7b74",
+        "scope": "Separate fixture-feature helper fault-injection cases. This executable is excluded from delivery.",
         "test_source": "native/helper/tests/closed_work_batch.py",
         "test_source_sha256": "a6df76aa2da7ba2f3360911b50a0e0c17da69e86e58239baaf67e9d2451f0ab7"
       }
     ],
-    "qualification_boundary": "Disposable native fixture evidence for wire 7 on the observed local host and exact storage contract. No new-binary stock lifecycle, installed-client, or off-host qualification is asserted. Historical witnesses remain attributed to their original binaries.",
-    "qualification_identity": "d5bb5f2f864bef0cfa52ca92f9d8174d46b14ee4ef64adcbd7db1e9fc815bcf8"
+    "qualification_boundary": "Wire 7 and storage-wide Keep on disposable local filesystem fixtures with the exact helper and fixture producer. Stock live lifecycle remains separately attributed.",
+    "qualification_identity": "e80bb767bd6d4c67eb1b15d9595b1d8486a0d42b6e46dd9dbbe7656947fac362"
   },
   "commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
   "compatibility_backports": [
@@ -224,9 +234,9 @@
           "sha256": "80a30e7e3ad2ca0073350e57dc347ab7bd860665f55d792a4f3210a8300a0f4f"
         },
         {
-          "bytes": 2548,
+          "bytes": 5061,
           "path": "native/helper/src/main.rs",
-          "sha256": "f0c461883e8c6381dd4cf2966c50a6cf9e34b22a6fc0cb21abc7a3ab28f6e7f6"
+          "sha256": "6f73fb59e94a49706464379d94a133b5614aee58b21c725ea1fdd581b70744bf"
         },
         {
           "bytes": 10930,
@@ -337,12 +347,15 @@
           "bytes": 11201,
           "path": "native/patches/z-session-model-ids-0171.patch",
           "sha256": "7ff4e4acbaabc0acc8dbb79387a8e33263bc09be814e97823ae20625484a9a42"
+        },
+        {
+          "bytes": 14535,
+          "path": "native/patches/zz-keep.patch",
+          "sha256": "f7664cc81bc83cbaacb2db818c700252438acbc2bc17218d16e852c6415c0a63"
         }
       ]
     },
-    "manifest_encoding": "UTF-8 JSON with sorted keys, indent 2 and one trailing newline; provenance, qualification and distribution metadata are sealed separately.",
-    "manifest_sha256": "cc9d36f7590234d5bf619d7fac8852ed7a9a815d26617ea1c7cc2f119926a03c",
-    "scope": "Exact helper source, Cargo, toolchain and patch inputs used for the qualified production executable."
+    "manifest_sha256": "756bb3bf415730e4f6e53c1d8c2869877b88210a1eed5db6fcc1d27167fe535b"
   },
   "historical_build_qualifications": [
     {
@@ -513,6 +526,116 @@
       ],
       "qualification_boundary": "Selected stopped local work in the observed stock Codex 0.171.0 modes and exact storage contract. Related metadata and history-reference publication must have finished. Fixture and live witnesses retain their individual scopes. Local material preparation only.",
       "qualification_identity": "7eb502ff2471ed4faeb701157f4490fe1b962b1130c33a140b57597e316850db"
+    },
+    {
+      "build_observations_sha256": "99ea4bb8f734566be3c501ddb3e0bf1e41a18f8cdb1d364f66c264c84327c6b3",
+      "contract_sha256": "ea5c41f89d0e1eddcdfe1b17a0aca45dc6a24555a6a2393d3c5605d0316762eb",
+      "dynamic_libraries": [
+        "libgcc_s.so.1",
+        "libm.so.6",
+        "libc.so.6",
+        "ld-linux-x86-64.so.2"
+      ],
+      "fixture_helper_sha256": "7c8683f5ce034224812007c1ac5b49470138c0e1e679d9ae3371cd6ae7e54867",
+      "helper_bytes": 82443424,
+      "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+      "native_candidate": {
+        "summary_sha256": "b7bc644107b3477a0cf61b5e2972eb8e0694acd67eceeace4657a13b21e5afb0"
+      },
+      "partitions": [
+        {
+          "cases": 70,
+          "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+          "kind": "batch-full",
+          "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+          "result_sha256": "7077afba233cf01e86daf56ebf713faa35734f3d2459d041ff079b1ce9f003a2",
+          "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+          "test_source": "native/helper/tests/closed_work_batch.py",
+          "test_source_sha256": "a6df76aa2da7ba2f3360911b50a0e0c17da69e86e58239baaf67e9d2451f0ab7"
+        },
+        {
+          "cases": 65,
+          "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+          "kind": "current",
+          "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+          "result_sha256": "b07d937910f74b504084ae6165a5e37ebe0da449c55a27ecde4ce08a462e4d0f",
+          "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+          "test_source": "native/helper/tests/current_contract.py",
+          "test_source_sha256": "b6b0acf20cf3ee07e86bfb8bbbc3fdbead83924ed32a55096f9c6203412cf1e1"
+        },
+        {
+          "cases": 24,
+          "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+          "kind": "physical",
+          "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+          "result_sha256": "fb5bb58cafaf64bc8a9232e54236fac3674ee171f1ce0cd7a52753bd5ed70ea4",
+          "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+          "test_source": "native/helper/tests/physical_rollouts.py",
+          "test_source_sha256": "b69917f4c114082b2d4d4efce260af9ee5b9137968be71589cbe4362ec2ae662"
+        },
+        {
+          "cases": 22,
+          "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+          "kind": "direct",
+          "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+          "result_sha256": "9a454ecb2e8751697c7fb94a0cfb8fa32066953b7a7cc19358d29251cd93a72b",
+          "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+          "test_source": "native/helper/tests/direct_closed_work.py",
+          "test_source_sha256": "4556ac76aeacb92f8bef45f473aae99091ee9533449b8e44d15b5e0ac8141a43"
+        },
+        {
+          "cases": 13,
+          "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+          "kind": "attached",
+          "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+          "result_sha256": "3ba457e5af13bb531f8396b34d1b8ce63d9dff3415e398f00cefe056838bf991",
+          "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+          "test_source": "native/helper/tests/attached_cleanup.py",
+          "test_source_sha256": "2028b111ac522ac0f6baa5764f023a6ce41920a5bbb01f88939e358eb4df614f"
+        },
+        {
+          "cases": 20,
+          "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+          "kind": "guardian",
+          "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+          "result_sha256": "005c9b6341dd7d7c20dc2b770ffa474d86d3b085e7e9c09dd0ac0bb1939742e0",
+          "scope": "Disposable native fixtures; Guardian integration used a private provisional profile.",
+          "test_source": "native/helper/tests/guardian_closed_work.py",
+          "test_source_sha256": "c8b36f0e1141e8e8094c464f081232a6a4f7dc15ca1bc4a3bf3ccd0b94dd50de"
+        },
+        {
+          "cases": 12,
+          "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+          "kind": "session_model_ids",
+          "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+          "result_sha256": "b3b5efe7378fa943af46bdf1a69d849f68971ddc3f9b0df88d60234003bac88e",
+          "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+          "test_source": "native/helper/tests/session_model_ids.py",
+          "test_source_sha256": "a84d48ecfbd9f50895a4bc9237fddf3b7c9d02bf195c62f398a55ead332ebf6a"
+        },
+        {
+          "cases": 28,
+          "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
+          "kind": "supplemental_state",
+          "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+          "result_sha256": "cc1064c2d3bc9326048b1b49d3064a9aceea6afe6174500d50f322067854bc39",
+          "scope": "Disposable native fixtures; no stock lifecycle or installed-client claim.",
+          "test_source": "native/helper/tests/supplemental_state.py",
+          "test_source_sha256": "82202257d7f777f4a5020e4e4d490bf3e56b43b00c91de2f6caf270998882333"
+        },
+        {
+          "cases": 11,
+          "helper_sha256": "7c8683f5ce034224812007c1ac5b49470138c0e1e679d9ae3371cd6ae7e54867",
+          "kind": "hook",
+          "producer_fixture_sha256": "cc8c52e782ec10780da157e08cb5fde184bd8041855def00f1d45bf80bf874e2",
+          "result_sha256": "7cd76210b70bc0f18b4dac78586abc531cd16ad0c585a3a0b35abad52958ec0c",
+          "scope": "Fixtures-enabled helper controlled hooks; distinct from production.",
+          "test_source": "native/helper/tests/closed_work_batch.py",
+          "test_source_sha256": "a6df76aa2da7ba2f3360911b50a0e0c17da69e86e58239baaf67e9d2451f0ab7"
+        }
+      ],
+      "qualification_boundary": "Disposable native fixture evidence for wire 7 on the observed local host and exact storage contract. No new-binary stock lifecycle, installed-client, or off-host qualification is asserted. Historical witnesses remain attributed to their original binaries.",
+      "qualification_identity": "d5bb5f2f864bef0cfa52ca92f9d8174d46b14ee4ef64adcbd7db1e9fc815bcf8"
     }
   ],
   "repository": "https://github.com/openai/codex",

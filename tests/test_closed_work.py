@@ -402,3 +402,19 @@ def test_projected_report_preserves_caller_scope_and_combined_retention(exact: b
     assert reasons[str(_thread(3).value)]["reason"] == ClosedWorkReason.AGE
     assert reasons[str(_thread(1).value)]["reason"] == ClosedWorkReason.DESCENDANT
     assert reasons[str(_thread(1).value)]["witness"] == str(_thread(3).value)
+
+
+def test_keep_is_direct_retention_and_propagates_to_ancestor_and_provider() -> None:
+    graph = replace(
+        _graph(),
+        kept_threads=frozenset({_thread(2)}),
+        history_provider_references=(
+            HistoryProviderReference(RolloutId(UUID(int=2)), RolloutId(UUID(int=3))),
+        ),
+    )
+    result = select_closed_work(graph, CUTOFF, frozenset({_thread(1)}))
+    reasons = {item.thread_id: item for item in result.retained}
+    assert reasons[_thread(2)].reason is ClosedWorkReason.KEEP
+    assert reasons[_thread(1)].reason is ClosedWorkReason.DESCENDANT
+    assert reasons[_thread(3)].reason is ClosedWorkReason.PROVIDER
+    assert not result.conditional_candidates

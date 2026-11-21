@@ -181,6 +181,9 @@ def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> N
                 "cleanup_status",
                 "reconcile_cleanup",
                 "compatibility_status",
+                "keep_status",
+                "keep_set",
+                "keep_clear",
             }
             summary = _data(await session.call_tool("catalogue_summary", {"limit": 1}))
             if summary["projects"]:
@@ -297,6 +300,7 @@ def test_read_only_sdk_exposes_observation_without_cleanup_operation_or_receipt(
                 "prepare_cleanup",
                 "cleanup_status",
                 "compatibility_status",
+                "keep_status",
             }
             diagnostic_tool = next(
                 tool for tool in tools.tools if tool.name == "compatibility_status"
