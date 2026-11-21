@@ -147,7 +147,7 @@ def _support(arguments: argparse.Namespace) -> int:
     return 0
 
 
-def _parser() -> argparse.ArgumentParser:
+def _parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     """Expose one supported cleanup route and its browsing adapters."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -170,6 +170,26 @@ def _parser() -> argparse.ArgumentParser:
     doctor.add_argument("--support-record-sha256")
     doctor.add_argument("--support-context-sha256")
     doctor.add_argument("--json", action="store_true")
+    catalogue = commands.add_parser("catalogue", help="Summarize matching histories")
+    catalogue_commands = catalogue.add_subparsers(dest="catalogue_action", required=True)
+    summary = catalogue_commands.add_parser("summary", help="Rank stored cwd values")
+    summary.add_argument("--home", type=Path, required=True)
+    summary.add_argument(
+        "--rank", choices=("stored_bytes", "closed_agent_bytes"), default="stored_bytes"
+    )
+    summary.add_argument("--text", default="")
+    summary.add_argument("--before")
+    summary.add_argument("--min-bytes", type=int)
+    summary.add_argument("--max-bytes", type=int)
+    summary.add_argument(
+        "--scope", choices=("all", "main", "agents", "ordinary_agents", "guardians"), default="all"
+    )
+    summary.add_argument("--cwd")
+    summary.add_argument("--archive-state", choices=("not_archived", "archived", "unknown"))
+    summary.add_argument("--root", action="append", default=[])
+    summary.add_argument("--offset", type=int, default=0)
+    summary.add_argument("--limit", type=int, default=50)
+    summary.add_argument("--json", action="store_true")
     storage = commands.add_parser("storage", help="Observe storage usage")
     storage.add_argument("--home", type=Path, required=True)
     storage.add_argument("--json", action="store_true")
@@ -326,13 +346,78 @@ def _mcp(arguments: argparse.Namespace) -> int:
     )
 
 
+def _catalogue_summary(arguments: argparse.Namespace) -> int:
+    """Observe and summarize one catalogue generation."""
+    from codex_session_gc.cli.mcp_server import CatalogueObservation  # noqa: PLC0415
+
+    try:
+        report = asyncio.run(
+            CatalogueObservation(arguments.home).catalogue_summary(
+                rank=arguments.rank,
+                text=arguments.text,
+                before=arguments.before,
+                min_bytes=arguments.min_bytes,
+                max_bytes=arguments.max_bytes,
+                scope=arguments.scope,
+                cwd=arguments.cwd,
+                archive_state=arguments.archive_state,
+                roots=arguments.root,
+                offset=arguments.offset,
+                limit=arguments.limit,
+            )
+        )
+    except (OSError, ValueError, sqlite3.Error) as error:
+        sys.stderr.write(f"Catalogue summary refused: {error}\n")
+        return INVALID_INPUT_EXIT
+    if arguments.json:
+        sys.stdout.write(json.dumps(report, sort_keys=True) + "\n")
+    else:
+
+        def metric(value: dict[str, Any]) -> str:
+            exact = value["stored_bytes"]
+            size = str(exact) if exact is not None else f">={value['known_stored_bytes']}"
+            return (
+                f"{value['history_count']} histories, {size} B, "
+                f"{value['incomplete_history_count']} incomplete"
+            )
+
+        def breakdown_line(breakdown: dict[str, Any]) -> str:
+            return " | ".join(f"{name}: {metric(value)}" for name, value in breakdown.items())
+
+        sys.stdout.write("Project (stored cwd) — matching history storage\n")
+        display_limit = 50
+        for row in report["projects"]:
+            display = row["cwd_display"]
+            suffix = "…" if row["cwd_truncated"] or len(display) > display_limit else ""
+            sys.stdout.write(
+                f"{display[:display_limit]}{suffix} [{row['project_key']}]: "
+                f"{breakdown_line(row['breakdown'])}\n"
+            )
+        sys.stdout.write(f"Overall: {breakdown_line(report['overall'])}\n")
+        sys.stdout.write(
+            f"Catalogue: physical_complete={report['physical_complete']}, "
+            f"source_changed={report['source_changed']}\n"
+        )
+        if report["diagnostics"]:
+            sys.stdout.write("Diagnostics: " + ", ".join(report["diagnostics"]) + "\n")
+        if report["diagnostics_truncated"]:
+            sys.stdout.write("Further diagnostics omitted.\n")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one current command; unsupported commands fail during argument parsing."""
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] in ("install", "update"):
         return installer_main(values[1:])
     arguments = _parser().parse_args(values)
-    handlers = {"support": _support, "doctor": _doctor, "storage": run_storage, "mcp": _mcp}
+    handlers = {
+        "support": _support,
+        "doctor": _doctor,
+        "storage": run_storage,
+        "mcp": _mcp,
+        "catalogue": _catalogue_summary,
+    }
     if arguments.command in handlers:
         return handlers[arguments.command](arguments)
     if arguments.command == "ui":

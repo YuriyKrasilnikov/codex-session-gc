@@ -480,3 +480,11 @@ results to its client; an AI client may include them in requests to its configur
 model provider. Read-only mode limits mutations and does not redact metadata.
 Do not publish raw cleanup receipts or conversation transcripts in public issues
 or releases. Share only the minimal redacted diagnostic information needed.
+
+`catalogue summary --home PATH` ranks matching catalogue histories by their exact
+stored working directory. Use `--rank closed_agent_bytes` to rank observed closed
+ordinary agents, and `--json` for counts, known bytes, incomplete counts and
+nullable exact totals. Filters apply to histories before aggregation. The
+summary is advisory and does not grant cleanup permission. The terminal project
+summary and read-only MCP `catalogue_summary` offer the same breakdown; MCP
+project keys are valid only with their originating catalogue snapshot.

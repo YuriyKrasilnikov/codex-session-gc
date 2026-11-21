@@ -120,3 +120,9 @@ a catalogue-only change does not authorize a new deletion route. Keep native
 producer evidence attributed to its actual source/binary. Current module exports
 and CLI parser define available interfaces. Follow [the update procedure](compatibility.md)
 for a Codex version change.
+
+Project summaries reduce the catalogue's matched histories by literal stored
+cwd, independently of contextual work groups. Their source and observed agent
+status totals retain incomplete measurements. MCP keeps one ranked reduction per
+catalogue generation and uses generation-bound project keys for exact drilldown;
+these keys do not authorize cleanup.

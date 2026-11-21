@@ -304,3 +304,102 @@ class CatalogueIndex:
         if query.order_target == "history":
             histories.sort(key=lambda entry: _history_order(entry, query.sort, query.direction))
         return CatalogueResult(groups, tuple(histories))
+
+
+@dataclass(frozen=True, slots=True)
+class Totals:
+    """Counts and known/exact stored bytes for a set of histories."""
+
+    history_count: int = 0
+    known_stored_bytes: int = 0
+    incomplete_history_count: int = 0
+    stored_bytes: int | None = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Breakdown:
+    """Source classes and the disjoint observed ordinary-agent statuses."""
+
+    total: Totals
+    main: Totals
+    agent: Totals
+    guardian: Totals
+    unknown: Totals
+    closed_agents: Totals
+    active_or_open_agents: Totals
+    unknown_status_agents: Totals
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectRow:
+    """One exact stored working directory."""
+
+    cwd: str
+    breakdown: Breakdown
+
+
+@dataclass(frozen=True, slots=True)
+class Summary:
+    """Complete ranked projects and their combined totals."""
+
+    overall: Breakdown
+    projects: tuple[ProjectRow, ...]
+
+
+def summarize_catalogue(
+    histories: tuple[SessionEntry, ...],
+    rank: Literal["stored_bytes", "closed_agent_bytes"] = "stored_bytes",
+) -> Summary:
+    """Reduce matched histories once; contextual relatives are never counted."""
+    if rank not in ("stored_bytes", "closed_agent_bytes"):
+        raise ValueError("Unknown summary rank.")
+    names = (
+        "total",
+        "main",
+        "agent",
+        "guardian",
+        "unknown",
+        "closed_agents",
+        "active_or_open_agents",
+        "unknown_status_agents",
+    )
+    buckets: dict[str, dict[str, list[int]]] = {}
+    overall = {name: [0, 0, 0] for name in names}
+    for entry in histories:
+        project = buckets.setdefault(entry.cwd, {name: [0, 0, 0] for name in names})
+        selected = ["total", entry.source.value]
+        if entry.source is SessionSource.AGENT:
+            status = entry.agent_status if entry.issue != "invalid_spawn_topology" else None
+            selected.append(
+                "closed_agents"
+                if status == "closed"
+                else "active_or_open_agents"
+                if status in ("active", "open")
+                else "unknown_status_agents"
+            )
+        for name in selected:
+            for group in (overall, project):
+                values = group[name]
+                values[0] += 1
+                values[1] += entry.known_stored_bytes
+                values[2] += entry.stored_bytes is None
+
+    def breakdown(values: dict[str, list[int]]) -> Breakdown:
+        def total(name: str) -> Totals:
+            count, known, incomplete = values[name]
+            return Totals(count, known, incomplete, known if not incomplete else None)
+
+        return Breakdown(*(total(name) for name in names))
+
+    projects = [ProjectRow(cwd, breakdown(values)) for cwd, values in buckets.items()]
+
+    def order(row: ProjectRow) -> tuple[bool, int, bool, str]:
+        value = row.breakdown.total if rank == "stored_bytes" else row.breakdown.closed_agents
+        return (
+            value.incomplete_history_count > 0 and value.known_stored_bytes == 0,
+            -value.known_stored_bytes,
+            value.incomplete_history_count > 0,
+            row.cwd,
+        )
+
+    return Summary(breakdown(overall), tuple(sorted(projects, key=order)))
