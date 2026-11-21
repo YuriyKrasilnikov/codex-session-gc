@@ -10,12 +10,14 @@ import stat
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from itertools import islice
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from codex_session_gc.domain.physical import PhysicalRepresentation, ownership_from_path
 from codex_session_gc.inventory.storage_sql import OWNER_BYTES, observe_owners
 from codex_session_gc.inventory.storage_walk import (
+    StorageScan,
     StorageScanCancelled,
     StorageScanError,
     identity_for_fd,
@@ -29,13 +31,15 @@ if TYPE_CHECKING:
 
     from codex_session_gc.domain import RolloutId, ThreadId
     from codex_session_gc.inventory.storage_sql import SqlOwners
-    from codex_session_gc.inventory.storage_walk import MountIdentity, StorageEntry, StorageScan
+    from codex_session_gc.inventory.storage_walk import MountIdentity, StorageEntry
 
 PAGE_LIMIT = 100
 ASSOCIATIONS = ("all", "matched", "missing", "ambiguous", "unknown", "unparsed")
 _HISTORY_CATEGORIES = frozenset(("sessions", "archived_sessions"))
 _DIRECTORIES = _HISTORY_CATEGORIES | {"packages", "worktrees", "cache", "plugins"}
 _DISPLAY_LIMIT = 500
+_DIAGNOSTIC_PATH_COUNT = 25_000
+_DIAGNOSTIC_PATH_BYTES = 8 * 1024 * 1024
 _BYTES_PER_BLOCK = 512
 _SURROGATE_BASE = 0xDC00
 _BYTE_SURROGATES = range(0xDC80, 0xDD00)
@@ -155,6 +159,9 @@ class StorageSnapshot:
     storage_snapshot_id: str
     _summary: _Summary
     _rows: tuple[_HistoryRow, ...]
+    _diagnostic_paths: tuple[tuple[str, ...] | None, ...] = ()
+    _history_names_observed: int = 0
+    _sql_scan: StorageScan | None = None
 
     def summary(self) -> dict[str, Any]:
         """Return summary values without sharing the observation's state."""
@@ -331,7 +338,7 @@ def _rows(
     disputed: set[MountIdentity],
     cancelled: Callable[[], bool],
     remaining_bytes: int,
-) -> tuple[tuple[_HistoryRow, ...], int]:
+) -> tuple[tuple[_HistoryRow, ...], int, tuple[tuple[str, ...] | None, ...]]:
     candidates: list[_History] = []
     for entry in scan.entries:
         _check_cancelled(cancelled)
@@ -345,6 +352,8 @@ def _rows(
     rollouts = Counter(history.rollout for history in candidates if history.rollout is not None)
     inodes = Counter(history.entry.identity for history in candidates)
     output = []
+    paths: list[tuple[str, ...] | None] = []
+    path_bytes = 0
     for ordinal, history in enumerate(candidates, start=1):
         _check_cancelled(cancelled)
         entry = history.entry
@@ -365,6 +374,12 @@ def _rows(
             or (history.rollout is not None and rollouts[history.rollout] > 1)
         )
         values = _measure(entry)
+        raw_bytes = sum(len(os.fsencode(part)) + 1 for part in entry.parts)
+        if len(paths) < _DIAGNOSTIC_PATH_COUNT and path_bytes + raw_bytes <= _DIAGNOSTIC_PATH_BYTES:
+            paths.append(entry.parts)
+            path_bytes += raw_bytes
+        else:
+            paths.append(None)
         output.append(
             _HistoryRow(
                 object_id,
@@ -379,7 +394,7 @@ def _rows(
                 _association(owner, sql, ambiguous=ambiguous),
             )
         )
-    return tuple(output), len(candidates) - len(output)
+    return tuple(output), len(candidates) - len(output), tuple(paths)
 
 
 def _verify_root(home: Path, expected: MountIdentity) -> None:
@@ -432,7 +447,7 @@ def observe_storage(
         counts[sql.reason] += 1
     total, categories, disputed = _account(scan.entries, counts, stop)
     row_bytes = available - OWNER_BYTES * (len(sql.ids) + len(sql.duplicates))
-    rows, omitted = _rows(scan, sql, disputed, stop, row_bytes)
+    rows, omitted, diagnostic_paths = _rows(scan, sql, disputed, stop, row_bytes)
     if omitted:
         counts["history_row_limit"] += omitted
     _verify_root(scan.home, scan.home_identity)
@@ -456,4 +471,19 @@ def observe_storage(
         dict(counts),
         "partial" if partial or omitted else "complete",
     )
-    return StorageSnapshot(f"storage/{uuid4()}", summary, rows)
+    source_entries = tuple(
+        islice(
+            (
+                entry
+                for entry in scan.entries
+                if len(entry.parts) == 1
+                and entry.parts[0].startswith("state_")
+                and entry.parts[0].endswith(".sqlite")
+            ),
+            2,
+        )
+    )
+    source_scan = StorageScan(scan.home, scan.home_identity, source_entries, scan.root_complete, ())
+    return StorageSnapshot(
+        f"storage/{uuid4()}", summary, rows, diagnostic_paths, len(rows) + omitted, source_scan
+    )

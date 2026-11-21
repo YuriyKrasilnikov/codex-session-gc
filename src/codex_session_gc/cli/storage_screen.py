@@ -15,6 +15,7 @@ from textual.containers import Horizontal
 from textual.screen import Screen
 from textual.widgets import Button, DataTable, Select, Static
 
+from codex_session_gc.cli.storage_diagnostic_screen import StorageDiagnosticScreen
 from codex_session_gc.cli.storage_service import StorageService
 
 
@@ -57,11 +58,12 @@ class StorageScreen(Screen[None]):
             allow_blank=False,
             id="storage-filter",
         )
-        yield DataTable(id="storage-objects")
+        yield DataTable(id="storage-objects", cursor_type="row")
         with Horizontal(id="storage-controls"):
             yield Button("Prev", id="storage-prev")
             yield Button("Next", id="storage-next")
             yield Button("Refresh", id="storage-refresh")
+            yield Button("Problems", id="storage-problems")
             yield Button("Back", id="storage-back")
 
     def on_mount(self) -> None:
@@ -129,7 +131,22 @@ class StorageScreen(Screen[None]):
                 Text(str(item.get("association", ""))),
                 Text(str(item.get("logical_file_bytes", ""))),
                 Text(str(item.get("allocated_bytes", ""))),
+                key=item["object_id"],
             )
+
+    def _open_diagnostics(self, subject_id: str | None) -> None:
+        if self.summary is not None:
+            self.app.push_screen(
+                StorageDiagnosticScreen(
+                    self.service, self.summary["storage_snapshot_id"], subject_id
+                )
+            )
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Explain the selected physical name in its originating observation."""
+        event.stop()
+        if isinstance(event.row_key.value, str):
+            self._open_diagnostics(event.row_key.value)
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "storage-filter" and self.summary is not None:
@@ -142,6 +159,8 @@ class StorageScreen(Screen[None]):
         action = event.button.id
         if action == "storage-back":
             await self.action_back()
+        elif action == "storage-problems":
+            self._open_diagnostics(None)
         elif action == "storage-refresh" and (
             self._observation is None or self._observation.done()
         ):

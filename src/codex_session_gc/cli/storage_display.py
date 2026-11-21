@@ -9,6 +9,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from codex_session_gc.inventory.storage import PAGE_LIMIT, observe_storage
+from codex_session_gc.inventory.storage_diagnostics import observe_diagnostics
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -69,6 +70,81 @@ def run_storage(arguments: Namespace) -> int:
         json.dumps(result, sort_keys=True, ensure_ascii=True)
         if arguments.json
         else _terminal(result)
+    )
+    sys.stdout.write(text + "\n")
+    return 0
+
+
+def _identity(subject: dict[str, Any] | None) -> str:
+    if subject is None:
+        return "unresolved endpoint"
+    roles = [subject["kind"]]
+    if subject["object_id"] is not None:
+        roles.append(subject["object_id"])
+    if subject["thread_id"] is not None:
+        roles.append(f"thread {subject['thread_id']}")
+    if subject["rollout_id"] is not None:
+        roles.append(f"rollout {subject['rollout_id']}")
+    return " · ".join(roles)
+
+
+def diagnostic_subject_line(subject: dict[str, Any]) -> str:
+    """Describe a physical, SQL-only or dangling observation from detached fields."""
+    facts = []
+    if subject["original_association"] is not None:
+        facts.append(f"at scan {subject['original_association']}")
+    facts.extend((f"SQL owner {subject['sql_owner']}", f"pointer {subject['current_pointer']}"))
+    return " · ".join([_identity(subject), *facts, *subject["reasons"]])
+
+
+def diagnostic_evidence_line(evidence: dict[str, Any]) -> str:
+    """Describe the origin and both roles of a direct or derived relationship."""
+    source = _identity(evidence["source_subject"])
+    target = _identity(evidence["target_subject"])
+    detail = " · ".join(value for key in ("reason", "status") if (value := evidence[key]))
+    relation = f"{evidence['kind']} ({evidence['origin']})"
+    return f"{relation}  {source} → {target}" + (f" · {detail}" if detail else "")
+
+
+def _diagnostic_terminal(result: dict[str, Any], page: dict[str, Any]) -> str:
+    coverage = ", ".join(f"{name}={state}" for name, state in result["coverage"].items())
+    lines = [f"Coverage · {coverage}"]
+    if status := page.get("status"):
+        lines.append(str(status))
+    subject = page.get("subject")
+    if subject is not None:
+        lines.append(diagnostic_subject_line(subject))
+    render = diagnostic_evidence_line if subject is not None else diagnostic_subject_line
+    lines.extend(render(item) for item in page["items"])
+    lines.append(f"{page['total_matching']} matching observations")
+    if page["next_offset"] is not None:
+        lines.append(f"Next page · --offset {page['next_offset']}")
+    return "\n".join(lines)
+
+
+def run_storage_diagnostics(arguments: Namespace) -> int:
+    """Observe once and display a page of problems or a typed UUID lookup."""
+    if arguments.offset < 0 or not 1 <= arguments.limit <= PAGE_LIMIT:
+        sys.stderr.write("storage-diagnostics: invalid page arguments\n")
+        return 2
+    try:
+        home = arguments.home.expanduser().resolve()
+        observation = observe_diagnostics(home, observe_storage(home))
+        bounds = {"offset": arguments.offset, "limit": arguments.limit}
+        if arguments.thread is None and arguments.rollout is None:
+            page = observation.subjects(reason="problems", **bounds)
+        else:
+            page = observation.lookup(
+                thread_id=arguments.thread, rollout_id=arguments.rollout, **bounds
+            )
+    except (OSError, ValueError) as error:
+        sys.stderr.write(f"storage-diagnostics: observation unavailable ({type(error).__name__})\n")
+        return 2
+    result = observation.summary()
+    text = (
+        json.dumps({**result, "page": page}, sort_keys=True, ensure_ascii=True)
+        if arguments.json
+        else _diagnostic_terminal(result, page)
     )
     sys.stdout.write(text + "\n")
     return 0
