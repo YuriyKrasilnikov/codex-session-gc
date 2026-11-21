@@ -286,9 +286,6 @@ def _preview(arguments: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 raise ValueError(message)  # noqa: TRY301
             report = preview_policy(home, parse_rule_json(rule_path.read_text(encoding="utf-8")))
             return report, UNAVAILABLE_GRAPH_EXIT if report["errors"] else 0
-        if not arguments.closed_work:
-            message = "Manual selection requires --closed-work."
-            raise ValueError(message)  # noqa: TRY301
         if arguments.cutoff is None and not arguments.select_thread:
             message = "Without --cutoff, explicit --select-thread IDs are required."
             raise ValueError(message)  # noqa: TRY301
@@ -514,7 +511,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] in ("install", "update"):
         return installer_main(values[1:])
-    arguments = _parser().parse_args(values)
+    parser = _parser()
+    arguments = parser.parse_args(values)
+    if arguments.command == "plan" and arguments.rule is None and not arguments.closed_work:
+        parser.error("manual plan requires --closed-work")
     handlers = {
         "support": _support,
         "doctor": _doctor,
