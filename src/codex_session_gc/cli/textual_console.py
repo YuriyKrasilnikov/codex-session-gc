@@ -1,5 +1,5 @@
 # Copyright (c) 2026
-# ruff: noqa: EM101, TRY003
+# ruff: noqa: EM101, TRY003, TRY301, PLR2004
 
 """Grouped terminal browsing with exact advisory selection and durable execution."""
 
@@ -126,6 +126,7 @@ class SessionApp(App[tuple[str, int]]):
     #review-text { height: auto; }
     #confirm { height: 3; display: none; }
     #execute { display: none; }
+    #child-ids, #choose-children, #source-preview { display: none; }
     .reviewing .filters, .reviewing #sessions, .reviewing #details-panel { display: none; }
     .reviewing #project-summary { display: none; }
     """
@@ -133,9 +134,14 @@ class SessionApp(App[tuple[str, int]]):
     def __init__(
         self, home: Path, cutoff: UtcCutoff | None, helper: Path | None, receipts: Path
     ) -> None:
-        """Bind one home and frozen selection without storage I/O."""
+        """Bind the chosen directory identity for this interactive session."""
         super().__init__()
         self.home, self.cutoff, self.helper, self.receipts = home, cutoff, helper, receipts
+        try:
+            metadata = home.stat()
+            self.startup_home: tuple[int, int] | None = (metadata.st_dev, metadata.st_ino)
+        except OSError:
+            self.startup_home = None
         self.storage = StorageService(home)
         self.index: CatalogueIndex | None = None
         self.catalogue: SessionCatalogue | None = None
@@ -152,6 +158,16 @@ class SessionApp(App[tuple[str, int]]):
         self.dispatch_task: asyncio.Task[None] | None = None
         self.dispatching = False
         self.receipt: Path | None = None
+        self.guidance: dict[str, Any] | None = None
+        self.guided_sources: tuple[ThreadId, ...] = ()
+        self.guided_source_roots: dict[ThreadId, ThreadId] = {}
+        self.guided_home: tuple[int, int] | None = None
+        self.guided_cutoff: UtcCutoff | None = None
+        self.guided_first = False
+        self.guided_child_roots: dict[ThreadId, ThreadId] = {}
+        self.guided_child_sources: dict[str, str] = {}
+        self.guided_ready = False
+        self.first_result = ""
         self.reviewed: Intent | None = None
         self.interrupt_requested = False
         self.review_open = False
@@ -251,6 +267,7 @@ class SessionApp(App[tuple[str, int]]):
             id="notice",
             markup=False,
         )
+        yield Input(placeholder="Observed child IDs, comma separated", id="child-ids")
         yield Input(placeholder="Type literal DELETE after reviewing exact selection", id="confirm")
         with Horizontal(id="actions"):
             yield Button("Select matches", id="select")
@@ -258,6 +275,8 @@ class SessionApp(App[tuple[str, int]]):
             yield Button("Preview", id="preview", variant="primary")
             yield Button("Cancel / Back", id="cancel")
             yield Button("Execute DELETE", id="execute", variant="error")
+            yield Button("Preview chosen children", id="choose-children")
+            yield Button("Fresh source preview", id="source-preview")
             yield Button("Refresh", id="refresh")
             yield Button("Storage", id="storage")
             yield Button("Project summary", id="project-summary")
@@ -612,7 +631,13 @@ class SessionApp(App[tuple[str, int]]):
                 "receipt; quitting is disabled."
             )
             return
-        if self.review_open and action not in {"cancel", "quit", "execute"}:
+        if self.review_open and action not in {
+            "cancel",
+            "quit",
+            "execute",
+            "choose-children",
+            "source-preview",
+        }:
             return
         if action == "project-summary":
             if self.index is None or (self.load_task is not None and not self.load_task.done()):
@@ -648,8 +673,172 @@ class SessionApp(App[tuple[str, int]]):
             await self.action_cancel_preview()
         elif action == "execute":
             self._confirm_dispatch()
+        elif action == "choose-children":
+            self._choose_children()
+        elif action == "source-preview":
+            await self._source_preview()
         elif action == "quit":
             await self.action_quit()
+
+    def _choose_children(self) -> None:  # noqa: C901
+        """Turn only explicitly entered observed children into an ordinary exact request."""
+        try:
+            guidance = self.guidance
+            if not guidance or guidance.get("truncated"):
+                raise ValueError("Complete attachment observation is required.")
+            sources = guidance["sources"]
+            source_ids = {ThreadId.parse(row["id"]) for row in sources}
+            if not source_ids or not source_ids <= set(self.selected):
+                raise ValueError("Select the displayed source histories for guided cleanup.")
+            observed: dict[ThreadId, ThreadId] = {}
+            ambiguous: set[ThreadId] = set()
+            child_sources: dict[ThreadId, str] = {}
+            for row in sources:
+                for child in row["children"]:
+                    try:
+                        identifier = ThreadId.parse(child["id"])
+                        root = ThreadId.parse(child["root_id"])
+                    except ValueError, TypeError, KeyError:
+                        continue
+                    source_id = row["id"]
+                    if identifier in observed and (
+                        observed[identifier] != root or child_sources[identifier] != source_id
+                    ):
+                        ambiguous.add(identifier)
+                    observed[identifier] = root
+                    child_sources[identifier] = source_id
+            for identifier in ambiguous:
+                observed.pop(identifier, None)
+            values = [part.strip() for part in self.query_one("#child-ids", Input).value.split(",")]
+            chosen = tuple(ThreadId.parse(value) for value in values if value)
+            if not chosen or len(set(chosen)) != len(chosen) or not set(chosen) <= observed.keys():
+                raise ValueError("Enter distinct IDs from the observed children.")
+            identity = guidance["home_identity"]
+            if not isinstance(identity, list) or len(identity) != 2:
+                raise ValueError("Home identity is unavailable.")
+            stat = self.home.stat()
+            if self.startup_home != (stat.st_dev, stat.st_ino):
+                raise ValueError("Home changed since the console started.")
+            if identity != [stat.st_dev, stat.st_ino]:
+                raise ValueError("Home changed since observation.")
+            self.guided_home = (stat.st_dev, stat.st_ino)
+            self.guided_cutoff = self.cutoff
+            self.guided_sources = tuple(sorted(source_ids))
+            self.guided_source_roots = {
+                ThreadId.parse(row["id"]): ThreadId.parse(row["root_id"]) for row in sources
+            }
+            self.guided_child_roots = {item: observed[item] for item in chosen}
+            self.guided_child_sources = {str(item.value): child_sources[item] for item in chosen}
+            self.guided_first = True
+            self.guided_ready = False
+            intent = Intent(
+                self.home,
+                self.cutoff or ExactIds(frozenset(chosen)),
+                tuple(sorted({observed[item] for item in chosen})),
+                tuple(sorted(chosen)),
+            )
+            self.reviewed = None
+            self._review_mode(enabled=True)
+            self.timing = TimingObserver("preview")
+            self.preview_task = asyncio.create_task(self._preview(intent))
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            self._notice(f"Cannot choose children: {error}")
+
+    async def _source_preview(self) -> None:
+        """Reobserve the original source and require a separate confirmation."""
+        if not self.guided_ready or self.guided_home is None:
+            return
+        try:
+            stat = self.home.stat()
+            if (stat.st_dev, stat.st_ino) != self.guided_home:
+                raise ValueError("Home changed since the child preview.")
+            catalogue = await asyncio.to_thread(read_session_catalogue, self.home)
+            if catalogue.source_changed:
+                raise ValueError("Fresh catalogue is incomplete or changed.")
+            groups = CatalogueIndex(catalogue).query(CatalogueQuery()).groups
+            actual = {
+                entry.id: group.root.id
+                for group in groups
+                if group.selectable
+                for entry in group.entries
+            }
+            if any(
+                actual.get(source) != self.guided_source_roots[source]
+                for source in self.guided_sources
+            ):
+                raise ValueError("A source or its work is no longer resolved.")
+            roots = tuple(sorted({actual[source] for source in self.guided_sources}))
+            intent = Intent(
+                self.home,
+                self.guided_cutoff or ExactIds(frozenset(self.guided_sources)),
+                roots,
+                self.guided_sources,
+            )
+            self.guided_ready = False
+            self._review_mode(enabled=True)
+            self.timing = TimingObserver("preview")
+            self.preview_task = asyncio.create_task(self._preview(intent))
+        except Exception as error:  # noqa: BLE001
+            self.guided_ready = False
+            self._notice(f"Fresh source preview unavailable: {error}. Return to browsing.")
+
+    def _matching_child_result(  # noqa: PLR0911
+        self, intent: Intent, report: dict[str, Any], status: int
+    ) -> bool:
+        """Advance only for a complete confirmed result with exactly reviewed effects."""
+        if (
+            status != 0
+            or report.get("outcome") != "confirmed"
+            or report.get("lifecycleUnresolved") is not False
+        ):
+            return False
+        declaration = intent.confirmation()
+        if report.get("attemptId") != declaration.operation_id:
+            return False
+        expected = {target.thread_id for target in declaration.physical_manifest}
+        paths = {
+            rollout.rollout_path
+            for target in declaration.physical_manifest
+            for rollout in target.rollouts
+        }
+        rows = report.get("roots")
+        if not isinstance(rows, list) or not rows:
+            return False
+        actual: set[str] = set()
+        removed: set[str] = set()
+        seen_roots: set[str] = set()
+        for row in rows:
+            native = row.get("nativeReceipt")
+            if row.get("status") != "confirmed" or not isinstance(native, dict):
+                return False
+            selected = row.get("selectedThreads")
+            effects = native.get("removed_rollouts")
+            if not isinstance(selected, list) or not isinstance(effects, list):
+                return False
+            root = row.get("root")
+            if not isinstance(root, str) or root in seen_roots:
+                return False
+            seen_roots.add(root)
+            expected_ids = {
+                str(child.value)
+                for child, owner in self.guided_child_roots.items()
+                if str(owner.value) == root
+            }
+            expected_paths = {
+                rollout.rollout_path
+                for target in declaration.physical_manifest
+                if target.thread_id in expected_ids
+                for rollout in target.rollouts
+            }
+            if not expected_ids or set(selected) != expected_ids or set(effects) != expected_paths:
+                return False
+            actual.update(selected)
+            removed.update(effects)
+        return (
+            actual == expected == {str(item.value) for item in intent.selected}
+            and removed == paths
+            and seen_roots == {str(root.value) for root in intent.roots}
+        )
 
     def _confirm_dispatch(self) -> None:
         if self.query_one("#confirm", Input).value == "DELETE" and self.reviewed is not None:
@@ -665,6 +854,9 @@ class SessionApp(App[tuple[str, int]]):
         self.query_one("#confirm", Input).value = ""
         self.query_one("#confirm").display = False
         self.query_one("#execute").display = False
+        self.query_one("#child-ids").display = False
+        self.query_one("#choose-children").display = False
+        self.query_one("#source-preview").display = False
         for identifier in ("select", "clear", "refresh", "preview", "storage"):
             self.query_one("#" + identifier, Button).disabled = enabled
         for widget in self.query(".filters Input, .filters Select"):
@@ -675,6 +867,14 @@ class SessionApp(App[tuple[str, int]]):
             return
         if not self.selected or not self.valid_filters:
             self._notice("Select exact histories and use a valid UTC cutoff if supplied.")
+            return
+        try:
+            metadata = self.home.stat()
+        except OSError as error:
+            self._notice(f"Cannot open the console home: {error}")
+            return
+        if (metadata.st_dev, metadata.st_ino) != self.startup_home:
+            self._notice("Home changed since the console started. Reopen the console.")
             return
         intent = Intent(
             self.home,
@@ -692,7 +892,7 @@ class SessionApp(App[tuple[str, int]]):
         )
         self.preview_task = asyncio.create_task(self._preview(intent))
 
-    async def _preview(self, intent: Intent) -> None:
+    async def _preview(self, intent: Intent) -> None:  # noqa: C901, PLR0912
         report: dict[str, Any] | None = None
         try:
             assert self.timing is not None  # noqa: S101
@@ -709,10 +909,39 @@ class SessionApp(App[tuple[str, int]]):
             )
             report["labels"] = labels
             lines = preview_lines(report)
+            guidance = report.get("attachment_cleanup")
+            if (
+                isinstance(guidance, dict)
+                and guidance.get("sources")
+                and guidance.get("home_identity") != list(self.startup_home or ())
+            ):
+                raise ValueError("Home changed since the console started.")
+            self.guidance = guidance if isinstance(guidance, dict) else None
+            if self.guidance and self.guidance.get("sources") and not self.guided_first:
+                lines.append("Observed attachment children (advisory; enter IDs deliberately):")
+                for source in self.guidance["sources"]:
+                    for child in source.get("children", []):
+                        lines.append(
+                            f"  source {source['id']} child {child['id']} work {child['root_id']}"
+                        )
+                if self.guidance.get("truncated"):
+                    lines.append("Observation truncated; omitted children are unknown.")
+                self.query_one("#child-ids").display = True
+                self.query_one("#choose-children").display = True
             lines.extend(timing_terminal(self.timing.snapshot()).splitlines())
             self.query_one("#progress").display = False
             self.query_one("#review-text", Static).update("\n".join(clean(line) for line in lines))
-            self.reviewed = confirmed_intent(intent, report)
+            reviewed = confirmed_intent(intent, report)
+            if reviewed.confirmation().home_identity != self.startup_home:
+                raise ValueError("Home identity changed during preview.")
+            if (
+                self.guided_first
+                and report.get("selected_attachments") != self.guided_child_sources
+            ):
+                raise ValueError("Child attachments changed or are unavailable; restart preview.")
+            if self.guided_first and set(reviewed.selected) != set(intent.selected):
+                raise ValueError("Child preview did not include every chosen child.")
+            self.reviewed = reviewed
             self.query_one("#confirm").display = True
             self.query_one("#execute").display = True
             self._notice(
@@ -742,11 +971,37 @@ class SessionApp(App[tuple[str, int]]):
             self.preview_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self.preview_task
+        previous_result = self.first_result
+        self.first_result = ""
         self.reviewed = None
+        self.guidance = None
+        self.guided_sources = ()
+        self.guided_source_roots = {}
+        self.guided_home = None
+        self.guided_cutoff = None
+        self.guided_first = False
+        self.guided_child_roots = {}
+        self.guided_child_sources = {}
+        self.guided_ready = False
         self.timing = None
         self.query_one("#progress").display = False
         self._review_mode(enabled=False)
-        self._notice("Preview closed before dispatch; no cleanup was requested.")
+        if previous_result:
+            self.selected.clear()
+            self.catalogue = None
+            self.index = None
+            self.groups = ()
+            self.matching_histories = ()
+            self.row_map.clear()
+            self.query_one(DataTable).clear()
+            results = self.query_one("#root-results", RichLog)
+            results.clear()
+            results.display = True
+            results.write(previous_result)
+            await self._load()
+            self._notice("Child result and receipt retained above; catalogue refreshed.")
+        else:
+            self._notice("Preview closed before dispatch; no cleanup was requested.")
 
     async def _dispatch(self, intent: Intent) -> None:
         self.dispatching = True
@@ -786,15 +1041,35 @@ class SessionApp(App[tuple[str, int]]):
                     continue
             self._show_progress()
             self.timing.finish()
-            self.completed_result = (result_text(report), status)
+            result = result_text(report)
+            if self.guided_first and self._matching_child_result(intent, report, status):
+                self.first_result = f"{result}\nReceipt: {self.receipt}"
+                self.guided_first = False
+                self.guided_ready = True
+                self.reviewed = None
+                self.query_one("#review-text", Static).update(
+                    "\n".join(clean(line) for line in self.first_result.splitlines())
+                )
+                self.query_one("#confirm").display = False
+                self.query_one("#execute").display = False
+                self.query_one("#source-preview").display = True
+                self._notice("Children confirmed. Request a fresh source preview or cancel.")
+                return
+            self.completed_result = (
+                (self.first_result + "\n" if self.first_result else "") + result,
+                status,
+            )
             self.exit(self.completed_result)
         except Exception as error:  # noqa: BLE001
             if self.timing is not None:
                 self.timing.finish(interrupted=True)
-            self.completed_result = (
+            message = (
                 f"UNKNOWN after confirmation: {error}. Keep receipt and reconcile; do not retry."
                 if self.receipt
-                else str(error),
+                else str(error)
+            )
+            self.completed_result = (
+                (self.first_result + "\n" if self.first_result else "") + message,
                 4 if self.receipt else 2,
             )
             self.exit(self.completed_result)
@@ -820,11 +1095,17 @@ class SessionApp(App[tuple[str, int]]):
         if self.dispatching:
             self._notice("Execution cannot be abandoned. Wait for outcome and receipt.")
             return
+        previous_result = self.first_result
         await self.action_cancel_preview()
         if self.load_task is not None and not self.load_task.done():
             self._notice("Waiting for catalogue observation to finish before exit…")
             await self.load_task
-        self.exit(("Stopped before dispatch.", 0))
+        self.exit(
+            (
+                (previous_result + "\n" if previous_result else "") + "Stopped before dispatch.",
+                0,
+            )
+        )
 
 
 def run(arguments: argparse.Namespace) -> int:

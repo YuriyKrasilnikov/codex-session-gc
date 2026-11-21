@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shlex
 import sqlite3
 from collections import Counter
 from compression.zstd import compress, decompress
@@ -14,19 +15,29 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
-from textual.widgets import DataTable, Input, Select
+from textual.widgets import DataTable, Input, Select, Static
 
 from codex_session_gc.cli.console_tasks import parse_cutoff
 from codex_session_gc.cli.main import main
 from codex_session_gc.cli.textual_console import SessionApp
-from codex_session_gc.domain import ArchiveState
+from codex_session_gc.domain import ArchiveState, ThreadId
 from codex_session_gc.recovery import LaunchStatus, inspect
-from tests.mcp_native_fixture import CHILD, OTHER, ROOT, logical_rows, make_guardian_home, make_home
+from tests.mcp_native_fixture import (
+    CHILD,
+    OTHER,
+    ROOT,
+    attach_history,
+    logical_rows,
+    make_guardian_home,
+    make_home,
+)
 from tests.test_mcp_native import assert_selected_effects, call, native_helper, server
 
 if TYPE_CHECKING:
     from pathlib import Path
     from typing import Any
+
+    from textual.pilot import Pilot
 
 __all__ = ["native_helper"]
 
@@ -434,3 +445,148 @@ def test_actual_adapters_remove_all_owned_revert_formats_and_preserve_provider( 
     assert payload["age_policy"] == {"kind": "before", "cutoff": "2030-01-01T00:00:00+00:00"}
     assert payload["deletion_scope"] == [CHILD]
     assert {item["rollout_path"] for item in payload["targets"][0]["rollouts"]} == owned
+
+
+@pytest.mark.parametrize(("cutoff", "cross_root"), [(None, True), ("2030-01-01T00:00:00Z", False)])
+def test_cli_reviews_and_deletes_attachment_then_source(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    native_helper: Path,
+    cutoff: str | None,
+    *,
+    cross_root: bool,
+) -> None:
+    """Follow the displayed previews and explicitly execute two exact requests."""
+    codex_dir = tmp_path / "home's data"
+    paths = make_home(codex_dir)
+    attach_history(paths, CHILD, ROOT, standalone=cross_root)
+    child_root = CHILD if cross_root else ROOT
+    initial = ["plan", "--online", "--home", str(codex_dir), "--closed-work", ROOT]
+    initial.extend(("--select-thread", ROOT))
+    if cutoff is not None:
+        initial.extend(("--cutoff", cutoff))
+    assert main(initial) == 0
+    lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
+    assert f"Attachment {CHILD} (unselected), work root {child_root}" in lines
+    child = _suggestion(lines, "Review attachment: ")
+    source = _suggestion(lines, "After confirmed attachment removal, preview source: ")
+
+    child_review, source_review = [
+        command[1:] for command in (child, source) if command[:2] == ["codex-session-gc", "plan"]
+    ]
+    assert main([*child_review, "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["deletions"] == [CHILD]
+    assert report["roots"] == [child_root]
+    before = logical_rows(codex_dir)
+    child_receipt = tmp_path / "child.sqlite"
+    source_receipt = tmp_path / "source.sqlite"
+    child_result = _apply(child_review, native_helper, child_receipt, capsys)
+    assert not paths[CHILD].exists()
+    assert paths[ROOT].is_file()
+    assert main([*source_review, "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["deletions"] == [ROOT]
+
+    source_result = _apply(source_review, native_helper, source_receipt, capsys)
+    assert child_result["attemptId"] != source_result["attemptId"]
+    assert child_receipt.is_file()
+    assert source_receipt.is_file()
+    assert not paths[ROOT].exists()
+    assert paths[OTHER].is_file()
+    expected = before["state_5.sqlite"]["threads"]
+    assert logical_rows(codex_dir)["state_5.sqlite"]["threads"] == [
+        row for row in expected if row[0] == OTHER
+    ]
+
+
+def _suggestion(lines: list[str], prefix: str) -> list[str]:
+    (value,) = [line.removeprefix(prefix) for line in lines if line.startswith(prefix)]
+    return shlex.split(value)
+
+
+def test_textual_reviews_attachment_and_source_in_one_interaction(
+    tmp_path: Path, native_helper: Path
+) -> None:
+    """Confirm independently within the application and keep both receipts."""
+    codex_dir = tmp_path / "home"
+    receipts = tmp_path / "receipts"
+    paths = make_home(codex_dir)
+    attach_history(paths, CHILD, ROOT, standalone=True)
+
+    async def review() -> None:
+        browser = SessionApp(codex_dir, None, native_helper, receipts)
+        async with browser.run_test(size=(174, 60)) as pilot:
+            assert browser.load_task is not None
+            await browser.load_task
+            source = ThreadId.parse(ROOT)
+            browser.selected = {source: source}
+            await _textual_preview(browser, pilot, "#preview")
+            assert browser.query_one("#child-ids", Input).display
+            browser.query_one("#child-ids", Input).value = CHILD
+            await _textual_preview(browser, pilot, "#choose-children")
+            assert browser.reviewed is not None, browser.query_one("#notice", Static).render()
+            assert browser.reviewed.selected == (ThreadId.parse(CHILD),)
+            await _textual_apply(browser, pilot)
+            assert browser.query_one("#source-preview").display
+            assert not browser.query_one("#confirm", Input).display
+            first_receipt = browser.receipt
+            assert first_receipt is not None
+            assert first_receipt.is_file()
+            assert paths[ROOT].is_file()
+            assert not paths[CHILD].exists()
+            await _textual_preview(browser, pilot, "#source-preview")
+            assert browser.reviewed is not None
+            assert browser.reviewed.selected == (source,)
+            assert not browser.query_one("#confirm", Input).value
+            await _textual_apply(browser, pilot)
+            assert browser.completed_result is not None
+            assert browser.completed_result[1] == 0
+            assert str(first_receipt) in browser.completed_result[0]
+            assert browser.receipt is not None
+            assert browser.receipt != first_receipt
+            assert browser.receipt.is_file()
+
+    asyncio.run(asyncio.wait_for(review(), 90))
+    assert not paths[ROOT].exists()
+    assert paths[OTHER].is_file()
+    assert [row[0] for row in logical_rows(codex_dir)["state_5.sqlite"]["threads"]] == [OTHER]
+
+
+async def _textual_preview(browser: SessionApp, pilot: Pilot[tuple[str, int]], button: str) -> None:
+    previous = browser.preview_task
+    await pilot.pause()
+    assert await pilot.click(button)
+    assert browser.preview_task is not None
+    assert browser.preview_task is not previous, browser.query_one("#notice", Static).render()
+    await browser.preview_task
+
+
+async def _textual_apply(browser: SessionApp, pilot: Pilot[tuple[str, int]]) -> None:
+    browser.query_one("#confirm", Input).value = "DELETE"
+    await pilot.pause()
+    assert await pilot.click("#execute")
+    assert browser.dispatch_task is not None
+    await browser.dispatch_task
+
+
+def _apply(
+    preview_arguments: list[str],
+    helper: Path,
+    receipt: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> dict[str, object]:
+    status = main(
+        [
+            "apply",
+            *preview_arguments[1:],
+            "--helper",
+            str(helper),
+            "--receipt",
+            str(receipt),
+            "--json",
+        ]
+    )
+    value: dict[str, object] = json.loads(capsys.readouterr().out)
+    assert status == 0, value
+    assert value["outcome"] == "confirmed"
+    return value

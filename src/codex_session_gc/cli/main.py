@@ -18,7 +18,7 @@ from codex_session_gc import diagnostics
 from codex_session_gc import sqlite_engine as sqlite3
 from codex_session_gc.artifacts import ArtifactIdentity, SourceIdentity
 from codex_session_gc.cli import closed_work_execution, timing_display
-from codex_session_gc.cli.console_display import preview_lines
+from codex_session_gc.cli.console_display import attachment_plan_lines, preview_lines
 from codex_session_gc.cli.console_tasks import preview_selection
 from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.cli.storage_display import run_storage, run_storage_diagnostics
@@ -279,7 +279,7 @@ def _print_preview(report: dict[str, Any]) -> str:
     """Display preparation errors or the exact conditional declaration."""
     if report["errors"]:
         return "\n".join(str(error) for error in report["errors"])
-    return "\n".join(preview_lines(report))
+    return "\n".join([*preview_lines(report), *attachment_plan_lines(report)])
 
 
 def _doctor(arguments: argparse.Namespace) -> int:

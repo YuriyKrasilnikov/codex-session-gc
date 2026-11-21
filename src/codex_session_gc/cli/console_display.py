@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
 import shutil
 import stat
 import unicodedata
@@ -78,6 +79,69 @@ def receipt_path(directory: Path, home: Path) -> Path:
         raise ValueError("Receipt directory must be outside the selected home.")
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     return directory / f"cleanup-{uuid.uuid4()}.sqlite"
+
+
+def _plan_command(report: dict[str, Any], root: str, thread: str) -> str:
+    arguments = [
+        "codex-session-gc",
+        "plan",
+        "--online",
+        "--home",
+        report["home"],
+        "--closed-work",
+        root,
+        "--select-thread",
+        thread,
+    ]
+    if report["cutoff"] is not None:
+        arguments.extend(("--cutoff", report["cutoff"]))
+    return shlex.join(arguments)
+
+
+def attachment_plan_lines(report: dict[str, Any]) -> list[str]:
+    """Render read-only navigation for separate CLI invocations."""
+    guidance = report.get("attachment_cleanup")
+    identity = report.get("home_identity")
+    output = []
+    if identity is not None:
+        output.append(f"Observed home device/inode: {identity[0]}/{identity[1]}")
+    for child, source in report.get("selected_attachments", {}).items():
+        output.append(f"Selected attachment {child} currently points at source {source}.")
+    if not guidance or not (guidance["sources"] or guidance["truncated"]):
+        return output
+    output.append("Attached histories holding selected sources:")
+    commands_available = report["home"].isprintable()
+    if not commands_available:
+        output.append("Preview commands are unavailable for a home path with control characters.")
+    for source in guidance["sources"]:
+        output.append(f"  Source {source['id']}")
+        for child in source["children"]:
+            membership = "selected" if child["selected"] else "unselected"
+            root = child["root_id"]
+            output.append(
+                f"    Attachment {child['id']} ({membership}), "
+                f"work root {root if root is not None else 'unavailable'}"
+            )
+            if commands_available and root is not None:
+                output.append(f"    Review attachment: {_plan_command(report, root, child['id'])}")
+        root = source["root_id"]
+        if commands_available and root is not None:
+            output.append(
+                "    After confirmed attachment removal, preview source: "
+                + _plan_command(report, root, source["id"])
+            )
+    if guidance["truncated"]:
+        output.append("Additional observed attachments are omitted from this report.")
+    output.extend(
+        [
+            "Use the first attempt's receipt to check the result before reviewing the source.",
+            (
+                "Each command reads current storage independently. Compare home device/inode "
+                "and review the work roots and current attachment sources before a separate apply."
+            ),
+        ]
+    )
+    return output
 
 
 def preview_lines(report: dict[str, Any]) -> list[str]:

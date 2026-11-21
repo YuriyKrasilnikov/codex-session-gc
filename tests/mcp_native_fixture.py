@@ -121,6 +121,30 @@ def logical_rows(home: Path) -> dict[str, dict[str, list[tuple[Any, ...]]]]:
     return result
 
 
+def attach_history(
+    paths: dict[str, Path], child_id: str, source_id: str, *, standalone: bool = False
+) -> None:
+    """Declare the same logical attachment in a synthetic SQL row and its header."""
+    rollout = paths[child_id]
+    lines = rollout.read_text().splitlines()
+    header = json.loads(lines[0])
+    payload = header["payload"]
+    payload.update(attached_thread=True, forked_from_id=source_id)
+    with sqlite3.connect(rollout.parent.parent / "state_5.sqlite") as connection:
+        if standalone:
+            payload.pop("parent_thread_id", None)
+            payload["source"] = "cli"
+            connection.execute("UPDATE threads SET source='cli' WHERE id=?", (child_id,))
+            connection.execute(
+                "DELETE FROM thread_spawn_edges WHERE child_thread_id=?", (child_id,)
+            )
+        connection.execute(
+            "UPDATE threads SET attached_thread_parent_id=? WHERE id=?", (source_id, child_id)
+        )
+    lines[0] = json.dumps(header)
+    rollout.write_text("\n".join(lines) + "\n")
+
+
 def retained_provider(path: Path, target: Path) -> None:
     lines = path.read_text().splitlines()
     header = json.loads(lines[0])

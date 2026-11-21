@@ -169,15 +169,26 @@ def preview_selection(
         read_closed_work_facts,
     )
     from codex_session_gc.execution.resource_policy import collection_limits  # noqa: PLC0415
+    from codex_session_gc.planning.attachment_cleanup import (  # noqa: PLC0415
+        AdvisoryAncestry,
+        attachment_cleanup,
+    )
     from codex_session_gc.planning.closed_work import select_closed_work  # noqa: PLC0415
 
+    before = home.stat()
+    home_identity = (before.st_dev, before.st_ino)
+    ancestry = AdvisoryAncestry()
     facts = read_closed_work_facts(
         home,
         cutoff,
         roots,
         selected,
         collection_limits(),
+        advisory_ancestry=ancestry,
     )
+    after = home.stat()
+    if (after.st_dev, after.st_ino) != home_identity:
+        raise ValueError("The home identity changed during preview.")
     with interval(Phase.SELECTION_MANIFEST):
         selection = select_closed_work(
             facts.snapshot,
@@ -230,6 +241,12 @@ def preview_selection(
     return {
         **intent.payload(),
         "kind": "closed_work_selection",
+        "home_identity": list(home_identity),
+        "attachment_cleanup": attachment_cleanup(facts.snapshot, selected, ancestry, home_identity),
+        "selected_attachments": {
+            str(child.value): str(source.value)
+            for child, source in sorted(ancestry.selected_attachments.items())
+        },
         "physical_manifest": [target.model_dump(mode="json") for target in targets],
         "physical_lineage": "observed",
         "known_stored_bytes": sum(sizes.values()),
