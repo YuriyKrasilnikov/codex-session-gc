@@ -126,6 +126,7 @@ class SessionApp(App[tuple[str, int]]):
     #confirm { height: 3; display: none; }
     #execute { display: none; }
     .reviewing .filters, .reviewing #sessions, .reviewing #details-panel { display: none; }
+    .reviewing #project-summary { display: none; }
     """
 
     def __init__(self, home: Path, cutoff: UtcCutoff, helper: Path | None, receipts: Path) -> None:
@@ -255,6 +256,7 @@ class SessionApp(App[tuple[str, int]]):
             yield Button("Execute DELETE", id="execute", variant="error")
             yield Button("Refresh", id="refresh")
             yield Button("Storage", id="storage")
+            yield Button("Project summary", id="project-summary")
             yield Button("Quit", id="quit")
         yield Footer()
 
@@ -581,7 +583,7 @@ class SessionApp(App[tuple[str, int]]):
             if current:
                 self._select((current[0],), current[1])
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901
+    async def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901, PLR0912
         """Route explicit browsing and execution actions."""
         action = event.button.id
         if self.dispatching:
@@ -592,7 +594,23 @@ class SessionApp(App[tuple[str, int]]):
             return
         if self.review_open and action not in {"cancel", "quit", "execute"}:
             return
-        if action == "storage":
+        if action == "project-summary":
+            if self.index is None or (self.load_task is not None and not self.load_task.done()):
+                self._notice("Wait for the catalogue to finish loading.")
+                return
+            if not self.valid_filters:
+                self._notice("Correct the filters before opening the project summary.")
+                return
+            from codex_session_gc.cli.project_summary_screen import (  # noqa: PLC0415
+                ProjectSummaryScreen,
+            )
+
+            def drilldown(cwd: str | None) -> None:
+                if cwd is not None:
+                    self.query_one("#cwd", Select).value = cwd
+
+            self.push_screen(ProjectSummaryScreen(self.matching_histories), drilldown)
+        elif action == "storage":
             if self.load_task is not None and not self.load_task.done():
                 self._notice("Wait for the catalogue to finish loading before opening Storage.")
             else:

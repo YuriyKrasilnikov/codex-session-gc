@@ -26,13 +26,21 @@ from codex_session_gc.cli.console_display import discover_helper
 from codex_session_gc.cli.console_tasks import Intent, async_preview, parse_cutoff
 from codex_session_gc.cli.mcp_capability import McpCapability
 from codex_session_gc.cli.storage_service import StorageService
+from codex_session_gc.cli.summary_display import cwd_label
 from codex_session_gc.compatibility.observation import ImportedSupport
 from codex_session_gc.domain import ArchiveState, ThreadId
 from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
 from codex_session_gc.execution.selection_provenance import reviewed_associations
 from codex_session_gc.installation.model import InstallLayout
 from codex_session_gc.inventory.catalogue import SessionEntry, read_session_catalogue
-from codex_session_gc.inventory.query import CatalogueIndex, CatalogueQuery, CatalogueScope
+from codex_session_gc.inventory.query import (
+    CatalogueIndex,
+    CatalogueQuery,
+    CatalogueScope,
+    ProjectRow,
+    Summary,
+    summarize_catalogue,
+)
 
 _PAGE = 100
 _TEXT = 500
@@ -94,7 +102,120 @@ def _page(offset: int, limit: int) -> None:
         raise ValueError("Invalid page bounds.")
 
 
-class CatalogueService:
+class CatalogueObservation:
+    """Read-only catalogue generation and one bounded summary cache."""
+
+    def __init__(self, home: Path) -> None:
+        """Bind a home without acquiring cleanup state."""
+        self.home = home.resolve()
+        self.snapshot_id: str | None = None
+        self.index: CatalogueIndex | None = None
+        self._lock = asyncio.Lock()
+        self._summary_cache: tuple[str, CatalogueQuery, str, Summary] | None = None
+        self._project_keys: dict[str, str] = {}
+        self._cwd_keys: dict[str, str] = {}
+
+    async def _snapshot(
+        self, snapshot_id: str | None, *, refresh: bool = False
+    ) -> tuple[str, CatalogueIndex]:
+        async with self._lock:
+            if snapshot_id is not None and (refresh or snapshot_id != self.snapshot_id):
+                raise ValueError("The catalogue snapshot has expired; query the current snapshot.")
+            if refresh or self.index is None:
+                self.index = CatalogueIndex(
+                    await asyncio.to_thread(read_session_catalogue, self.home)
+                )
+                self.snapshot_id = str(uuid.uuid4())
+                self._summary_cache = None
+                self._project_keys = {
+                    f"project/{self.snapshot_id}/{ordinal}": cwd
+                    for ordinal, cwd in enumerate(
+                        sorted({e.cwd for e in self.index.entries.values()})
+                    )
+                }
+                self._cwd_keys = {cwd: key for key, cwd in self._project_keys.items()}
+            if snapshot_id is not None and snapshot_id != self.snapshot_id:
+                raise ValueError("The catalogue snapshot has expired; query the current snapshot.")
+            assert self.snapshot_id is not None  # noqa: S101
+            assert self.index is not None  # noqa: S101
+            return self.snapshot_id, self.index
+
+    async def catalogue_summary(  # noqa: PLR0913
+        self,
+        *,
+        snapshot_id: str | None = None,
+        refresh: bool = False,
+        text: str = "",
+        before: str | None = None,
+        min_bytes: int | None = None,
+        max_bytes: int | None = None,
+        scope: CatalogueScope = CatalogueScope.ALL,
+        roots: list[str] | None = None,
+        cwd: str | None = None,
+        archive_state: ArchiveState | None = None,
+        rank: Literal["stored_bytes", "closed_agent_bytes"] = "stored_bytes",
+        offset: int = 0,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Summarize matching histories by exact stored cwd; grants no cleanup permission."""
+        _page(offset, limit)
+        if len(text) > _TEXT or (roots is not None and len(roots) > _SELECTION):
+            raise ValueError("Query input exceeds the transport limit.")
+        if rank not in ("stored_bytes", "closed_agent_bytes"):
+            raise ValueError("Unknown summary rank.")
+        query = CatalogueQuery(
+            text=text.casefold(),
+            before=parse_cutoff(before).timestamp if before else None,
+            min_bytes=min_bytes,
+            max_bytes=max_bytes,
+            scope=scope,
+            roots=tuple(
+                sorted(
+                    {ThreadId.parse(value) for value in roots or []},
+                    key=lambda value: str(value.value),
+                )
+            ),
+            cwd=cwd,
+            archive_state=archive_state,
+        )
+        identity, index = await self._snapshot(snapshot_id, refresh=refresh)
+        if self._summary_cache is not None and self._summary_cache[:3] == (identity, query, rank):
+            summary = self._summary_cache[3]
+        else:
+            summary = summarize_catalogue(index.query(query).matching_histories, rank)
+            if self.snapshot_id == identity:
+                self._summary_cache = (identity, query, rank, summary)
+        page = summary.projects[offset : offset + limit]
+
+        def project(row: ProjectRow) -> dict[str, Any]:
+            display, truncated = cwd_label(row.cwd, _TEXT)
+            return {
+                "project_key": self._cwd_keys[row.cwd],
+                "cwd_display": display,
+                "cwd_truncated": truncated,
+                "breakdown": asdict(row.breakdown),
+            }
+
+        return {
+            "snapshot_id": identity,
+            "rank": rank,
+            "overall": asdict(summary.overall),
+            "projects": [project(row) for row in page],
+            "total_projects": len(summary.projects),
+            "offset": offset,
+            "next_offset": offset + len(page)
+            if offset + len(page) < len(summary.projects)
+            else None,
+            "advisory": True,
+            "permission": False,
+            "source_changed": index.catalogue.source_changed,
+            "physical_complete": index.catalogue.physical_complete,
+            "diagnostics": [_text(value) for value in index.catalogue.diagnostics[:_PAGE]],
+            "diagnostics_truncated": len(index.catalogue.diagnostics) > _PAGE,
+        }
+
+
+class CatalogueService(CatalogueObservation):
     """One fixed-home observation cache; explicit refresh replaces its identity."""
 
     def __init__(
@@ -107,16 +228,13 @@ class CatalogueService:
         support_scope: SupportScope | None = None,
     ) -> None:
         """Bind all tools to the startup home, never client-supplied paths."""
-        self.home = home.resolve()
+        super().__init__(home)
         self.capability = McpCapability(capability)
         self.support_scope = support_scope
         state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
         self.operations = ConfirmedOperations(
             self.home, helper, receipts or state / "codex-session-gc/receipts"
         )
-        self.snapshot_id: str | None = None
-        self.index: CatalogueIndex | None = None
-        self._lock = asyncio.Lock()
         self.storage = StorageService(self.home)
 
     async def storage_overview(self, *, refresh: bool = False) -> dict[str, Any]:
@@ -168,21 +286,6 @@ class CatalogueService:
             )
         return asdict(report)
 
-    async def _snapshot(
-        self, snapshot_id: str | None, *, refresh: bool = False
-    ) -> tuple[str, CatalogueIndex]:
-        async with self._lock:
-            if refresh or self.index is None:
-                self.index = CatalogueIndex(
-                    await asyncio.to_thread(read_session_catalogue, self.home)
-                )
-                self.snapshot_id = str(uuid.uuid4())
-            if snapshot_id is not None and snapshot_id != self.snapshot_id:
-                raise ValueError("The catalogue snapshot has expired; query the current snapshot.")
-            assert self.snapshot_id is not None  # noqa: S101
-            assert self.index is not None  # noqa: S101
-            return self.snapshot_id, self.index
-
     async def query_catalogue(  # noqa: PLR0913
         self,
         *,
@@ -198,6 +301,7 @@ class CatalogueService:
         direction: Literal["asc", "desc"] = "desc",
         roots: list[str] | None = None,
         cwd: str | None = None,
+        project_key: str | None = None,
         archive_state: ArchiveState | None = None,
         offset: int = 0,
         limit: int = 50,
@@ -206,6 +310,8 @@ class CatalogueService:
         _page(offset, limit)
         if len(text) > _TEXT or (roots is not None and len(roots) > _SELECTION):
             raise ValueError("Query input exceeds the transport limit.")
+        if project_key is not None and (cwd is not None or snapshot_id is None or refresh):
+            raise ValueError("A current snapshot and valid project key are required, without cwd.")
         query = CatalogueQuery(
             text=text,
             before=parse_cutoff(before).timestamp if before else None,
@@ -220,6 +326,12 @@ class CatalogueService:
             archive_state=archive_state,
         )
         identity, index = await self._snapshot(snapshot_id, refresh=refresh)
+        if project_key is not None:
+            if project_key not in self._project_keys:
+                raise ValueError("Unknown project key for this catalogue snapshot.")
+            from dataclasses import replace  # noqa: PLC0415
+
+            query = replace(query, cwd=self._project_keys[project_key])
         result = index.query(query)
         groups = result.groups
         matches = result.matching_histories
@@ -409,6 +521,7 @@ def create_server(
         service.storage_overview,
         service.storage_objects,
         service.query_catalogue,
+        service.catalogue_summary,
         service.session_details,
         service.prepare_cleanup,
         service.compatibility_status,

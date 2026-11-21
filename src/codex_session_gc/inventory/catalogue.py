@@ -441,6 +441,9 @@ def _topology(  # noqa: C901, PLR0912
                 invalid.add(child)
                 diagnostics.append("invalid_spawn_status")
             else:
+                if child in statuses and statuses[child] != status:
+                    invalid.add(child)
+                    diagnostics.append("conflicting_spawn_status")
                 statuses[child] = status
         if parent in identifiers:
             children[parent].add(child)

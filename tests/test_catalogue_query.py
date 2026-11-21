@@ -8,7 +8,12 @@ import pytest
 
 from codex_session_gc.domain import ArchiveState, ThreadId
 from codex_session_gc.inventory.catalogue import SessionCatalogue, SessionEntry, SessionSource
-from codex_session_gc.inventory.query import CatalogueIndex, CatalogueQuery, CatalogueScope
+from codex_session_gc.inventory.query import (
+    CatalogueIndex,
+    CatalogueQuery,
+    CatalogueScope,
+    summarize_catalogue,
+)
 from tests.current_storage_fixture import _stored_rollout
 
 _A = ThreadId.parse("11111111-1111-4111-8111-111111111111")
@@ -487,3 +492,37 @@ def test_exact_filters_preserve_incomplete_byte_bounds_and_query_detachment() ->
     assert not index.query(replace(query, max_bytes=50)).groups
     assert _matches(index, query) == {_E}
     assert _matches(index, CatalogueQuery(cwd=_CWD, scope="agents", min_bytes=200)) == {_B, _C}
+
+
+def test_summary_counts_matches_and_preserves_unknowns() -> None:
+    main = _entry(_A, 100)
+    worker = _entry(_B, 300, _A)
+    guardian = replace(_entry(_C, 200, _A), source=SessionSource.GUARDIAN)
+    unknown = replace(_entry(_D, None, _A), issue="invalid_spawn_topology")
+    index = CatalogueIndex(
+        SessionCatalogue((main, worker, guardian, unknown), (), source_changed=False)
+    )
+    summary = summarize_catalogue(index.query(CatalogueQuery(scope="agents")).matching_histories)
+    totals = summary.projects[0].breakdown
+    assert totals.total.history_count == 3
+    assert totals.total.known_stored_bytes == 500
+    assert totals.total.stored_bytes is None
+    assert totals.closed_agents.stored_bytes == 300
+    assert totals.guardian.stored_bytes == 200
+    assert totals.unknown_status_agents.incomplete_history_count == 1
+    assert totals.main.stored_bytes == 0
+    assert summarize_catalogue(()).overall.total.stored_bytes == 0
+
+
+def test_summary_rank_and_literal_cwd() -> None:
+    histories = (
+        replace(_entry(_A, 500), cwd="/a"),
+        replace(_entry(_B, 300, _A), cwd="/b"),
+        replace(_entry(_C, None), cwd=""),
+    )
+    assert [row.cwd for row in summarize_catalogue(histories).projects] == ["/a", "/b", ""]
+    assert [row.cwd for row in summarize_catalogue(histories, "closed_agent_bytes").projects] == [
+        "/b",
+        "",
+        "/a",
+    ]

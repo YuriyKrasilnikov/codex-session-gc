@@ -1099,3 +1099,78 @@ def test_storage_live_fixture_matches_cli_and_mcp(
             assert missing in str(table.get_row_at(0)[0])
 
     asyncio.run(asyncio.wait_for(scenario(), timeout=20))
+
+
+def test_project_summary_preserves_selection_and_drills_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        browser = app(tmp_path, monkeypatch)
+        snapshot = catalogue()
+        root, agent = snapshot.entries
+        multi_project = replace(snapshot, entries=(root, replace(agent, cwd="/another-project")))
+        monkeypatch.setattr(ui, "read_session_catalogue", lambda _home: multi_project)
+        async with browser.run_test(size=(150, 45)) as pilot:
+            assert browser.load_task is not None
+            await browser.load_task
+            await pilot.pause()
+            browser.selected[ROOT] = ROOT
+            assert await pilot.click("#project-summary", offset=(3, 1))
+            await pilot.pause()
+            assert browser.screen.id != "_default", browser.query_one("#notice", Static).content
+            assert browser.screen.query_one("#project-table", DataTable).row_count == len(
+                multi_project.entries
+            )
+            overall = str(browser.screen.query_one("#project-overall", Static).content)
+            assert "main:" in overall
+            assert "closed_agents:" in overall
+            assert "unknown_status_agents:" in overall
+            await pilot.press("escape")
+            await pilot.pause()
+            assert browser.selected == {ROOT: ROOT}
+            assert await pilot.click("#project-summary", offset=(3, 1))
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert browser.selected == {ROOT: ROOT}
+            assert isinstance(browser.query_one("#cwd", Select).value, str)
+
+    asyncio.run(scenario())
+
+
+def test_project_summary_refuses_invalid_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        browser = app(tmp_path, monkeypatch)
+        async with browser.run_test(size=(150, 45)) as pilot:
+            assert browser.load_task is not None
+            await browser.load_task
+            browser.query_one("#minimum", Input).value = "invalid"
+            await pilot.pause()
+            assert not browser.valid_filters
+            await pilot.click("#project-summary")
+            await pilot.pause()
+            assert browser.screen is browser.screen_stack[0]
+
+    asyncio.run(scenario())
+
+
+def test_project_summary_refuses_pending_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        browser = app(tmp_path, monkeypatch)
+        async with browser.run_test(size=(150, 45)) as pilot:
+            assert browser.load_task is not None
+            await browser.load_task
+            pending = asyncio.create_task(asyncio.Event().wait())
+            browser.load_task = pending
+            try:
+                await pilot.click("#project-summary")
+                await pilot.pause()
+                assert browser.screen is browser.screen_stack[0]
+            finally:
+                pending.cancel()
+
+    asyncio.run(scenario())

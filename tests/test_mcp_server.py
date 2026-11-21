@@ -45,7 +45,7 @@ from codex_session_gc.execution.confirmed_declaration import (
     create_declaration,
 )
 from codex_session_gc.execution.physical_manifest import decode_targets
-from codex_session_gc.inventory.query import CatalogueIndex
+from codex_session_gc.inventory.query import CatalogueIndex, CatalogueQuery, CatalogueResult
 from codex_session_gc.planning.closed_work import select_closed_work
 from codex_session_gc.recovery import AttemptId, TerminalKind, inspect
 from tests.current_storage_fixture import _A, _B, _LIMITS, _id
@@ -66,6 +66,7 @@ from tests.test_catalogue_query import (
 from tests.test_catalogue_query import (
     _E as QUERY_UNKNOWN,
 )
+from tests.test_catalogue_query import _mixed_index
 from tests.test_closed_work_apply import _setup
 from tests.test_closed_work_reconcile import _delete_selected
 
@@ -160,6 +161,7 @@ def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> N
                 "storage_overview",
                 "storage_objects",
                 "query_catalogue",
+                "catalogue_summary",
                 "session_details",
                 "prepare_cleanup",
                 "apply_cleanup",
@@ -167,6 +169,16 @@ def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> N
                 "reconcile_cleanup",
                 "compatibility_status",
             }
+            summary = _data(await session.call_tool("catalogue_summary", {"limit": 1}))
+            if summary["projects"]:
+                row = summary["projects"][0]
+                drill = _data(
+                    await session.call_tool(
+                        "query_catalogue",
+                        {"snapshot_id": summary["snapshot_id"], "project_key": row["project_key"]},
+                    )
+                )
+                assert drill["snapshot_id"] == summary["snapshot_id"]
             queried = _data(await session.call_tool("query_catalogue", {"limit": 1}))
             assert len(queried["histories"]) == 1
             snapshot = queried["snapshot_id"]
@@ -251,6 +263,7 @@ def test_read_only_sdk_exposes_observation_without_cleanup_operation_or_receipt(
                 "storage_overview",
                 "storage_objects",
                 "query_catalogue",
+                "catalogue_summary",
                 "session_details",
                 "prepare_cleanup",
                 "cleanup_status",
@@ -1159,3 +1172,73 @@ def test_engine_exception_preserves_saved_outcome_or_unknown_without_replay(
     )
     assert restarted.apply_reference(**reference)["outcome"] == result["outcome"]
     assert calls == 1
+
+
+def test_project_summary_cache_and_generation_drilldown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codex_session_gc.cli import mcp_server  # noqa: PLC0415
+    from codex_session_gc.inventory.catalogue import SessionCatalogue  # noqa: PLC0415
+
+    source = _mixed_index().catalogue
+    entries = list(source.entries)
+    entries[1] = replace(entries[1], cwd="/other")
+    catalogue = SessionCatalogue(tuple(entries), (), source_changed=False)
+    reads = queries = 0
+    original = CatalogueIndex.query
+
+    def read(_home: Path) -> SessionCatalogue:
+        nonlocal reads
+        reads += 1
+        return catalogue
+
+    def query(index: CatalogueIndex, value: CatalogueQuery) -> CatalogueResult:
+        nonlocal queries
+        queries += 1
+        return original(index, value)
+
+    monkeypatch.setattr(mcp_server, "read_session_catalogue", read)
+    monkeypatch.setattr(CatalogueIndex, "query", query)
+    service = CatalogueService(tmp_path)
+
+    async def check() -> None:
+        first = await service.catalogue_summary(text="PROJECT", limit=1)
+        second = await service.catalogue_summary(text="project", offset=1, limit=1)
+        assert first["next_offset"] == 1
+        assert len(second["projects"]) == 1
+        assert reads == queries == 1
+        assert first["overall"] == second["overall"]
+        matched = [
+            entry
+            for entry in catalogue.entries
+            if "project" in (f"{entry.title}\n{entry.cwd}\n{entry.id.value}".casefold())
+        ]
+        assert first["overall"]["total"]["history_count"] == len(matched)
+        assert first["overall"]["total"]["known_stored_bytes"] == sum(
+            entry.known_stored_bytes for entry in matched
+        )
+        row = first["projects"][0]
+        selected = await service.query_catalogue(
+            snapshot_id=first["snapshot_id"], project_key=row["project_key"]
+        )
+        assert all(item["cwd"] == row["cwd_display"] for item in selected["histories"])
+        for kwargs in (
+            {"refresh": True, "min_bytes": -1},
+            {
+                "refresh": True,
+                "project_key": row["project_key"],
+                "snapshot_id": first["snapshot_id"],
+            },
+        ):
+            with pytest.raises(ValueError):
+                await service.query_catalogue(**kwargs)
+        assert reads == 1
+        refreshed = await service.catalogue_summary(refresh=True)
+        assert reads == 2
+        assert refreshed["snapshot_id"] != first["snapshot_id"]
+        with pytest.raises(ValueError):
+            await service.query_catalogue(
+                snapshot_id=first["snapshot_id"], project_key=row["project_key"]
+            )
+
+    asyncio.run(check())
