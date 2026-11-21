@@ -1284,37 +1284,32 @@ def test_stdio_progress_is_scoped_to_each_request(tmp_path: Path) -> None:
     make_home(home)
 
     async def check() -> None:
-        # Coordinate the test-only declaration builder with actual SDK sends.
-        # This witnesses in-flight delivery without requiring a final frame.
+        # The client acknowledges its own in-flight frame before the reply can finish.
+        acknowledgements = tmp_path / "progress"
+        acknowledgements.mkdir()
         bootstrap = """
-import json, sys, threading
+import asyncio, sys
 from pathlib import Path
-from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
 from codex_session_gc.execution.timing import current
-from codex_session_gc.cli.mcp_server import Context, run
-sent = {count: threading.Event() for count in (1, 2)}
-original_prepare = ConfirmedOperations.prepare
-original_progress = Context.report_progress
-async def observed_progress(self, progress, total=None, message=None):
-    await original_progress(self, progress, total, message)
-    if message is not None:
-        counts = json.loads(message).get("worker_counts")
-        if counts is not None and "selected_requested" in counts:
-            sent[counts["selected_requested"]].set()
-def gated_prepare(self, *args, **kwargs):
+from codex_session_gc.cli.mcp_server import CatalogueService, run
+acks = Path(sys.argv[2])
+original_prepare = CatalogueService.prepare_cleanup
+async def gated_prepare(self, *args, **kwargs):
+    result = await original_prepare(self, *args, **kwargs)
     observer = current()
     assert observer is not None
     count = observer.snapshot()["worker_counts"]["selected_requested"]
-    if not sent[count].wait(10):
-        raise RuntimeError("test did not observe the in-flight worker frame")
-    return original_prepare(self, *args, **kwargs)
-Context.report_progress = observed_progress
-ConfirmedOperations.prepare = gated_prepare
+    marker = acks / str(count)
+    async with asyncio.timeout(10):
+        while not marker.is_file():
+            await asyncio.sleep(0.01)
+    return result
+CatalogueService.prepare_cleanup = gated_prepare
 run(Path(sys.argv[1]))
 """
         parameters = StdioServerParameters(
             command=sys.executable,
-            args=["-c", bootstrap, str(home)],
+            args=["-c", bootstrap, str(home), str(acknowledgements)],
             env=dict(os.environ),
         )
         async with stdio_client(parameters) as (read, write), ClientSession(read, write) as session:
@@ -1325,11 +1320,17 @@ run(Path(sys.argv[1]))
             snapshot = _data(await session.call_tool("query_catalogue", {}))["snapshot_id"]
             observations: list[list[tuple[float, str | None]]] = [[], []]
 
+            async def receive(index: int, value: float, message: str | None) -> None:
+                observations[index].append((value, message))
+                counts = json.loads(message or "{}").get("worker_counts")
+                if counts is not None and counts.get("selected_requested") == index + 1:
+                    await asyncio.to_thread((acknowledgements / str(index + 1)).touch)
+
             async def first(value: float, _total: float | None, message: str | None) -> None:
-                observations[0].append((value, message))
+                await receive(0, value, message)
 
             async def second(value: float, _total: float | None, message: str | None) -> None:
-                observations[1].append((value, message))
+                await receive(1, value, message)
 
             args = {"snapshot_id": snapshot, "thread_ids": [ROOT], "cutoff": "2030-01-01"}
             larger = {**args, "thread_ids": [ROOT, CHILD]}
