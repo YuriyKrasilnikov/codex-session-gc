@@ -38,6 +38,7 @@ from codex_session_gc.execution.selection_provenance import (
     check_reviewed_associations,
     reviewed_associations,
 )
+from codex_session_gc.execution.timing import Count, Phase, count, interval
 
 if TYPE_CHECKING:
     from codex_session_gc.execution.progress import ProgressChannel
@@ -158,15 +159,18 @@ def preview_selection(
         selected,
         collection_limits(),
     )
-    selection = select_closed_work(
-        facts.snapshot,
-        facts.cutoff,
-        roots,
-        selected_threads=selected,
-        physical_inventory=facts.physical_inventory,
-    )
-    candidates = sorted(selection.conditional_candidates)
-    targets = review_targets(facts, selection, home, collection_limits())
+    with interval(Phase.SELECTION_MANIFEST):
+        selection = select_closed_work(
+            facts.snapshot,
+            facts.cutoff,
+            roots,
+            selected_threads=selected,
+            physical_inventory=facts.physical_inventory,
+        )
+        candidates = sorted(selection.conditional_candidates)
+        targets = review_targets(facts, selection, home, collection_limits())
+    count(Count.ROOTS, len(roots))
+    count(Count.CANDIDATES, len(candidates))
     sizes = {
         ThreadId.parse(target.thread_id): sum(
             item.physical_identity.size for item in target.rollouts

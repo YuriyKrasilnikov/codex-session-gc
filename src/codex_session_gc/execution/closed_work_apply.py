@@ -40,6 +40,7 @@ from codex_session_gc.execution.progress import (
     checked_channel,
 )
 from codex_session_gc.execution.selection_provenance import association_bindings
+from codex_session_gc.execution.timing import Count, Phase, count, interval
 from codex_session_gc.execution.transport import ChildCommand
 from codex_session_gc.planning.closed_work import ClosedWorkSelection, select_closed_work
 from codex_session_gc.recovery import (
@@ -225,14 +226,15 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
                     **({"operation_declaration": declaration} if declaration is not None else {}),
                 }
             )
-            create(
-                journal,
-                StartEnvelope(attempt, helper.evidence, context, _payload(scopes), context),
-                tuple(
-                    Unit(unit, index, _payload(scope))
-                    for index, (unit, scope) in enumerate(zip(units, scopes, strict=True))
-                ),
-            )
+            with interval(Phase.RECEIPT_CREATE):
+                create(
+                    journal,
+                    StartEnvelope(attempt, helper.evidence, context, _payload(scopes), context),
+                    tuple(
+                        Unit(unit, index, _payload(scope))
+                        for index, (unit, scope) in enumerate(zip(units, scopes, strict=True))
+                    ),
+                )
         except Exception as error:
             message = str(error)
             raise ApplyPreflightRefusedError(message) from error
@@ -247,27 +249,32 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
                 progress.publish(
                     ProgressEvent(ProgressKind.ROOT_STARTED, attempt, results[index].root)
                 )
+            count(Count.ROOTS_STARTED)
             try:
-                request = prepare_request(
-                    facts,
-                    selection,
-                    cutoff=facts.cutoff,
-                    codex_home=codex_home,
-                    sqlite_home=sqlite_home,
-                    journal=journal,
-                    attempt_id=attempt,
-                    unit_id=unit,
-                    helper=helper,
-                    default_provider=default_provider,
-                    limits=collection_limits,
-                )
+                with interval(Phase.ROOT_REQUEST_PREPARE):
+                    request = prepare_request(
+                        facts,
+                        selection,
+                        cutoff=facts.cutoff,
+                        codex_home=codex_home,
+                        sqlite_home=sqlite_home,
+                        journal=journal,
+                        attempt_id=attempt,
+                        unit_id=unit,
+                        helper=helper,
+                        default_provider=default_provider,
+                        limits=collection_limits,
+                    )
                 binding = LaunchBinding(
                     journal, attempt, LaunchId(uuid4()), index + 1, LaunchPurpose.APPLY
                 )
                 command = ChildCommand(Path(f"/proc/self/fd/{descriptor}"), (), {}, (descriptor,))
-                result = dispatch_once(
-                    binding, command, unit, request, context, **asdict(dispatch_limits)
-                )
+                count(Count.DISPATCH_ENTERED)
+                with interval(Phase.DISPATCH_ROUND_TRIP):
+                    result = dispatch_once(
+                        binding, command, unit, request, context, **asdict(dispatch_limits)
+                    )
+                count(Count.RESULTS_RETURNED)
             except (ValueError, OSError, OneShotError) as error:
                 results[index] = RootResult(results[index].root, unit, None, None, str(error))
                 if isinstance(error, OneShotError):

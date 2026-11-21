@@ -294,6 +294,13 @@ Unknown origin, age, archive state, missing history and ambiguous topology remai
 visible as retention or refusal. Known MAIN and archive states are not automatic
 policy exclusions; the native contract determines supported effects.
 
+Pass `--timings` to `plan` or `apply` to see elapsed time and observed work
+counts. An interactive terminal shows the current measured stage while the
+command runs. With `--json`, the final response includes a `timings` object.
+Unreached stages are listed separately from stages measured at zero duration.
+Helper round-trip time measures the caller's wait, including process handling.
+Measurements are separate from selection, confirmation and saved receipts.
+
 Preview JSON contains `roots`, `selected`, conditional `deletions`, corresponding
 `sizes` in stored bytes, `retained` reasons and `errors`. `physical_manifest` binds
 every selected owner's actual representation, immutable rollout ID, path, stat,

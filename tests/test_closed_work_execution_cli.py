@@ -827,3 +827,27 @@ def test_terminal_includes_retention_witness() -> None:
         ],
     }
     assert "retained parent: attached_thread_exists; witness: child" in terminal(report)
+
+
+def test_timed_apply_keeps_observations_out_of_receipt_and_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv, options, observed, _ = _case(tmp_path, monkeypatch)
+    assert main([*argv, "--timings"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    timing = report["timings"]
+    assert timing["counts_completion"] == "complete"
+    assert timing["counts"]["candidates"] >= 1
+    assert timing["counts"]["roots_started"] == 1
+    assert timing["counts"]["dispatch_entered"] == 1
+    assert timing["counts"]["results_returned"] == 1
+    assert {phase["name"] for phase in timing["phases"]} >= {
+        "receipt_create",
+        "root_request_prepare",
+        "dispatch_round_trip",
+        "final_receipt_observe",
+    }
+    (stored,) = inspect(options["journal"])
+    assert b"timings" not in stored.start.evidence.data
+    assert b"timings" not in stored.units[0].request.data
+    assert observed.read_text().splitlines() == [str(_id(1).value)]

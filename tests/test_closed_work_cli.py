@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from codex_session_gc.cli import main as cli
+from codex_session_gc.cli import timing_display
 from codex_session_gc.cli.main import main
+from codex_session_gc.execution.timing import Phase, interval
 from tests.current_storage_fixture import _CHILD, _GRANDCHILD, _MAIN, _native_home, _source
 
 if TYPE_CHECKING:
@@ -115,3 +118,57 @@ def test_public_root_origin_requires_positive_sql_source(
         assert {"id": _MAIN, "reason": "unknown_origin", "witness": None} in report["retained"]
     assert report["incomingReferencesComplete"]
     assert _source(tmp_path) == before
+
+
+def test_plan_timing_is_presentation_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _native_home(tmp_path)
+    before = _source(tmp_path)
+    args = [*_arguments(tmp_path), "--select-thread", _GRANDCHILD, "--json"]
+    assert main(args) == 0
+    ordinary = json.loads(capsys.readouterr().out)
+    assert main([*args, "--timings"]) == 0
+    timed = json.loads(capsys.readouterr().out)
+    timing = timed.pop("timings")
+    assert timed == ordinary
+    assert timing["scope"] == "preview"
+    assert {phase["name"] for phase in timing["phases"]} >= {
+        "sql_projection",
+        "header_inventory",
+        "selection_manifest",
+    }
+    assert _source(tmp_path) == before
+
+
+def test_ineligible_plan_reports_unobserved_stages(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _native_home(tmp_path)
+    arguments = _arguments(tmp_path)
+    arguments[-1] = "11111111-1111-4111-8111-111111111111"
+    assert main([*arguments, "--json", "--timings"]) == _UNAVAILABLE_EXIT
+    report = json.loads(capsys.readouterr().out)
+    assert report["errors"]
+    assert report["timings"]["counts_completion"] == "complete"
+    assert "header_inventory" in report["timings"]["missing_phases"]
+
+
+def test_keyboard_interruption_reports_only_partial_timings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Preserve the command interruption and expose completed timing evidence."""
+
+    def interrupt(*_args: object) -> dict[str, object]:
+        with interval(Phase.SQL_PROJECTION):
+            raise KeyboardInterrupt
+
+    records = []
+    monkeypatch.setattr(cli, "preview_selection", interrupt)
+    monkeypatch.setattr(timing_display, "interrupted", records.append)
+    with pytest.raises(KeyboardInterrupt):
+        main([*_arguments(tmp_path), "--json", "--timings"])
+    assert not capsys.readouterr().out
+    (record,) = records
+    assert record["counts_completion"] == "interrupted"
+    assert record["phases"][0]["name"] == "sql_projection"

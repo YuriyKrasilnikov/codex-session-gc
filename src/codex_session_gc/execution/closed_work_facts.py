@@ -37,6 +37,7 @@ from codex_session_gc.domain import (
 )
 from codex_session_gc.execution import closed_work_request as collector
 from codex_session_gc.execution.physical_inventory import observe_inventory
+from codex_session_gc.execution.timing import Count, Phase, count, interval
 from codex_session_gc.inventory.observation import RolloutObservation
 
 
@@ -123,13 +124,20 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
     limits: collector.CollectionLimits,
 ) -> collector.ClosedWorkFacts:
     """Read scoped SQL and selected headers once; leave global proof to native."""
+    count(Count.ROOTS_REQUESTED, len(roots))
+    if selected is not None:
+        count(Count.SELECTED_REQUESTED, len(selected))
+        count(Count.EXPLICIT_SELECTION)
     if not roots:
         raise collector.PreparationRefused("Closed-work roots are required.")
     collector._absolute(home)
     budget = collector.CollectionBudget(limits, time.monotonic() + limits.deadline_seconds)
     values = tuple(str(item.value) for item in sorted(roots))
     marks = ",".join("(?)" for _ in values)
-    with collector._read_transaction(home / collector.DatabaseKind.STATE, budget) as connection:
+    with (
+        interval(Phase.SQL_PROJECTION),
+        collector._read_transaction(home / collector.DatabaseKind.STATE, budget) as connection,
+    ):
         scope = tuple(
             row[0]
             for row in connection.execute(
@@ -169,6 +177,8 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
             row[0]: {"rollout_path": row[1]}
             for row in connection.execute("SELECT id,rollout_path FROM threads")
         }
+    count(Count.SQL_SCOPE_ROWS, len(scope))
+    count(Count.SQL_CURRENT_ROWS, len(current_rows))
     if any(value not in rows for value in values):
         raise collector.PreparationRefused("A required closed-work root state record is absent.")
     records = {}
@@ -201,7 +211,10 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
     # The planner reports foreign requested IDs. Observe provenance only for
     # members of this work, whose scoped SQL records can supply that provenance.
     requested = ownership_scope if selected is None else selected & ownership_scope
-    inventory, current_headers = observe_inventory(home, current_rows, frozenset(requested), budget)
+    with interval(Phase.HEADER_INVENTORY):
+        inventory, current_headers = observe_inventory(
+            home, current_rows, frozenset(requested), budget
+        )
     observations = []
     associations = []
     pointers = {pointer.ownership.thread_id: pointer for pointer in inventory.current_pointers}

@@ -17,7 +17,7 @@ from uuid import UUID
 from codex_session_gc import diagnostics
 from codex_session_gc import sqlite_engine as sqlite3
 from codex_session_gc.artifacts import ArtifactIdentity, SourceIdentity
-from codex_session_gc.cli import closed_work_execution
+from codex_session_gc.cli import closed_work_execution, timing_display
 from codex_session_gc.cli.console_display import preview_lines
 from codex_session_gc.cli.console_tasks import preview_selection
 from codex_session_gc.cli.mcp_capability import McpCapability
@@ -32,6 +32,7 @@ from codex_session_gc.compatibility.store import (
 )
 from codex_session_gc.domain import RolloutId, ThreadId, UtcCutoff
 from codex_session_gc.execution.resource_policy import READ_BYTES, TIMEOUT_SECONDS
+from codex_session_gc.execution.timing import TimingObserver, observe
 from codex_session_gc.installation.__main__ import InstallerError
 from codex_session_gc.installation.__main__ import main as installer_main
 from codex_session_gc.installation.activation import ActivationError
@@ -241,6 +242,8 @@ def _parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     apply.add_argument("--default-provider")
     reconcile = commands.add_parser("reconcile", help="Observe the saved attempt without replay")
     _execution_arguments(reconcile)
+    for command in (plan, apply):
+        command.add_argument("--timings", action="store_true")
     for command in (plan, apply, reconcile):
         command.add_argument("--online", action="store_true", required=True)
         command.add_argument("--json", action="store_true")
@@ -440,19 +443,43 @@ def main(argv: Sequence[str] | None = None) -> int:
         from codex_session_gc.cli import textual_console  # noqa: PLC0415
 
         return textual_console.run(arguments)
-    if arguments.command == "plan":
-        report, status = _preview(arguments)
-        output = json.dumps(report, sort_keys=True) if arguments.json else _print_preview(report)
+    observer = (
+        TimingObserver("preview" if arguments.command == "plan" else "apply")
+        if getattr(arguments, "timings", False)
+        else None
+    )
+    if observer is None:
+        report, status = _run_cleanup(arguments)
     else:
         try:
-            closed_work_execution.validate_arguments(arguments)
-        except ValueError as error:
-            _parser().error(str(error))
-        report, status = closed_work_execution.execute(arguments)
+            with observe(observer), timing_display.live(observer):
+                report, status = _run_cleanup(arguments)
+        except KeyboardInterrupt:
+            observer.finish(interrupted=True)
+            timing_display.interrupted(observer.snapshot())
+            raise
+        observer.finish()
+    summary = observer.snapshot() if observer is not None else None
+    if arguments.json:
+        presented = {**report, "timings": summary} if summary is not None else report
+        output = json.dumps(presented, sort_keys=True)
+    else:
         output = (
-            json.dumps(report, sort_keys=True)
-            if arguments.json
+            _print_preview(report)
+            if arguments.command == "plan"
             else closed_work_execution.terminal(report)
         )
+        if summary is not None:
+            output += "\n" + timing_display.terminal(summary)
     sys.stdout.write(output + "\n")
     return status
+
+
+def _run_cleanup(arguments: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    if arguments.command == "plan":
+        return _preview(arguments)
+    try:
+        closed_work_execution.validate_arguments(arguments)
+    except ValueError as error:
+        _parser().error(str(error))
+    return closed_work_execution.execute(arguments)
