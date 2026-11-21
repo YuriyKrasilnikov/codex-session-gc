@@ -1,9 +1,10 @@
 # Copyright (c) 2026
-# ruff: noqa: ANN001, ANN003, ANN201, ANN202, D103, PLR2004, PTH116, PTH208, S101
+# ruff: noqa: ANN001, ANN003, ANN201, ANN202, D103, PLR2004, PTH116, S101
 
 """Exercise bounded, no-follow storage traversal."""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -109,15 +110,37 @@ def test_cancel_and_root_error_are_sanitized(tmp_path) -> None:
     assert "private-missing" not in str(error.value)
 
 
-def test_deep_tree_does_not_hold_ancestor_descriptors(tmp_path) -> None:
+def test_deep_tree_does_not_hold_ancestor_descriptors(tmp_path, monkeypatch) -> None:
     directory = tmp_path
     for _ in range(80):
         directory = directory / "d"
         directory.mkdir()
-    before = len(os.listdir("/proc/self/fd"))
+
+    def descriptors_for_tree() -> int:
+        total = 0
+        for entry in Path("/proc/self/fd").iterdir():
+            try:
+                target = entry.readlink()
+            except FileNotFoundError:
+                continue
+            if target.is_relative_to(tmp_path):
+                total += 1
+        return total
+
+    real_identity = walk.identity_for_fd
+    peak = 0
+
+    def observe_identity(fd, info=None):
+        nonlocal peak
+        peak = max(peak, descriptors_for_tree())
+        return real_identity(fd, info)
+
+    monkeypatch.setattr(walk, "identity_for_fd", observe_identity)
+    assert descriptors_for_tree() == 0
     result = scan(tmp_path)
     assert len(result.entries) == 81
-    assert len(os.listdir("/proc/self/fd")) == before
+    assert 0 < peak <= 4
+    assert descriptors_for_tree() == 0
 
 
 def test_operation_limit_stops_queued_directories(tmp_path, monkeypatch) -> None:
