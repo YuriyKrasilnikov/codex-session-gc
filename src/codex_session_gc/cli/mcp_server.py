@@ -14,6 +14,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable  # noqa: TC003
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,6 +27,7 @@ from codex_session_gc import diagnostics
 from codex_session_gc.cli.console_display import discover_helper
 from codex_session_gc.cli.console_tasks import Intent, async_preview, cutoff_text, parse_cutoff
 from codex_session_gc.cli.mcp_capability import McpCapability
+from codex_session_gc.cli.policy_preview import preview_policy as evaluate_policy
 from codex_session_gc.cli.storage_service import StorageService
 from codex_session_gc.cli.summary_display import cwd_label
 from codex_session_gc.compatibility.observation import ImportedSupport
@@ -45,6 +47,7 @@ from codex_session_gc.inventory.query import (
     Summary,
     summarize_catalogue,
 )
+from codex_session_gc.inventory.selection_rule import SelectionRule
 
 _PAGE = 100
 _TEXT = 500
@@ -439,6 +442,35 @@ class CatalogueService(CatalogueObservation):
             "permission": False,
         }
 
+    async def preview_policy(
+        self,
+        rule: dict[str, Any],
+        prior_ids: list[str] | None = None,
+        prior_cutoff: str | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate a structured rule afresh without allocating confirmation state."""
+        if prior_ids is not None and len(prior_ids) > _SELECTION:
+            raise ValueError("Prior selection exceeds the transport limit.")
+        prior = None if prior_ids is None else frozenset(ThreadId.parse(x) for x in prior_ids)
+        if prior_ids is not None and prior is not None and len(prior) != len(prior_ids):
+            raise ValueError("Prior selection contains duplicate histories.")
+        if prior_cutoff is not None and prior is None:
+            raise ValueError("A prior cutoff requires prior IDs.")
+        cutoff = datetime.fromisoformat(prior_cutoff) if prior_cutoff is not None else None
+        if cutoff is not None and cutoff.utcoffset() is None:
+            raise ValueError("Prior cutoff must be timezone-aware.")
+        parsed = SelectionRule.from_mapping(rule)
+        self._require_startup_home()
+        report = await asyncio.to_thread(
+            evaluate_policy, self.home, parsed, prior_ids=prior, prior_cutoff=cutoff
+        )
+        self._require_startup_home()
+        if len(report["rule_matches"]) > _SELECTION:
+            raise ValueError("Rule matches exceed the transport selection limit.")
+        if len(json.dumps(report, ensure_ascii=False).encode()) > _REPORT_BYTES:
+            raise ValueError("Policy preview exceeds the bounded transport response.")
+        return report
+
     async def prepare_cleanup(
         self, snapshot_id: str, thread_ids: list[str], cutoff: str | None = None
     ) -> dict[str, Any]:
@@ -659,6 +691,7 @@ def create_server(
         service.query_catalogue,
         service.catalogue_summary,
         service.session_details,
+        service.preview_policy,
         prepare_cleanup,
         service.compatibility_status,
         service.keep_status,

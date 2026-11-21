@@ -34,6 +34,7 @@ from codex_session_gc.cli.console_tasks import (
     confirmed_intent,
     parse_cutoff,
 )
+from codex_session_gc.cli.policy_preview import preview_policy as evaluate_policy
 from codex_session_gc.cli.storage_screen import StorageScreen
 from codex_session_gc.cli.storage_service import StorageService
 from codex_session_gc.cli.timing_display import terminal as timing_terminal
@@ -49,6 +50,7 @@ from codex_session_gc.inventory.query import (
     CatalogueQuery,
     CatalogueScope,
 )
+from codex_session_gc.inventory.selection_rule import SelectionRule, parse_rule_json
 
 if TYPE_CHECKING:
     import argparse
@@ -101,6 +103,14 @@ def _archive(value: object) -> ArchiveState | None:
     raise ValueError("Choose a stored archive state or all archive states.")
 
 
+def _read_rule_file(path: Path, home: Path) -> SelectionRule:
+    """Recheck the selected path before every rule evaluation."""
+    resolved = path.expanduser().resolve(strict=True)
+    if resolved.is_relative_to(home.resolve(strict=True)):
+        raise ValueError("Rule file must be outside the Codex home.")
+    return parse_rule_json(resolved.read_text(encoding="utf-8"))
+
+
 class SessionApp(App[tuple[str, int]]):
     """Keep catalogue context separate from exact selected history identifiers."""
 
@@ -108,6 +118,7 @@ class SessionApp(App[tuple[str, int]]):
     BINDINGS: ClassVar = [
         ("q", "quit", "Quit"),
         ("space", "select_matches", "Select matches"),
+        ("r", "reevaluate_rule", "Run rule again"),
         ("escape", "cancel_preview", "Cancel preview"),
         ("k", "mark_keep", "Keep history"),
         ("u", "clear_keep", "Clear Keep"),
@@ -136,11 +147,19 @@ class SessionApp(App[tuple[str, int]]):
     """
 
     def __init__(
-        self, home: Path, cutoff: UtcCutoff | None, helper: Path | None, receipts: Path
+        self,
+        home: Path,
+        cutoff: UtcCutoff | None,
+        helper: Path | None,
+        receipts: Path,
+        rule_path: Path | None = None,
     ) -> None:
         """Bind the chosen directory identity for this interactive session."""
         super().__init__()
         self.home, self.cutoff, self.helper, self.receipts = home, cutoff, helper, receipts
+        self.rule_path, self.rule_observation = rule_path, ""
+        self.rule_ids: frozenset[ThreadId] | None = None
+        self.rule_cutoff: UtcCutoff | None = None
         try:
             metadata = home.stat()
             self.startup_home: tuple[int, int] | None = (metadata.st_dev, metadata.st_ino)
@@ -396,6 +415,8 @@ class SessionApp(App[tuple[str, int]]):
                 "Sizes: observed stored file bytes; unknowns retained."
             )
             self._filter()
+            if self.rule_path is not None and self.rule_ids is None:
+                await self._run_rule(fresh=True)
             if catalogue.diagnostics or catalogue.source_changed:
                 self._notice(
                     "Catalogue warnings: "
@@ -917,6 +938,74 @@ class SessionApp(App[tuple[str, int]]):
         for widget in self.query(".filters Input, .filters Select"):
             widget.disabled = enabled
 
+    async def action_reevaluate_rule(self) -> None:
+        """Start a new review, allowing new matches at a fresh evaluation time."""
+        if self.rule_path is None or self.review_open or self.dispatching:
+            return
+        await self._run_rule(fresh=True)
+
+    async def _run_rule(self, *, fresh: bool) -> dict[str, Any] | None:
+        if self.rule_path is None:
+            return None
+        try:
+            metadata = self.home.stat()
+            if (metadata.st_dev, metadata.st_ino) != self.startup_home:
+                raise ValueError("Home changed since the console started.")
+            rule = await asyncio.to_thread(_read_rule_file, self.rule_path, self.home)
+            prior = None if fresh else frozenset(self.selected) & (self.rule_ids or frozenset())
+            report = await asyncio.to_thread(
+                evaluate_policy,
+                self.home,
+                rule,
+                prior_ids=prior,
+                prior_cutoff=None
+                if fresh or self.rule_cutoff is None
+                else self.rule_cutoff.timestamp,
+            )
+            if tuple(report["home_identity"]) != self.startup_home:
+                raise ValueError("Home changed since the console started.")
+            if report.get("unresolved_ids") or report.get("errors"):
+                raise ValueError("Rule matches have unresolved ownership or preview errors.")
+            roots = report["match_roots"]
+            matches = {
+                ThreadId.parse(value): ThreadId.parse(roots[value])
+                for value in report["rule_matches"]
+            }
+            self.selected = matches
+            self.rule_ids = frozenset(matches)
+            self.rule_cutoff = parse_cutoff(report["cutoff"]) if report["cutoff"] else None
+            self.cutoff = self.rule_cutoff
+            self.query_one("#before", Input).value = report["cutoff"] or ""
+            self.rule_observation = (
+                f"Rule {self.rule_path}: {rule}; evaluated {report['evaluated_at']}; "
+                f"cutoff {report['cutoff'] or 'none'}; removed {report['removed_ids']}"
+            )
+            self._render_rows()
+            self._notice(self.rule_observation)
+        except Exception as error:  # noqa: BLE001
+            self._notice(f"Rule evaluation unavailable: {error}")
+            return None
+        else:
+            return report
+
+    async def _rule_review(self) -> None:
+        self._review_mode(enabled=True)
+        report = await self._run_rule(fresh=False)
+        if report is None or not self.selected:
+            self._review_mode(enabled=False)
+            self._notice("Rule refresh produced no reviewable matches; no confirmation created.")
+            return
+        intent = Intent(
+            self.home,
+            self.rule_cutoff or ExactIds(frozenset(self.selected)),
+            tuple(sorted(set(self.selected.values()))),
+            tuple(sorted(self.selected)),
+        )
+        self.reviewed = None
+        self.timing = TimingObserver("preview")
+        self._review_mode(enabled=True)
+        await self._preview(intent)
+
     def _start_preview(self) -> None:
         if self.review_open or self.dispatching:
             return
@@ -930,6 +1019,9 @@ class SessionApp(App[tuple[str, int]]):
             return
         if (metadata.st_dev, metadata.st_ino) != self.startup_home:
             self._notice("Home changed since the console started. Reopen the console.")
+            return
+        if self.rule_path is not None:
+            self.preview_task = asyncio.create_task(self._rule_review())
             return
         intent = Intent(
             self.home,
@@ -964,6 +1056,8 @@ class SessionApp(App[tuple[str, int]]):
             )
             report["labels"] = labels
             lines = preview_lines(report)
+            if self.rule_path is not None:
+                lines.insert(0, self.rule_observation)
             guidance = report.get("attachment_cleanup")
             if (
                 isinstance(guidance, dict)
@@ -1163,7 +1257,7 @@ class SessionApp(App[tuple[str, int]]):
         )
 
 
-def run(arguments: argparse.Namespace) -> int:
+def run(arguments: argparse.Namespace) -> int:  # noqa: C901
     """Run Textual on a TTY; retain backend results and receipt after terminal teardown."""
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         sys.stderr.write("ui requires an interactive terminal (TTY).\n")
@@ -1172,12 +1266,21 @@ def run(arguments: argparse.Namespace) -> int:
     if not home.is_dir():
         sys.stderr.write("--home must name an existing directory.\n")
         return 2
+    rule_path = getattr(arguments, "rule", None)
+    if rule_path is not None:
+        try:
+            rule_path = rule_path.expanduser().resolve(strict=True)
+            _read_rule_file(rule_path, home)
+        except (OSError, ValueError) as error:
+            sys.stderr.write(f"Invalid rule file: {error}\n")
+            return 2
     state = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser()
     app = SessionApp(
         home,
         arguments.cutoff,
         arguments.helper.expanduser().resolve() if arguments.helper else discover_helper(),
         arguments.receipt_dir or state / "codex-session-gc/receipts",
+        rule_path,
     )
     previous = {
         number: signal.getsignal(number)
