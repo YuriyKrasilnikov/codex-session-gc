@@ -107,4 +107,5 @@ def test_stdio_rejects_replaced_home_and_restart_binds_new_home(
                 assert result["can_apply_via_mcp"] is False
                 assert "confirmation" not in result
 
-    asyncio.run(asyncio.wait_for(check(), timeout=45))
+    # This scenario includes two server starts and cold preview workers.
+    asyncio.run(asyncio.wait_for(check(), timeout=90))
