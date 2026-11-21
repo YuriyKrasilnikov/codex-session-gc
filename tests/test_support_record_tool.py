@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -64,3 +65,31 @@ def test_changed_source_refuses_before_output(
         support_record.prepare_support_record(output)
     if output.exists():
         pytest.fail("Changed source was published")
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["review_required", "unassessed", "requires_execution_change", "supported_within_scope"],
+)
+def test_badge_tracks_release_subject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """Each support assessment displays the same target version."""
+    _, raw = _source(tmp_path, monkeypatch)
+    document = json.loads(raw)
+    document["target"]["source"]["ref"] = "refs/tags/rust-v1.2.3"
+    document["status"] = status
+    if status == "supported_within_scope":
+        document.update(coverage_complete=True, coverage_gaps=[])
+    subject = tmp_path / "subject.json"
+    subject.write_text(json.dumps(document))
+    output = tmp_path / "badge.json"
+    support_record.prepare_badge(subject, output)
+    expected = {
+        "schemaVersion": 1,
+        "label": "Codex CLI",
+        "message": "1.2.3",
+        "color": "blue",
+    }
+    if json.loads(output.read_bytes()) != expected:
+        pytest.fail("Badge differs from the supplied support record")

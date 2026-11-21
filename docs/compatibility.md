@@ -11,6 +11,33 @@ The pinned native source is OpenAI Codex commit
 source profile uses wire 7 for dated and exact-ID selections. Its qualification
 covers the separate helper and the documented storage boundaries.
 
+## 0.6.0 contract
+
+The wire-7 helper and profile are qualified against bounded disposable native
+fixtures, including cleanup and Keep. The reissued package bundles a support
+record assessing selected stopped local stock Codex 0.171.0 work as
+`supported_within_scope` under the conditions below. The earlier 0.6.0 package
+bundled `review_required`; its installed record is unchanged. The reissued
+package retains the published helper. The exact helper, profile and
+qualification identity remain bound by the bundled contract.
+
+Observations made after the initial publication and before reissue used the
+published helper SHA-256
+`8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273`
+and stock producer SHA-256
+`b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0`,
+with target source commit `ccf9be8cc458bd6b8336fe84d68d8893f2691a5e`.
+Observed cases include V1 legacy parent, V2 paginated and legacy histories,
+a retained fork provider, and installed CLI, Textual and MCP cleanup. These
+are bounded observations, not proof of producer source equivalence or a
+complete live lifecycle. The full automated source comparison remains UNKNOWN.
+Related selected-thread metadata updates and dependency-reference publication
+must finish before cleanup; writer acquisition does not certify their completion.
+Each affected rollout, SQLite and log location must use a qualified local
+filesystem. NFS, cross-host coordination and concurrent offline replacement are
+outside the scope. The tested host is Ubuntu 26.04 LTS x86_64 with glibc 2.43;
+other environments require qualification.
+
 ## 0.5.2 contract
 
 The locally verified 0.5.2 package supports selected stopped local stock Codex
@@ -31,8 +58,7 @@ Related selected-thread metadata updates and dependency-reference publication
 must finish before cleanup; writer acquisition does not certify their completion.
 Unknown Guardian sources, including `Internal`, remain protected.
 
-Local artifacts have been verified. Publication, official GitHub attestations and
-public installation remain separate prerequisites. Preserve the consumer named
+Preserve the consumer named
 by any unresolved older receipt; changing profiles does not migrate receipts.
 
 ## 0.5.0 and 0.5.1 contract
@@ -48,7 +74,8 @@ manifest and the wheel's unchanged `closed_work_contract.json`.
 
 ## Updating an installed release
 
-Use [the side-by-side upgrade procedure](recovery.md#upgrade-an-installed-release).
+Use [the side-by-side upgrade procedure](recovery.md#upgrade-an-installed-release),
+including when replacing the earlier 0.6.0 package with the reissued package.
 Download a matched bundle; changing only the helper or only a profile JSON file
 is not an upgrade. Existing receipt consumers must be retained while their
 outcomes remain unresolved.
@@ -88,7 +115,9 @@ the source tree. MCP exposes the same read-only information through
 
 An explicit `support import` can retrieve a specified GitHub release asset and
 verify its exact bytes with the trusted installed `gh`. Supply its asset ID,
-SHA-256, size and the GC assembly's full source commit. The returned record and
+SHA-256, size and the full GC source commit that signed the support record.
+For a post-release assessment this commit can be newer than the assembly commit.
+The returned record and
 verification-context digests select an explicit later `support show`. A stored
 receipt says verification was recorded at import time; offline display does not
 reauthenticate the signature or prove the source-support claim. Neither a record
@@ -100,13 +129,16 @@ then inspected offline. Substitute independently obtained exact identities:
 ```sh
 codex-session-gc support import --installation-id INSTALLATION_UUID \
   --asset-id ASSET_ID --sha256 RECORD_SHA256 --size RECORD_BYTES \
-  --gc-commit ASSEMBLY_COMMIT --gh /absolute/path/to/gh
+  --gc-commit SUPPORT_SOURCE_COMMIT --gh /absolute/path/to/gh
 codex-session-gc support show --installation-id INSTALLATION_UUID \
   --sha256 RECORD_SHA256 --context-sha256 CONTEXT_SHA256
 ```
 
 `CONTEXT_SHA256` is returned by import. Pass the same explicit `--install-dir`
 to both commands when the installation uses a non-default directory.
+For a separately published support record, obtain its asset ID, digest, size and
+attested source commit independently for this command. The download URL is not
+an argument to `support import`.
 
 To compare the imported record with the profile and helper observed by doctor,
 select it explicitly using the same installation and both digests:
@@ -331,6 +363,14 @@ Unknown source variants stay protected. In particular, an Internal
 Guardian source is not the qualified `SubAgentSource::Other("guardian")` case and
 remains unknown/protected; this does not claim a complete Guardian lifecycle.
 
+### Publish the README compatibility badge
+
+Generate `codex-compatibility-badge.json` from the support record being released.
+Set that asset's GitHub display label to the JSON `label` and version `message`
+joined by a space, for example `Codex CLI 0.171.0`. The README displays the
+version from the public GitHub Latest release API and links to the support
+conditions. Verify the rendered version against the released support record.
+
 ## Current validation boundaries
 
 Historical native storage qualification tests used disposable LocalThreadStore producers and
@@ -425,10 +465,13 @@ PRs and eligible main pushes take a staged source-only route. Main pushes that
 change only the support record still skip the artifact workflow. Staged runs
 validate the source qualification but neither acquire nor upload a native component, assemble release outputs, or
 attest an assembly or support record. This route does not qualify native or
-installed interfaces. A declared locator must be well formed and its exact public
-release asset must be available and match its size and digest; failure is an
-error, never a reason to switch to staged checks. The normal public qualified
-route remains in place when the locator is present.
+installed interfaces. A declared locator must identify an available release asset in this repository.
+Pull requests acquire it anonymously. An isolated acquisition job on the
+canonical main branch can read an asset from a draft release using a repository
+token with contents write permission. Push and pull request jobs check the
+downloaded size and digest before transferring the component. Manual support
+runs on main check asset availability with a HEAD request. A malformed locator
+or failed acquisition fails the run.
 
 Before a future unpublished release archive is used to establish native and
 installed qualification for a staged change, a trusted maintainer must run the
@@ -449,7 +492,7 @@ wheel before behavioral tests. Installed tests remove the source import path,
 verify the installed module origin, and exercise doctor, CLI, Textual, MCP and
 receipt observation without replay.
 Each run uses disposable test homes and temporary caches, bounded job timeouts,
-read-only repository permissions and short-lived result artifacts. It does not
+and short-lived result artifacts. Build and test jobs have read-only repository permissions. It does not
 publish a release. A successful hosted run qualifies only its recorded source,
 artifacts and named interfaces; local container compatibility probes do not
 substitute for that run or establish the full upstream application lifecycle.

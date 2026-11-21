@@ -224,6 +224,12 @@ closure members stay locked; selected state rows and the work root remain
 mandatory. Historical names remain untouched. Ambiguous multi-database commit
 evidence reports UNKNOWN rather than claiming rollback.
 
+The published 0.6.0 helper has SHA-256
+`8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273`.
+Stock observations made before reissue and the support conditions are described
+in [compatibility](../docs/compatibility.md). The reissued package bundles the
+`supported_within_scope` record; a build alone does not qualify a helper.
+
 The locally verified 0.5.2 helper has SHA-256
 `cbca2530df13ceabe6dd67e358d1cb5be362e1dc66a1246653456f21fcad3edc`.
 Its source inputs and bounded target-runtime observations are described in
@@ -352,7 +358,7 @@ source is intended for maintainers changing or validating the native contract.
 A digest mismatch remains a refusal, even after a successful build.
 
 Run these commands from the source checkout after the candidate helper and exact
-bundled profile have been qualified and the package version is set to 0.5.2.
+bundled profile have been qualified and the package version is set to 0.6.0.
 Synchronize the Python development environment and build the source distribution first. The
 commands below assume the already-qualified release helper has been retained at
 `/absolute/qualified/codex-session-gc-native` and the output directories are absent:
@@ -360,13 +366,13 @@ commands below assume the already-qualified release helper has been retained at
 ```sh
 set -eu
 uv sync --locked --group build --no-install-project --no-build --no-python-downloads
-test ! -e build/release-0.5.2
-mkdir -p build/release-0.5.2
-uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.5.2
-uv build --wheel build/release-0.5.2/codex_session_gc-0.5.2.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.5.2
-PYTHONPATH=src .venv/bin/python -m tools.build_release --wheel build/release-0.5.2/codex_session_gc-0.5.2-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.5.2/codex-session-gc-0.5.2-linux-x86_64
-PYTHONPATH=src .venv/bin/python -m tools.ci_release --sdist build/release-0.5.2/codex_session_gc-0.5.2.tar.gz --wheel build/release-0.5.2/codex_session_gc-0.5.2-py3-none-any.whl --bundle build/release-0.5.2/codex-session-gc-0.5.2-linux-x86_64 --helper /absolute/qualified/codex-session-gc-native
-PYTHONPATH=src .venv/bin/python -m tools.build_installer --output "$PWD/build/release-0.5.2/codex-session-gc-installer-0.5.2.pyz"
+test ! -e build/release-0.6.0
+mkdir -p build/release-0.6.0
+uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.6.0
+uv build --wheel build/release-0.6.0/codex_session_gc-0.6.0.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.6.0
+PYTHONPATH=src .venv/bin/python -m tools.build_release --wheel build/release-0.6.0/codex_session_gc-0.6.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.6.0/codex-session-gc-0.6.0-linux-x86_64
+PYTHONPATH=src .venv/bin/python -m tools.ci_release --sdist build/release-0.6.0/codex_session_gc-0.6.0.tar.gz --wheel build/release-0.6.0/codex_session_gc-0.6.0-py3-none-any.whl --bundle build/release-0.6.0/codex-session-gc-0.6.0-linux-x86_64 --helper /absolute/qualified/codex-session-gc-native
+PYTHONPATH=src .venv/bin/python -m tools.build_installer --output "$PWD/build/release-0.6.0/codex-session-gc-installer-0.6.0.pyz"
 ```
 
 The build group pins the existing Hatchling backend in `pyproject.toml`; its
@@ -397,9 +403,9 @@ shared archiver writes the v2 manifest before the payload and checks the archive
 against it; use the same archiver for local and CI releases:
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m tools.build_release --archive build/release-0.5.2/codex-session-gc-0.5.2-linux-x86_64 --output build/release-0.5.2/codex-session-gc-0.5.2-linux-x86_64.tar.gz
-cd build/release-0.5.2
-sha256sum codex-session-gc-0.5.2-linux-x86_64.tar.gz codex_session_gc-0.5.2-py3-none-any.whl codex_session_gc-0.5.2.tar.gz codex-session-gc-installer-0.5.2.pyz > SHA256SUMS
+PYTHONPATH=src .venv/bin/python -m tools.build_release --archive build/release-0.6.0/codex-session-gc-0.6.0-linux-x86_64 --output build/release-0.6.0/codex-session-gc-0.6.0-linux-x86_64.tar.gz
+cd build/release-0.6.0
+sha256sum codex-session-gc-0.6.0-linux-x86_64.tar.gz codex_session_gc-0.6.0-py3-none-any.whl codex_session_gc-0.6.0.tar.gz codex-session-gc-installer-0.6.0.pyz > SHA256SUMS
 ```
 
 Ship those four assets and `SHA256SUMS` together with the same version/tag.
@@ -413,12 +419,14 @@ locator only to obtain the component; it independently checks the component,
 helper, profile and native inputs before executing the helper. CI assembles the
 release from those bytes and does not compile the helper.
 
-On eligible main-branch pushes and pull requests, a dedicated acquisition job
-reads provenance at the source commit with a read-only token. A declared release
-asset must be downloadable without authentication. The job verifies its exact
-size and digest before transferring it to the separate read-only qualification
-job. The manual support workflow checks public availability without downloading
-the archive. A checkout with no locator takes the staged source route described
+The acquisition job reads provenance at the event commit. Pull requests fetch
+the declared asset anonymously. On the canonical main branch an isolated job
+uses a repository token with contents write permission to read the asset even
+while its release is a draft. The token stays on the GitHub API origin.
+On pushes and pull requests, acquisition checks the archive size and digest
+before transferring it to the separate read-only qualification job. Manual
+support runs on main check availability with a HEAD request. A checkout with
+no locator takes the staged source route described
 in [compatibility.md](../docs/compatibility.md#package-construction-and-ci-acceptance).
 
 After the final release asset is public, verify its real acquisition and

@@ -106,6 +106,13 @@ local server operator.
 
 ## Native execution
 
+The 0.6.0 contract uses wire 7 and the bundled exact state, thread history
+and companion schemas. The reissued package bundles a `supported_within_scope`
+record for selected stopped local stock Codex 0.171.0 work within the documented
+conditions, based on bounded observations made before reissue. The earlier
+0.6.0 package retains its original `review_required` record. The observations
+do not establish a complete live lifecycle. See [compatibility](compatibility.md).
+
 The 0.5.2 contract uses the exact state schema through migration 64
 and thread history schema through migration 9, with its bundled companion
 schemas. Its Python application and native helper use SQLite 3.54.1. The
@@ -123,7 +130,7 @@ public CLI and app-server workflows, with MAv1 and MAv2 qualified separately.
 Custom internal host controllers and arbitrary direct ephemeral-library access are
 outside this scope.
 
-For both 0.5.1 and 0.5.2, related selected-thread metadata updates
+For 0.5.1, 0.5.2 and 0.6.0, related selected-thread metadata updates
 and dependency-reference publication (for example, a new fork history reference)
 must finish before cleanup; acquiring a writer guard does not independently
 certify their completion.

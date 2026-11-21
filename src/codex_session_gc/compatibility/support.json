@@ -19,9 +19,6 @@
       "description": "This scoped assessment does not certify historical-body integrity, a complete Core lifecycle, generic Rust equivalence or the source and signature of an observed producer binary."
     },
     {
-      "description": "Source review covers the named consumed paths and the checked conditions for the new helper and profile. The automated source comparison does not establish general caller, feature or binary equivalence."
-    },
-    {
       "description": "Only qualified owner, provider, attachment and Guardian representations are covered; unsupported Internal Guardian selections remain protected or refused."
     },
     {
@@ -32,32 +29,34 @@
     },
     {
       "description": "Ordinary cache, plugin, process and output paths do not alias selected storage locations."
-    }
-  ],
-  "coverage_complete": false,
-  "coverage_gaps": [
+    },
     {
-      "description": "The current helper is backed by disposable native fixture evidence. An observed stock producer lifecycle requires a separate assessment."
+      "description": "Stock tests used a local scripted model provider and the observed 0.171.0 producer. Additional Guardian and attachment representations have disposable storage-fixture coverage. All clients deleting from a home must use the Keep-capable helper to enforce Keep marks."
+    },
+    {
+      "description": "The observed producer executable digest identifies the executable exercised. It does not attest the build provenance of a caller-provided producer."
     }
   ],
+  "coverage_complete": true,
+  "coverage_gaps": [],
   "execution": {
     "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
     "native_inputs_sha256": "756bb3bf415730e4f6e53c1d8c2869877b88210a1eed5db6fcc1d27167fe535b",
     "profile_sha256": "15397f1e32ff5630c872bb436b9bf3ec0edf53cb19150b2154c0e174a7bcf117"
   },
   "record_version": 1,
-  "report_sha256": "9f07d27ed01f743b6acf2715c987dc7fa9ea0aa8d76c3da9074a2ec751577ab1",
+  "report_sha256": "691c34879d976867e564166d7fba495d7362c6955cdc465199e4de68a5901691",
   "review": {
-    "scope": "Matched disposable wire-7 cleanup and Keep fixtures. Current native identity requires separate assessment for a stock live lifecycle.",
-    "source": "native-fixture-evidence:sha256:9f07d27ed01f743b6acf2715c987dc7fa9ea0aa8d76c3da9074a2ec751577ab1"
+    "scope": "Selected technically stopped persistent local work from stock Codex CLI 0.171.0 with the published 0.6.0 helper on the qualified Linux x86_64 host. Stock cases cover V1 legacy parent and paginated child, V2 legacy and paginated work, and a retained paginated fork that depends on its provider. The stock producer source is unchanged from the previous 0.171.0 assessment. Compared with the 0.5.2 helper, wire 7 separately validates age policy and exact-ID ceilings. Keep is checked under the same maintenance ownership before deletion. The writer, incoming attachment and physical-provider checks, fresh SQL validation and rollout-before-state ordering are retained.",
+    "source": "scoped-source-assessment:sha256:691c34879d976867e564166d7fba495d7362c6955cdc465199e4de68a5901691"
   },
   "source_origin": {
-    "scope": "Selected technically stopped work in the qualified local persistent stock Codex 0.171.0 workflows on matching state and companion storage, after related metadata updates and history-reference publication finish. The observed cases cover a V1 legacy parent with a paginated child, V2 paginated and V2 legacy, and an excluded retained-fork provider.",
+    "scope": "Selected technically stopped persistent local work from stock Codex CLI 0.171.0 with the published 0.6.0 helper on the qualified Linux x86_64 host. Stock cases cover V1 legacy parent and paginated child, V2 legacy and paginated work, and a retained paginated fork that depends on its provider.",
     "source": "https://github.com/openai/codex/tree/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e"
   },
-  "status": "review_required",
+  "status": "supported_within_scope",
   "target": {
-    "observed_binary_sha256": null,
+    "observed_binary_sha256": "b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0",
     "repository": "openai/codex",
     "source": {
       "commit": "ccf9be8cc458bd6b8336fe84d68d8893f2691a5e",
@@ -66,32 +65,28 @@
   },
   "witnesses": [
     {
-      "reference": "native-qualification-id:sha256:d5bb5f2f864bef0cfa52ca92f9d8174d46b14ee4ef64adcbd7db1e9fc815bcf8",
-      "scope": "Exact wire-7 helper, profile, source inputs and bounded native fixture evidence."
+      "reference": "native-qualification-id:sha256:e80bb767bd6d4c67eb1b15d9595b1d8486a0d42b6e46dd9dbbe7656947fac362",
+      "scope": "Matched wire-7 helper and Keep. Disposable native storage fixtures cover qualified representation, ownership, writer and exact-effect checks."
     },
     {
-      "reference": "stock-trace:sha256:56d2586336857f08f5320d117bb87c632e43b7b0243b6c7b68a86a1e446dbe36",
-      "scope": "Historical helper evidence: Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session."
+      "reference": "stock-trace:sha256:7b74aef28d0b0982c596a6b5c820f34171ace71d820161349dc090ba524264e1",
+      "scope": "V1 legacy parent with paginated child. With a live writer, the released helper refused without effects. After the work stopped, deletion removed only the chosen child. The retained parent and unrelated thread remained readable."
     },
     {
-      "reference": "stock-trace:sha256:860a9ec5af378bd1efb876855a829f930ccd42b6fa1602f7d6d9c35501919312",
-      "scope": "Historical helper evidence: Local stock clean turn, busy refusal before effects, stopped child-only deletion, retained parent and unrelated session."
+      "reference": "stock-trace:sha256:6ebe2c83c51f3dc8589d5a3558533e943905d31d04ac0043a84ea7e8012b65a6",
+      "scope": "V2 paginated. With a live writer, the released helper refused without effects. After the work stopped, deletion removed only the chosen child. The retained parent and unrelated thread remained readable."
     },
     {
-      "reference": "stock-retained-fork:sha256:3fa69d9913eb5f3deebfc20ff92de341fa3e52aed0b8ce4a0b2c4fbeed450ab5",
-      "scope": "Historical helper evidence: Actual stock paginated fork creation and retained provider dependency at rest."
+      "reference": "stock-installed-cli-mcp:sha256:8a8915038ed46c7337a343e1e374b7d24a2f2e62fc9348847d44121d36f47cef",
+      "scope": "Installed CLI protected a selected child with Keep, then cleared, removed and reconciled it. Installed MCP confirmed the selected V2 paginated child and observed the original attempt after restart without redispatch. Retained rollouts kept their original bytes."
     },
     {
-      "reference": "installed-provider-plan:sha256:e46a94cbeb7b80dd33d01260237cb876fb0c6514b2708eb92cecbc1025b54081",
-      "scope": "Historical helper evidence: Installed plan excluded the provider required by the retained fork before effects."
+      "reference": "stock-v2-legacy-interfaces:sha256:a04fa995207aeff487f5aff285f643063191c8568708a274a2d559d69af5942b",
+      "scope": "On separate V2 legacy homes, CLI, Textual and MCP each removed one selected child. Fresh stock processes read and resumed each retained parent and refused the removed child."
     },
     {
-      "reference": "installed-interface-checks:sha256:5e3d110c57408b85b447e927a219b111d6ee37eedb5f07a2a01436ae830474e5",
-      "scope": "Historical helper evidence: Named installed CLI, Textual and MCP cleanup and receipt behavior with the final execution profile."
-    },
-    {
-      "reference": "scoped-source-assessment:sha256:c323866791c57435efe5633dab591baddfc49966f19c49a95a0d4a0abaad8e58",
-      "scope": "Historical helper evidence: Selected technically stopped work in the qualified local persistent stock Codex 0.171.0 workflows on matching state and companion storage, after related metadata updates and history-reference publication finish. The observed cases cover a V1 legacy parent with a paginated child, V2 paginated and V2 legacy, and an excluded retained-fork provider."
+      "reference": "stock-retained-fork:sha256:8843fe6f15e76f31a9ab93cc28a1198d3e86b5b7ad4397d382334fb3e3228567",
+      "scope": "An installed preview retained a selected provider needed by an excluded paginated fork. Both histories stayed intact and could be read and resumed by stock Codex."
     }
   ]
 }

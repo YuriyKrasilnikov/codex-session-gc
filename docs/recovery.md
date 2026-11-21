@@ -102,8 +102,13 @@ There is no fallback to a retired wire format or automatic journal migration.
    Inspect startup, launch lifecycle and unit uncertainty independently. A newer
    storage schema can refuse the old consumer; do not rewrite its profile to force
    it to proceed.
-4. Use the separately verified installer to stage the new release. Retain the
-   reported installation ID and explicitly activate it after checking the chosen
+4. Use the separately verified installer to stage the new release. For the
+   reissued 0.6.0 package over an earlier 0.6.0 installation, select both a
+   fresh `--install-dir` and a fresh `--bin-dir` for staging and activation.
+   The existing version directory is not replaced; after activation, explicitly
+   use the new absolute CLI path and switch the MCP registration as described
+   below. Keep the old installation and its receipts while they are needed.
+   Retain the reported installation ID and explicitly activate it after checking the chosen
    home and receipt locations. `--action status` observes the completed staged
    installation or an existing activation intent. `--action reconcile` observes
    an existing activation intent and records a terminal state when established;

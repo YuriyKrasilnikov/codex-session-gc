@@ -1,5 +1,12 @@
 # codex-session-gc
 
+[![Codex CLI version](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fapi.github.com%2Frepos%2FYuriyKrasilnikov%2Fcodex-session-gc%2Freleases%2Flatest&search=%22label%22%5Cs%2A%3A%5Cs%2A%22Codex%20CLI%20%28%5B0-9%5D%5B0-9A-Za-z.%2B-%5D%2A%29&replace=%241&label=Codex%20CLI&color=blue)](docs/compatibility.md)
+[![Latest release](https://img.shields.io/github/v/release/YuriyKrasilnikov/codex-session-gc)](https://github.com/YuriyKrasilnikov/codex-session-gc/releases/latest)
+[![Tested on Ubuntu 26.04 x86_64](https://img.shields.io/badge/tested-Ubuntu%2026.04%20x86__64-E95420)](docs/compatibility.md)
+[![Python CI](https://github.com/YuriyKrasilnikov/codex-session-gc/actions/workflows/python.yml/badge.svg?branch=main&event=push)](https://github.com/YuriyKrasilnikov/codex-session-gc/actions/workflows/python.yml?query=branch%3Amain+event%3Apush)
+
+[Install](#download-and-install) · [Terminal UI](#browse-and-select) · [CLI](#cli-preview-and-cleanup) · [MCP](#mcp) · [Check my installation](#diagnose-compatibility)
+
 Browse Codex storage, select stopped work and delete an exact set of histories
 while unrelated sessions continue running. The terminal interface uses Textual;
 CLI and MCP operations share its selection rules. MAIN histories can be selected.
@@ -7,7 +14,23 @@ Explicit Guardian histories can also be selected. Their historical parent associ
 does not select or require deletion of the parent. Age is a caller-supplied filter,
 not a fixed retention policy.
 
-## What is new in 0.5.2
+## What is new in 0.6.0
+
+- See which projects and histories take up space, including files outside the
+  catalogue. Inspect the dependency that keeps a history in use.
+- Mark a history **Keep** to protect it across manual and rule-based cleanup.
+  Upgrade all cleanup clients for that home before relying on the mark.
+- Save a rule such as “closed agents in this project older than 90 days” and
+  review fresh matches on each run. Exact selections can omit the age filter.
+- Review an attachment and its source in two steps with separate confirmations
+  and receipts. Follow progress while the preview and cleanup run.
+
+The 0.6.0 helper supports selected stopped local Codex CLI 0.171.0 work
+within the stated conditions. Stock and installed-client checks observed bounded
+cases; they do not establish a complete lifecycle guarantee. The reissued package
+bundles the `supported_within_scope` support record. [Compatibility details](docs/compatibility.md)
+
+## What was new in 0.5.2
 
 The published 0.5.2 package supports selected stopped local Codex 0.171.0
 work within the boundaries described in [compatibility](docs/compatibility.md).
@@ -34,12 +57,12 @@ its content scrolls in compact windows.
 
 ## Download and install
 
-The published 0.5.2 installation workflow uses a matched Linux x86_64
+The 0.6.0 installation workflow uses a matched Linux x86_64
 bundle and a standard-library installer. Obtain the published assets and independently
 verify their attestations before using them. Python 3.14 or newer, `uv` and a
 separately trusted GitHub CLI (`gh`) are prerequisites. The qualified deployment
 is Ubuntu 26.04 LTS, glibc 2.43;
-other environments require qualification. The native contract uses wire 6, the
+other environments require qualification. The native contract uses wire 7, the
 exact state schema through migration 64, thread history through migration 9,
 and the specified companion schemas.
 
@@ -53,10 +76,10 @@ bootstrap before executing it; an unverified installer cannot verify itself:
 set -eu
 mkdir codex-session-gc-download
 cd codex-session-gc-download
-curl --fail --location --output codex-session-gc-installer-0.5.2.pyz \
-  https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.5.2/codex-session-gc-installer-0.5.2.pyz
+curl --fail --location --output codex-session-gc-installer-0.6.0.pyz \
+  https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.6.0/codex-session-gc-installer-0.6.0.pyz
 GC_ASSEMBLY_COMMIT=FULL_40_CHARACTER_ASSEMBLY_COMMIT
-gh attestation verify codex-session-gc-installer-0.5.2.pyz \
+gh attestation verify codex-session-gc-installer-0.6.0.pyz \
   --repo YuriyKrasilnikov/codex-session-gc \
   --signer-workflow YuriyKrasilnikov/codex-session-gc/.github/workflows/artifacts.yml \
   --source-digest "$GC_ASSEMBLY_COMMIT" --source-ref refs/heads/main \
@@ -74,13 +97,13 @@ prints an installation ID; retain that exact ID for activation and recovery.
 Substitute your actual existing Codex home and receipt directory:
 
 ```sh
-python3.14 -I codex-session-gc-installer-0.5.2.pyz --release v0.5.2 \
+python3.14 -I codex-session-gc-installer-0.6.0.pyz --release v0.6.0 \
   --action stage --gh /absolute/path/to/gh --uv /absolute/path/to/uv \
   --python /absolute/path/to/python3.14
-python3.14 -I codex-session-gc-installer-0.5.2.pyz --action activate \
+python3.14 -I codex-session-gc-installer-0.6.0.pyz --action activate \
   --installation-id INSTALLATION_UUID --home /absolute/codex-home \
   --receipt-dir /absolute/receipt-directory
-python3.14 -I codex-session-gc-installer-0.5.2.pyz --action status \
+python3.14 -I codex-session-gc-installer-0.6.0.pyz --action status \
   --installation-id INSTALLATION_UUID
 ```
 
@@ -99,10 +122,11 @@ For an existing installation, retain old receipt consumers and follow
 [recovery and upgrades](docs/recovery.md). Consumers of the
 [0.4.0 release](https://github.com/YuriyKrasilnikov/codex-session-gc/releases/tag/v0.4.0)
 must retain it while their unresolved receipts require it. A version directory
-already present in an application directory is not replaced. To install another
-copy of 0.5.2, choose both a fresh `--install-dir` and a fresh `--bin-dir`; use
-the resulting absolute CLI and reported MCP command. This does not switch a
-launcher in the old application directory. The same-version 0.5.0 example in
+already present in an application directory is not replaced. To upgrade an
+earlier 0.6.0 installation to the reissued package, choose both a fresh `--install-dir` and a fresh `--bin-dir` when staging and activating it;
+use the resulting absolute CLI and explicitly replace the MCP registration with
+the reported command. This does not switch a launcher in the old application
+directory. The same-version 0.5.0 example in
 [recovery and upgrades](docs/recovery.md#replace-an-existing-050-installation)
 illustrates this procedure.
 
@@ -155,9 +179,11 @@ permission to delete; execution still requires native ownership and fresh checks
 The source-support claim is separate from these local observations. Producer
 identity supplied on the command line remains an unverified caller observation;
 an unknown running binary origin is not inferred from a version string.
-By default, doctor observes the bundled support record. After an explicit
-`support import`, use the returned record and context digests to compare that
-record against the current profile and helper:
+By default, doctor observes the bundled support record. The reissued 0.6.0
+package bundles `supported_within_scope`; an earlier installation retains its
+original `review_required` record. To compare an explicitly imported record
+against the current profile and helper, use the returned record and context
+digests:
 
 ```sh
 codex-session-gc doctor --home /absolute/codex-home \
@@ -175,7 +201,7 @@ See [compatibility](docs/compatibility.md) for the supported boundary.
 
 ## Inspect disk usage
 
-The current source checkout supports a whole-home storage overview.
+The storage command provides a whole-home storage overview.
 
 ```sh
 codex-session-gc storage --home /absolute/codex-home
@@ -278,7 +304,7 @@ default is the user's state directory. The UI requires an interactive terminal.
 
 ## CLI preview and cleanup
 
-The current source uses a matching wire 7 helper for the workflows below.
+Use the matching wire 7 helper for the workflows below.
 Choose a stopped session root and an explicit UTC cutoff:
 
 ```console
@@ -475,7 +501,7 @@ writer guard does not independently certify their completion. Selected descripto
 remain open for the checks immediately before unlink. History bodies are not
 scanned or hashed.
 
-The 0.5.2 native contract is wire 6 and the exact bundled state schema
+The 0.6.0 native contract is wire 7 and the exact bundled state schema
 through migration 64, thread history through migration 9, and the companion
 schemas. Its bounded path supports plain JSONL and Zstandard, legacy and paginated history,
 and every observed pre/post-revert rollout belonging to a selected owner.
@@ -488,8 +514,9 @@ or be closed; selecting that parent never implicitly selects the Guardian. Exact
 selected-owner rows in `guardian_review_feedback` and `thread_read_receipts` are
 deleted for both ordinary and Guardian histories; unselected opaque rows remain
 untouched. Matched retained Guardians keep their existing physical writer guards.
-The observed runtime boundary is stopped local stock Codex 0.171.0 work in the
-named V1 and V2 history modes described in [compatibility](docs/compatibility.md). Custom
+Post-release stock observations for the wire-7 helper cover stopped local Codex
+0.171.0 work in the named V1 and V2 history modes described in
+[compatibility](docs/compatibility.md). Custom
 internal controllers and arbitrary direct ephemeral-library access are outside this
 boundary. It is not a guarantee of business success or an empty runtime heap.
 

@@ -30,11 +30,13 @@ env:
 jobs:
   acquire-native:
     name: Acquire the declared native component
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'YuriyKrasilnikov/codex-session-gc'
+    if: >-
+      github.repository == 'YuriyKrasilnikov/codex-session-gc' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'support'))
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
-      contents: read
+      contents: write
     defaults:
       run:
         shell: bash
@@ -58,7 +60,7 @@ jobs:
           gc_acquire_curl="$(curl --version | head -1 | cut -d' ' -f2)"
           python3 -c 'import sys; v=tuple(int(x) for x in sys.argv[1].split(".")[:3]); assert v >= (8, 4, 0)' "$gc_acquire_curl"
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
-          printf 'Authorization: Bearer %s\n' "$GC_ACQUIRE_TOKEN" | curl --header @- --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-redirs 5 --max-time 60 --max-filesize 1048576 --header 'Accept: application/vnd.github.raw+json' --output "$GC_ACQUIRE_ROOT/provenance.json" -- "https://api.github.com/repos/YuriyKrasilnikov/codex-session-gc/contents/native/build-inputs/provenance.json?ref=$GITHUB_SHA"
+          printf 'Authorization: Bearer %s\n' "$GC_ACQUIRE_TOKEN" | curl -q --header @- --fail --silent --proto '=https' --proto-redir '=https' --max-redirs 5 --max-time 60 --max-filesize 1048576 --header 'Accept: application/vnd.github.raw+json' --output "$GC_ACQUIRE_ROOT/provenance.json" -- "https://api.github.com/repos/YuriyKrasilnikov/codex-session-gc/contents/native/build-inputs/provenance.json?ref=$GITHUB_SHA"
           python3 - "$GC_ACQUIRE_ROOT/provenance.json" > "$GC_ACQUIRE_ROOT/locator.txt" <<'PY'
           import json, re, sys
 
@@ -98,12 +100,21 @@ jobs:
             exit 0
           fi
           gc_asset_url="https://api.github.com/repos/YuriyKrasilnikov/codex-session-gc/releases/assets/$gc_asset"
-          public_fetch=(curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-redirs 5 --header 'Accept: application/octet-stream')
+          fetch=(curl -q --fail --silent --location --proto '=https' --proto-redir '=https' --max-redirs 5 --header 'Accept: application/octet-stream')
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            "${public_fetch[@]}" --head --max-time 60 --output /dev/null -- "$gc_asset_url"
+            fetch+=(--head --max-time 60 --output /dev/null)
+          else
+            fetch+=(--max-time 180 --max-filesize "$gc_bytes" --output "$GC_ACQUIRE_ROOT/native-component.tar.gz")
+          fi
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            "${fetch[@]}" -- "$gc_asset_url"
+          else
+            # curl restricts Authorization to the initial origin when following redirects.
+            printf 'Authorization: Bearer %s\n' "$GC_ACQUIRE_TOKEN" | "${fetch[@]}" --header @- -- "$gc_asset_url"
+          fi
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             exit 0
           fi
-          "${public_fetch[@]}" --max-time 180 --max-filesize "$gc_bytes" --output "$GC_ACQUIRE_ROOT/native-component.tar.gz" -- "$gc_asset_url"
           test -f "$GC_ACQUIRE_ROOT/native-component.tar.gz" && test ! -L "$GC_ACQUIRE_ROOT/native-component.tar.gz"
           test "$(wc -c < "$GC_ACQUIRE_ROOT/native-component.tar.gz")" -eq "$gc_bytes"
           test "$(sha256sum "$GC_ACQUIRE_ROOT/native-component.tar.gz" | cut -d' ' -f1)" = "$gc_sha"
@@ -129,7 +140,7 @@ jobs:
 
   acquire-native-readonly:
     name: Acquire the declared public native component
-    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'support')
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -389,7 +400,7 @@ jobs:
 
   attest-support:
     name: Attest selected source support record
-    needs: acquire-native-readonly
+    needs: acquire-native
     if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'support' }}
     runs-on: ubuntu-26.04
     permissions:
@@ -398,7 +409,7 @@ jobs:
       attestations: write
     steps:
       - name: Require successful locator acquisition
-        if: needs.acquire-native-readonly.result != 'success'
+        if: needs.acquire-native.result != 'success'
         run: exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -411,7 +422,7 @@ jobs:
           set -eu
           python3 -m tools.ci_native --route > "$RUNNER_TEMP/native-route.json"
           gc_route="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["route"])' "$RUNNER_TEMP/native-route.json")"
-          test "$gc_route" = '${{ needs.acquire-native-readonly.outputs.route }}'
+          test "$gc_route" = '${{ needs.acquire-native.outputs.route }}'
           printf 'route=%s\n' "$gc_route" >> "$GITHUB_OUTPUT"
       - name: Validate and prepare exact source bytes
         if: steps.route.outputs.route == 'qualified'
@@ -420,6 +431,7 @@ jobs:
         run: |
           set -eu
           python3 -m tools.support_record --output "$RUNNER_TEMP/codex-session-gc-support.json"
+          python3 -m tools.support_record --badge-from "$RUNNER_TEMP/codex-session-gc-support.json" --output "$RUNNER_TEMP/codex-compatibility-badge.json"
       - name: Attest the exact support record
         if: steps.route.outputs.route == 'qualified'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -430,6 +442,8 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: support-record-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/codex-session-gc-support.json
+          path: |
+            ${{ runner.temp }}/codex-session-gc-support.json
+            ${{ runner.temp }}/codex-compatibility-badge.json
           if-no-files-found: error
           retention-days: 3

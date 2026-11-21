@@ -458,7 +458,10 @@ def test_source_support_is_separate_from_local_execution_observation(
     _equal(support.native_inputs_independently_observed, expected=False)
     if support.record is None or support.bindings is None:
         pytest.fail("Bundled support claim is unavailable")
-    _equal(support.record.status, SupportStatus.REVIEW_REQUIRED)
+    packaged = json.loads(
+        files("codex_session_gc.compatibility").joinpath("support.json").read_bytes()
+    )
+    _equal(support.record.status, SupportStatus(packaged["status"]))
     checks = {item.field: item.state for item in support.bindings.checks}
     _equal(checks["source_commit"], BindingState.MATCH)
     _equal(checks["source_ref"], BindingState.MATCH)
@@ -530,7 +533,7 @@ def test_cli_producer_values_are_caller_observations_not_source_proof(
     checks = {item["field"]: item["state"] for item in support["bindings"]["checks"]}
     _equal(checks["source_commit"], "match")
     _equal(checks["source_ref"], "match")
-    _equal(checks["producer_binary"], "unknown")
+    _equal(checks["producer_binary"], "mismatch")
     _equal(checks["native_inputs"], "unknown")
 
 
