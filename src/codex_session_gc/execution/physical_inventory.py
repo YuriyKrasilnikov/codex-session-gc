@@ -6,9 +6,12 @@ from __future__ import annotations
 
 import os
 import stat
-from contextlib import closing, contextmanager
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING
 
 from codex_session_gc.domain import (
@@ -33,20 +36,36 @@ from codex_session_gc.execution.closed_work_request import (
     HeaderObservation,
     PreparationRefused,
     _absolute,
+    _capture_header_descriptor,
+    _decode_header,
     _empty_descriptor,
-    _observe_header_descriptor,
+    _verify_header_binding,
 )
 from codex_session_gc.execution.timing import Count, count
 from codex_session_gc.planning.physical_lineage import normalize_history_providers
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator, Mapping
+    from concurrent.futures import Future
+
+    from codex_session_gc.execution.closed_work_request import _CapturedHeader
+
+
+_PATH_CHECK_WINDOW = 4
 
 
 @dataclass(frozen=True, slots=True)
 class _Entry:
     path: Path
     parent_fd: int
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingHeader:
+    captured: _CapturedHeader
+    representation: PhysicalRepresentation
+    original: ExitStack
+    check: Future[None]
 
 
 @contextmanager
@@ -190,7 +209,170 @@ def _metadata(header: HeaderObservation, representation: PhysicalRepresentation)
     )
 
 
-def observe_inventory(  # noqa: C901, PLR0915
+def _current_matches(
+    path: Path, representation: PhysicalRepresentation, row: Mapping[str, object] | None
+) -> bool:
+    if row is None:
+        return False
+    raw = Path(str(row["rollout_path"]))
+    plain = path.with_suffix("") if representation is PhysicalRepresentation.ZSTD else path
+    return raw in (plain, plain.with_name(plain.name + ".zst"))
+
+
+def _join_path_checks(executor: ThreadPoolExecutor) -> KeyboardInterrupt | None:
+    """Finish shutdown even if the caller is interrupted while joining workers."""
+    interruption = None
+    while True:
+        try:
+            executor.shutdown(wait=True, cancel_futures=True)
+        except KeyboardInterrupt as error:
+            if interruption is None:
+                interruption = error
+        else:
+            return interruption
+
+
+def _submit_path_check(executor: ThreadPoolExecutor, captured: _CapturedHeader) -> Future[None]:
+    """Admit filesystem access only after the executor owns the started worker."""
+    admission = Lock()
+    admitted = False
+
+    def check() -> None:
+        with admission:
+            accepted = admitted
+        if accepted:
+            _verify_header_binding(captured)
+
+    # An interrupted Thread.start can leave work runnable before submit returns.
+    # Hold it here so a worker untracked by shutdown cannot verify a released leaf.
+    with admission:
+        result = executor.submit(check)
+        admitted = True
+        return result
+
+
+def _inventory_headers(  # noqa: C901, PLR0912, PLR0915
+    home: Path,
+    current_rows: Mapping[str, Mapping[str, object]],
+    capture_owners: frozenset[ThreadId],
+    budget: CollectionBudget,
+    unresolved_empty_rollouts: list[Path],
+) -> Generator[tuple[HeaderObservation, PhysicalRepresentation]]:
+    """Capture in the caller and retire verified pathname checks in traversal order."""
+    executor: ThreadPoolExecutor | None = None
+    pending: deque[_PendingHeader] = deque()
+    submitting: ExitStack | None = None
+    seen = set()
+    entries_seen = 0
+    headers_read = 0
+    initial_used = budget.used
+
+    def retire() -> tuple[HeaderObservation, PhysicalRepresentation]:
+        nonlocal headers_read
+        item = pending[0]
+        item.check.result()
+        item.original.close()
+        pending.popleft()
+        header = _decode_header(item.captured)
+        headers_read += 1
+        return header, item.representation
+
+    def capture(
+        path: Path, descriptor: int
+    ) -> tuple[_CapturedHeader, PhysicalRepresentation] | None:
+        representation = (
+            PhysicalRepresentation.ZSTD
+            if path.name.endswith(".jsonl.zst")
+            else PhysicalRepresentation.PLAIN
+        )
+        empty = _empty_descriptor(path, descriptor)
+        try:
+            ownership = ownership_from_path(path, representation)
+        except InvalidRecordError:
+            if empty:
+                return None
+            raise
+        if ownership.rollout_id in seen:
+            message = "One physical rollout has duplicate or competing representations."
+            raise PreparationRefused(message)
+        seen.add(ownership.rollout_id)
+        selected = ownership.thread_id in capture_owners
+        if empty:
+            current = _current_matches(
+                path,
+                representation,
+                current_rows.get(str(ownership.thread_id.value)),
+            )
+            if selected or current:
+                message = "A selected or current physical history is empty."
+                raise PreparationRefused(message)
+            unresolved_empty_rollouts.append(path)
+            return None
+        captured = _capture_header_descriptor(
+            path,
+            descriptor,
+            budget,
+            require_stable_extent=selected,
+            enforce_extent_limit=selected,
+        )
+        return captured, representation
+
+    failed = False
+    try:
+        with closing(_files(home)) as entries:
+            while True:
+                if len(pending) == _PATH_CHECK_WINDOW:
+                    yield retire()
+                try:
+                    entry = next(entries, None)
+                    if entry is None:
+                        break
+                    entries_seen += 1
+                    budget.check()
+                    with ExitStack() as original:
+                        descriptor = original.enter_context(_leaf(entry))
+                        staged = capture(entry.path, descriptor)
+                        if staged is None:
+                            continue
+                        captured, representation = staged
+                        if executor is None:
+                            executor = ThreadPoolExecutor(max_workers=_PATH_CHECK_WINDOW)
+                        # Submission can enqueue work and then fail to start a thread.
+                        # Keep the pin until shutdown even if no Future was returned.
+                        submitting = original.pop_all()
+                        check = _submit_path_check(executor, captured)
+                        pending.append(_PendingHeader(captured, representation, submitting, check))
+                        submitting = None
+                except Exception:
+                    # A later traversal, capture or submission error must wait for
+                    # every earlier admitted pathname and metadata verdict.
+                    while pending:
+                        yield retire()
+                    raise
+            while pending:
+                yield retire()
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        interruption = None
+        try:
+            if executor is not None:
+                interruption = _join_path_checks(executor)
+        finally:
+            with ExitStack() as originals:
+                if submitting is not None:
+                    originals.callback(submitting.close)
+                for item in pending:
+                    originals.callback(item.original.close)
+            count(Count.INVENTORY_ENTRIES, entries_seen)
+            count(Count.HEADERS_READ, headers_read)
+            count(Count.INVENTORY_BUDGET_BYTES, budget.used - initial_used)
+        if interruption is not None and not failed:
+            raise interruption
+
+
+def observe_inventory(
     home: Path,
     current_rows: Mapping[str, Mapping[str, object]],
     capture_owners: frozenset[ThreadId],
@@ -198,81 +380,26 @@ def observe_inventory(  # noqa: C901, PLR0915
 ) -> tuple[PhysicalInventory, dict[Path, HeaderObservation]]:
     """Read every active/archive header, including orphan consumer owners.
 
-    Definitely empty regular files preserve the qualified zero-file exception;
-    they supply no fabricated metadata and cannot satisfy a provider reference.
+    Definitely empty regular files preserve the qualified zero-file exception.
     Only headers needed by current SQL pointers are retained as small projections.
     """
     items = []
-    unresolved_empty_rollouts = []
+    unresolved_empty_rollouts: list[Path] = []
     headers = {}
-    seen = set()
-    entries_seen = 0
-    headers_read = 0
-    initial_used = budget.used
-    try:
-        with closing(_files(home)) as entries:
-            for entry in entries:
-                entries_seen += 1
-                budget.check()
-                with _leaf(entry) as descriptor:
-                    path = entry.path
-                    representation = (
-                        PhysicalRepresentation.ZSTD
-                        if path.name.endswith(".jsonl.zst")
-                        else PhysicalRepresentation.PLAIN
-                    )
-                    empty = _empty_descriptor(path, descriptor)
-                    try:
-                        ownership = ownership_from_path(path, representation)
-                    except InvalidRecordError:
-                        if empty:
-                            continue
-                        raise
-                    if ownership.rollout_id in seen:
-                        message = "One physical rollout has duplicate or competing representations."
-                        raise PreparationRefused(message)
-                    seen.add(ownership.rollout_id)
-                    if empty:
-                        row = current_rows.get(str(ownership.thread_id.value))
-                        raw = None if row is None else Path(str(row["rollout_path"]))
-                        plain = (
-                            path.with_suffix("")
-                            if representation is PhysicalRepresentation.ZSTD
-                            else path
-                        )
-                        if ownership.thread_id in capture_owners or raw in (
-                            plain,
-                            plain.with_name(plain.name + ".zst"),
-                        ):
-                            message = "A selected or current physical history is empty."
-                            raise PreparationRefused(message)
-                        unresolved_empty_rollouts.append(path)
-                        continue
-                    selected = ownership.thread_id in capture_owners
-                    header = _observe_header_descriptor(
-                        path,
-                        descriptor,
-                        budget,
-                        require_stable_extent=selected,
-                        enforce_extent_limit=selected,
-                    )
-                    headers_read += 1
-                    item = _metadata(header, representation)
-                    items.append(item)
-                    row = current_rows.get(str(ownership.thread_id.value))
-                    if row is not None and ownership.thread_id in capture_owners:
-                        raw = Path(str(row["rollout_path"]))
-                        plain = (
-                            path.with_suffix("")
-                            if representation is PhysicalRepresentation.ZSTD
-                            else path
-                        )
-                        if raw in (plain, plain.with_name(plain.name + ".zst")):
-                            headers[path] = header
-    finally:
-        count(Count.INVENTORY_ENTRIES, entries_seen)
-        count(Count.HEADERS_READ, headers_read)
-        count(Count.INVENTORY_BUDGET_BYTES, budget.used - initial_used)
+    with closing(
+        _inventory_headers(home, current_rows, capture_owners, budget, unresolved_empty_rollouts)
+    ) as verified:
+        for header, representation in verified:
+            item = _metadata(header, representation)
+            items.append(item)
+            observed_owner = item.ownership.thread_id
+            if observed_owner in capture_owners and _current_matches(
+                header.path, representation, current_rows.get(str(observed_owner.value))
+            ):
+                headers[header.path] = header
+            # Earlier path, envelope and metadata refusals outrank a deadline
+            # reached while waiting for their pathname checks.
+            budget.check()
     pointers = []
     for owner, row in current_rows.items():
         raw = Path(str(row["rollout_path"]))
@@ -294,4 +421,5 @@ def observe_inventory(  # noqa: C901, PLR0915
         unresolved_empty_rollouts=tuple(unresolved_empty_rollouts),
     )
     normalize_history_providers(inventory)
+    budget.check()
     return inventory, headers

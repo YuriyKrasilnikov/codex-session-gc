@@ -169,6 +169,15 @@ class HeaderObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class _CapturedHeader:
+    """A bounded first line sampled from a still-open original leaf."""
+
+    path: Path
+    line: bytes
+    identity: tuple[int, int, int, int, int]
+
+
+@dataclass(frozen=True, slots=True)
 class ClosedWorkFacts:
     """Validated source facts, independent of a whole maintenance plan."""
 
@@ -839,9 +848,12 @@ def _open(path: Path) -> int:
         descriptor = os.open(
             path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
         )
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise PreparationRefused("Only regular native input files are supported.")
+        except BaseException:
             os.close(descriptor)
-            raise PreparationRefused("Only regular native input files are supported.")
+            raise
         return descriptor
     finally:
         os.close(directory)
@@ -924,6 +936,26 @@ def _observe_header_descriptor(
     enforce_extent_limit: bool = True,
 ) -> HeaderObservation:
     """Capture a bounded header through a borrowed regular descriptor."""
+    captured = _capture_header_descriptor(
+        path,
+        descriptor,
+        budget,
+        require_stable_extent=require_stable_extent,
+        enforce_extent_limit=enforce_extent_limit,
+    )
+    _verify_header_binding(captured)
+    return _decode_header(captured)
+
+
+def _capture_header_descriptor(
+    path: Path,
+    descriptor: int,
+    budget: CollectionBudget,
+    *,
+    require_stable_extent: bool,
+    enforce_extent_limit: bool,
+) -> _CapturedHeader:
+    """Read and sample the original leaf before its pathname check."""
     before = os.fstat(descriptor)
     if enforce_extent_limit and before.st_size > budget.limits.maximum_rollout_bytes:
         raise PreparationRefused("The selected rollout exceeds its size bound.")
@@ -946,11 +978,19 @@ def _observe_header_descriptor(
     except HeaderReadError as error:
         raise PreparationRefused(str(error)) from error
     after = os.fstat(descriptor)
-    if (require_stable_extent and _identity(before) != _identity(after)) or _sample(path) != (
-        after.st_dev,
-        after.st_ino,
-    ):
+    if require_stable_extent and _identity(before) != _identity(after):
         raise PreparationRefused("The selected physical history changed during header capture.")
+    return _CapturedHeader(path, captured.line, _identity(after))
+
+
+def _verify_header_binding(captured: _CapturedHeader) -> None:
+    """Reopen the absolute name while the original leaf remains pinned."""
+    if _sample(captured.path) != captured.identity[:2]:
+        raise PreparationRefused("The selected physical history changed during header capture.")
+
+
+def _decode_header(captured: _CapturedHeader) -> HeaderObservation:
+    """Decode only the bounded first line of a verified pathname observation."""
     envelope = json.loads(captured.line)
     if (
         not isinstance(envelope, dict)
@@ -972,7 +1012,9 @@ def _observe_header_descriptor(
         "forked_from_ordinal_exclusive",
     )
     metadata = {key: envelope["payload"][key] for key in keys if key in envelope["payload"]}
-    return HeaderObservation(path, metadata, sha256(captured.line).digest(), _identity(after))
+    return HeaderObservation(
+        captured.path, metadata, sha256(captured.line).digest(), captured.identity
+    )
 
 
 def _identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
