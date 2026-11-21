@@ -790,12 +790,11 @@ class SessionApp(App[tuple[str, int]]):
                     continue
             self._show_progress()
             self.timing.finish()
-            self.completed_result = (
-                result_text(report) + "\n" + timing_terminal(self.timing.snapshot()),
-                status,
-            )
+            self.completed_result = (result_text(report), status)
             self.exit(self.completed_result)
         except Exception as error:  # noqa: BLE001
+            if self.timing is not None:
+                self.timing.finish(interrupted=True)
             self.completed_result = (
                 f"UNKNOWN after confirmation: {error}. Keep receipt and reconcile; do not retry."
                 if self.receipt
@@ -885,4 +884,6 @@ def run(arguments: argparse.Namespace) -> int:
             f"Receipt: {clean(str(app.receipt))}\n"
             "Keep it for reconcile; never retry UNKNOWN blindly.\n"
         )
+    if app.completed_result is not None and app.timing is not None and app.timing.scope == "apply":
+        sys.stdout.write(timing_terminal(app.timing.snapshot()) + "\n")
     return status

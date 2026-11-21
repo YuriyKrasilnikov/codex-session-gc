@@ -648,6 +648,29 @@ def test_missing_postdispatch_result_is_unknown(
     assert "do not retry" in output
 
 
+def test_console_renders_timings_outside_the_completed_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result = ("Outcome: REFUSED", 3)
+
+    def finish(browser: ui.SessionApp) -> tuple[str, int]:
+        browser.timing = ui.TimingObserver("apply")
+        browser.timing.finish()
+        browser.completed_result = result
+        return result
+
+    monkeypatch.setattr(ui.SessionApp, "run", finish)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    arguments = argparse.Namespace(
+        home=tmp_path, cutoff=CUTOFF, helper=Path("/helper"), receipt_dir=tmp_path.parent
+    )
+    assert ui.run(arguments) == result[1]
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == result[0]
+    assert lines[1].startswith("timings: ")
+
+
 @pytest.mark.parametrize("size", [(80, 24), (120, 40)])
 def test_title_and_three_sizes_visible_together(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, size: tuple[int, int]
