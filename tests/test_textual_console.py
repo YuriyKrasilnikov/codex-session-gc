@@ -511,7 +511,11 @@ def test_review_locks_selection_and_resets_confirmation(
     async def scenario() -> None:
         browser = app(tmp_path, monkeypatch)
 
+        preview_calls = 0
+
         async def preview(intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
+            nonlocal preview_calls
+            preview_calls += 1
             assert mode is PreviewMode.CONFIRM
             return report(intent)
 
@@ -521,6 +525,9 @@ def test_review_locks_selection_and_resets_confirmation(
             await pilot.click("#select")
             await pilot.click("#preview")
             await pilot.pause()
+            first_timing = browser.timing
+            assert first_timing is not None
+            assert "timings:" in str(browser.query_one("#review-text", Static).render())
             browser.query_one("#confirm", Input).value = "DELETE"
             assert browser.query_one("#clear").disabled
             assert browser.query_one("#refresh").disabled
@@ -539,6 +546,9 @@ def test_review_locks_selection_and_resets_confirmation(
             await pilot.click("#preview")
             await pilot.pause()
             assert browser.query_one("#confirm", Input).value == ""
+            assert preview_calls == 2  # noqa: PLR2004
+            assert browser.timing is not first_timing
+            assert not browser.query_one("#progress").display
             assert browser.receipt is None
 
     asyncio.run(scenario())

@@ -11,7 +11,7 @@ import hashlib
 import json
 import os
 import uuid
-from collections.abc import AsyncIterator  # noqa: TC003
+from collections.abc import AsyncIterator, Awaitable  # noqa: TC003
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 import anyio
 from mcp.server import MCPServer
+from mcp.server.mcpserver.context import Context  # noqa: TC002
 from mcp.types import ToolAnnotations
 
 from codex_session_gc import diagnostics
@@ -31,6 +32,7 @@ from codex_session_gc.compatibility.observation import ImportedSupport
 from codex_session_gc.domain import ArchiveState, ThreadId
 from codex_session_gc.execution.confirmed_operation import ConfirmedOperations
 from codex_session_gc.execution.selection_provenance import reviewed_associations
+from codex_session_gc.execution.timing import TimingObserver, observe, worker_wakeup
 from codex_session_gc.installation.model import InstallLayout
 from codex_session_gc.inventory.catalogue import SessionEntry, read_session_catalogue
 from codex_session_gc.inventory.query import (
@@ -509,6 +511,41 @@ class CatalogueService(CatalogueObservation):
             )
 
 
+async def _observed_call(
+    ctx: Context[Any, Any], observer: TimingObserver, operation: Awaitable[dict[str, Any]]
+) -> dict[str, Any]:
+    """Own a cancellable coalescing sender independently of the backend result."""
+    wake = asyncio.Event()
+
+    async def send() -> None:
+        sequence = 0
+        try:
+            while True:
+                snapshot = observer.snapshot()
+                sequence += 1
+                message = json.dumps(snapshot, separators=(",", ":"))
+                with anyio.fail_after(0.2):
+                    await ctx.report_progress(sequence, total=None, message=message)
+                with anyio.move_on_after(0.1):
+                    await wake.wait()
+                wake.clear()
+        except TimeoutError, OSError, RuntimeError:
+            return
+
+    sender = asyncio.create_task(send())
+    failed = True
+    try:
+        with observe(observer), worker_wakeup(wake):
+            result = await operation
+        failed = False
+        return result
+    finally:
+        observer.finish(interrupted=failed)
+        with anyio.CancelScope(shield=True):
+            sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
+
+
 def create_server(
     home: Path,
     helper: Path | None = None,
@@ -546,6 +583,23 @@ def create_server(
     annotations = ToolAnnotations(
         read_only_hint=True, destructive_hint=False, open_world_hint=False
     )
+
+    async def prepare_cleanup(
+        snapshot_id: str, thread_ids: list[str], cutoff: str, ctx: Context[Any, Any]
+    ) -> dict[str, Any]:
+        """Preview scoped metadata for exact IDs without dispatch or journal creation."""
+        return await _observed_call(
+            ctx, TimingObserver("preview"), service.prepare_cleanup(snapshot_id, thread_ids, cutoff)
+        )
+
+    async def apply_cleanup(
+        operation_id: str, digest: str, ctx: Context[Any, Any]
+    ) -> dict[str, Any]:
+        """Apply the exact server-held preparation referenced by two unchanged strings."""
+        return await _observed_call(
+            ctx, TimingObserver("apply"), service.apply_cleanup(operation_id, digest)
+        )
+
     for tool in (
         service.storage_overview,
         service.storage_objects,
@@ -555,7 +609,7 @@ def create_server(
         service.query_catalogue,
         service.catalogue_summary,
         service.session_details,
-        service.prepare_cleanup,
+        prepare_cleanup,
         service.compatibility_status,
     ):
         server.tool(annotations=annotations)(tool)
@@ -567,7 +621,7 @@ def create_server(
                 destructive_hint=True,
                 open_world_hint=False,
             )
-        )(service.apply_cleanup)
+        )(apply_cleanup)
         server.tool(
             annotations=ToolAnnotations(
                 read_only_hint=False,

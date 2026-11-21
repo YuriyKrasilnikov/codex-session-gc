@@ -4,13 +4,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from threading import Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ParamSpec, TypeVar
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -75,6 +76,7 @@ class TimingObserver:
         self._counts: dict[Count, int] = {}
         self._interrupted = False
         self._finished_ns: int | None = None
+        self._worker: dict[str, object] | None = None
 
     @contextmanager
     def phase(self, name: Phase) -> Iterator[None]:
@@ -108,28 +110,101 @@ class TimingObserver:
             if self._finished_ns is None:
                 self._finished_ns = finished
 
+    def accept_worker(self, value: object) -> bool:  # noqa: C901, PLR0911
+        """Accept only a bounded summary from the invocation's private worker."""
+        if not isinstance(value, dict) or value.get("scope") != "preview":
+            return False
+        elapsed, phases, counts = (
+            value.get("caller_elapsed_ns"),
+            value.get("phases"),
+            value.get("counts"),
+        )
+        if type(elapsed) is not int or elapsed < 0 or not isinstance(phases, list):
+            return False
+        if len(phases) > len(Phase) or not isinstance(counts, dict) or len(counts) > len(Count):
+            return False
+        accepted = []
+        for item in phases:
+            if not isinstance(item, dict):
+                return False
+            name = item.get("name")
+            if not isinstance(name, str):
+                return False
+            try:
+                phase = Phase(name)
+            except ValueError, TypeError:
+                return False
+            duration, calls = item.get("elapsed_ns"), item.get("calls")
+            if (
+                type(duration) is not int
+                or duration < 0
+                or type(calls) is not int
+                or calls < 1
+                or item.get("completion") not in {"complete", "interrupted"}
+            ):
+                return False
+            accepted.append(
+                {
+                    "name": phase.value,
+                    "clock_domain": "worker",
+                    "elapsed_ns": duration,
+                    "calls": calls,
+                    "completion": item["completion"],
+                }
+            )
+        accepted_counts: dict[str, int] = {}
+        for name, amount in counts.items():
+            try:
+                key = Count(name)
+            except ValueError, TypeError:
+                return False
+            if type(amount) is not int or amount < 0:
+                return False
+            accepted_counts[key.value] = amount
+        completion = value.get("counts_completion")
+        if completion not in {"complete", "interrupted"}:
+            return False
+        with self._lock:
+            self._worker = {
+                "elapsed": elapsed,
+                "phases": accepted,
+                "counts": accepted_counts,
+                "counts_completion": completion,
+            }
+        return True
+
     def snapshot(self) -> dict[str, object]:
         """Copy the latest observation for a consumer without exposing source data."""
         now = self._clock()
         with self._lock:
             end = self._finished_ns if self._finished_ns is not None else now
             elapsed = max(0, end - self._started)
+            phases: list[dict[str, object]] = [
+                {
+                    "name": phase.value,
+                    "clock_domain": "caller",
+                    "elapsed_ns": item.elapsed_ns,
+                    "calls": item.calls,
+                    "completion": "interrupted" if item.interrupted else "complete",
+                }
+                for phase in Phase
+                if (item := self._measurements.get(phase)) is not None
+            ]
+            worker_phases = self._worker["phases"] if self._worker else []
+            if isinstance(worker_phases, list):
+                phases.extend(worker_phases)
+            order = {phase.value: index for index, phase in enumerate(Phase)}
+            phases.sort(key=lambda item: order[str(item["name"])])
             return {
                 "scope": self.scope,
                 "caller_elapsed_ns": elapsed,
-                "worker_elapsed_ns": None,
+                "worker_elapsed_ns": self._worker["elapsed"] if self._worker else None,
                 "current_stage": self._active[-1].value if self._active else None,
-                "phases": [
-                    {
-                        "name": phase.value,
-                        "clock_domain": "caller",
-                        "elapsed_ns": item.elapsed_ns,
-                        "calls": item.calls,
-                        "completion": "interrupted" if item.interrupted else "complete",
-                    }
-                    for phase in Phase
-                    if (item := self._measurements.get(phase)) is not None
-                ],
+                "phases": phases,
+                "worker_counts": self._worker["counts"] if self._worker else {},
+                "worker_counts_completion": (
+                    self._worker["counts_completion"] if self._worker else None
+                ),
                 "counts": dict(self._counts),
                 "counts_completion": (
                     "interrupted"
@@ -138,7 +213,9 @@ class TimingObserver:
                     else "complete"
                 ),
                 "missing_phases": [
-                    phase.value for phase in Phase if phase not in self._measurements
+                    phase.value
+                    for phase in Phase
+                    if not any(item["name"] == phase.value for item in phases)
                 ],
             }
 
@@ -167,3 +244,64 @@ def count(name: Count, amount: int = 1) -> None:
     observer = _current.get()
     if observer is not None:
         observer.count(name, amount)
+
+
+def current() -> TimingObserver | None:
+    """Return the observer belonging to the current async or thread context."""
+    return _current.get()
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+async def measured_to_thread(  # noqa: UP047
+    function: Callable[_P, _R], *args: _P.args, **kwargs: _P.kwargs
+) -> _R:
+    """Measure submission to thread entry, including submission failure exactly once."""
+    waiting = interval(Phase.EXECUTOR_WAIT)
+    waiting.__enter__()
+    guard = Lock()
+    closed = False
+
+    def close_wait(error: BaseException | None = None) -> None:
+        nonlocal closed
+        with guard:
+            if not closed:
+                closed = True
+                if error is None:
+                    waiting.__exit__(None, None, None)
+                else:
+                    waiting.__exit__(type(error), error, error.__traceback__)
+
+    def run() -> _R:
+        close_wait()
+        return function(*args, **kwargs)
+
+    try:
+        return await asyncio.to_thread(run)
+    except BaseException as error:
+        close_wait(error)
+        raise
+    finally:
+        close_wait()
+
+
+_worker_signal: ContextVar[asyncio.Event | None] = ContextVar("worker_signal", default=None)
+
+
+@contextmanager
+def worker_wakeup(event: asyncio.Event) -> Iterator[None]:
+    """Bind one request-owned event to the async caller context."""
+    token = _worker_signal.set(event)
+    try:
+        yield
+    finally:
+        _worker_signal.reset(token)
+
+
+def signal_worker_summary() -> None:
+    """Wake the current request's consumer from its event-loop task."""
+    event = _worker_signal.get()
+    if event is not None:
+        event.set()

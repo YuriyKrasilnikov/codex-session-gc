@@ -37,8 +37,10 @@ from codex_session_gc.cli.console_tasks import (
 )
 from codex_session_gc.cli.storage_screen import StorageScreen
 from codex_session_gc.cli.storage_service import StorageService
+from codex_session_gc.cli.timing_display import terminal as timing_terminal
 from codex_session_gc.domain import ArchiveState, ThreadId, UtcCutoff
 from codex_session_gc.execution.progress import ProgressChannel, ProgressEvent, ProgressKind
+from codex_session_gc.execution.timing import TimingObserver, measured_to_thread, observe
 from codex_session_gc.inventory.catalogue import SessionCatalogue, read_session_catalogue
 from codex_session_gc.inventory.query import (
     CatalogueGroup,
@@ -111,7 +113,7 @@ class SessionApp(App[tuple[str, int]]):
     Screen { layout: vertical; overflow: hidden hidden; }
     #content { height: 1fr; min-height: 0; }
     #heading, #notice { height: 2; }
-    #progress { height: 3; display: none; }
+    #progress { height: 4; display: none; }
     #root-results { height: 4; display: none; }
     .filters { height: 3; }
     .filters Input { width: 1fr; }
@@ -154,6 +156,7 @@ class SessionApp(App[tuple[str, int]]):
         self.review_open = False
         self.completed_result: tuple[str, int] | None = None
         self.valid_filters = True
+        self.timing: TimingObserver | None = None
         self.progress: ProgressChannel | None = None
         self.progress_started = 0.0
         self.progress_operation = ""
@@ -284,7 +287,22 @@ class SessionApp(App[tuple[str, int]]):
 
     def _show_progress(self) -> None:
         """Render known boundaries and local elapsed time while awaiting the result."""
-        if not self.is_running or not self.dispatching or self.progress is None:
+        if not self.is_running:
+            return
+        if not self.dispatching or self.progress is None:
+            if (
+                self.timing is not None
+                and self.preview_task is not None
+                and not self.preview_task.done()
+            ):
+                snapshot = self.timing.snapshot()
+                elapsed_ns = snapshot["caller_elapsed_ns"]
+                elapsed = elapsed_ns / 1e9 if isinstance(elapsed_ns, int) else 0.0
+                self.query_one("#progress", Static).update(
+                    f"Waiting for preview worker: {elapsed:.1f}s; "
+                    "worker stages unavailable until it returns"
+                )
+                self.query_one("#progress").display = True
             return
         for event in self.progress.drain():
             self.progress_operation = str(event.operation_id.value)
@@ -306,7 +324,9 @@ class SessionApp(App[tuple[str, int]]):
         if last is not None and last.root is not None:
             outcome = last.outcome.value if last.outcome is not None else "not_dispatched"
             returned = f"{last.root.value}: {outcome}"
+        stage = self.timing.snapshot()["current_stage"] if self.timing is not None else None
         self.query_one("#progress", Static).update(
+            f"Stage: {stage or 'waiting'}\n"
             f"Operation {self.progress_operation}\n"
             f"Waiting {elapsed:.1f}s; current root: {current}\n"
             f"Root results {self.progress_results}; last: {returned}"
@@ -667,9 +687,11 @@ class SessionApp(App[tuple[str, int]]):
             tuple(sorted(self.selected)),
         )
         self.reviewed = None
+        self.timing = TimingObserver("preview")
         self._review_mode(enabled=True)
         self.query_one("#review-text", Static).update(
-            "Reading selected metadata headers for conditional preview… Esc cancels "
+            "Reading scoped SQL and active/archive history headers for conditional preview… "
+            "Esc cancels "
             "before dispatch and waits for the preview worker."
         )
         self.preview_task = asyncio.create_task(self._preview(intent))
@@ -677,7 +699,10 @@ class SessionApp(App[tuple[str, int]]):
     async def _preview(self, intent: Intent) -> None:
         report: dict[str, Any] | None = None
         try:
-            report = await async_preview(intent, mode=PreviewMode.CONFIRM)
+            assert self.timing is not None  # noqa: S101
+            with observe(self.timing):
+                report = await async_preview(intent, mode=PreviewMode.CONFIRM)
+            self.timing.finish()
             labels = (
                 {
                     str(entry.id.value): clean(f"{entry.title[:300]} | {entry.cwd[:300]}")
@@ -688,6 +713,8 @@ class SessionApp(App[tuple[str, int]]):
             )
             report["labels"] = labels
             lines = preview_lines(report)
+            lines.extend(timing_terminal(self.timing.snapshot()).splitlines())
+            self.query_one("#progress").display = False
             self.query_one("#review-text", Static).update("\n".join(clean(line) for line in lines))
             self.reviewed = confirmed_intent(intent, report)
             self.query_one("#confirm").display = True
@@ -697,8 +724,13 @@ class SessionApp(App[tuple[str, int]]):
                 "Exact deletion IDs are frozen. Type DELETE to dispatch once."
             )
         except asyncio.CancelledError:
+            if self.timing is not None:
+                self.timing.finish(interrupted=True)
             raise
         except Exception as error:  # noqa: BLE001
+            if self.timing is not None:
+                self.timing.finish(interrupted=True)
+            self.query_one("#progress").display = False
             if report is None:
                 self.query_one("#review-text", Static).update(
                     clean(f"Preview unavailable: {error}")
@@ -715,6 +747,8 @@ class SessionApp(App[tuple[str, int]]):
             with suppress(asyncio.CancelledError):
                 await self.preview_task
         self.reviewed = None
+        self.timing = None
+        self.query_one("#progress").display = False
         self._review_mode(enabled=False)
         self._notice("Preview closed before dispatch; no cleanup was requested.")
 
@@ -728,6 +762,7 @@ class SessionApp(App[tuple[str, int]]):
                 return
             operation_id = intent.confirmation().operation_id
             self.receipt = receipt_path(self.receipts, self.home)
+            self.timing = TimingObserver("apply")
             self.progress = ProgressChannel()
             self.progress_started = time.monotonic()
             self.progress_operation = operation_id
@@ -739,11 +774,12 @@ class SessionApp(App[tuple[str, int]]):
             self._notice(
                 "Executing once. Do not close: awaiting native outcome and durable receipt…"
             )
-            backend = asyncio.create_task(
-                asyncio.to_thread(
-                    apply_intent, intent, self.helper, self.receipt, progress=self.progress
+            with observe(self.timing):
+                backend = asyncio.create_task(
+                    measured_to_thread(
+                        apply_intent, intent, self.helper, self.receipt, progress=self.progress
+                    )
                 )
-            )
             while True:
                 try:
                     report, status = await asyncio.shield(backend)
@@ -753,7 +789,11 @@ class SessionApp(App[tuple[str, int]]):
                     # Teardown must join it, not turn cancellation into a retry.
                     continue
             self._show_progress()
-            self.completed_result = (result_text(report), status)
+            self.timing.finish()
+            self.completed_result = (
+                result_text(report) + "\n" + timing_terminal(self.timing.snapshot()),
+                status,
+            )
             self.exit(self.completed_result)
         except Exception as error:  # noqa: BLE001
             self.completed_result = (
