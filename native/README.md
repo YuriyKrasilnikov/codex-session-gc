@@ -412,20 +412,17 @@ locator only to obtain the component; it independently checks the component,
 helper, profile and native inputs before executing the helper. CI assembles the
 release from those bytes and does not compile the helper.
 
-On a trusted main-branch push, a dedicated acquisition job reads the declared
-locator as data at the source commit and fetches that asset with a short-lived
-write-capable repository token. That job does not check out or execute project
-code, helper or tests. A separate read-only job receives the component and
-performs the qualification checks and tests. The token's write capability applies
-to repository contents; the acquisition job uses it only to read provenance and
-the declared asset.
+On eligible main-branch pushes and pull requests, a dedicated acquisition job
+reads provenance at the source commit with a read-only token. A declared release
+asset must be downloadable without authentication. The job verifies its exact
+size and digest before transferring it to the separate read-only qualification
+job. The manual support workflow checks public availability without downloading
+the archive. A checkout with no locator takes the staged source route described
+in [compatibility.md](../docs/compatibility.md#package-construction-and-ci-acceptance).
 
-Pull requests use a read-only token for acquisition. An inaccessible private
-asset fails qualification rather than producing a successful qualified result.
-After the final release asset is public, verify that a pull request can acquire
-and qualify the component with read-only access; public availability must be
-observed, not inferred from an asset ID. The component can also be checked in a
-source checkout without running it; the output helper path must be absent:
+After the final release asset is public, verify its real acquisition and
+qualification in a pull request. The component can also be checked in a source
+checkout without running it; the output helper path must be absent:
 
 ```sh
 PYTHONPATH=src .venv/bin/python -m tools.ci_native --describe

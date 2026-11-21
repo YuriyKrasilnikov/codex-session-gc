@@ -93,7 +93,7 @@ jobs:
         run: |
           set -eu
           "$UV_PROJECT_ENVIRONMENT/bin/python" -m tools.ci_pytest tests tools/tests --ignore=tests/test_mcp_native.py --ignore=tests/test_mcp_disconnect.py --ignore=tests/test_mixed_native.py --basetemp "$GC_CI_ROOT/tests" -o "cache_dir=$GC_CI_ROOT/pytest-cache" --junitxml "$GC_CI_ROOT/python.xml"
-          echo 'Python source partition passed. Native and installed interfaces are evaluated by the matched-artifacts job.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Python source partition passed. See the native workflow for the hosted qualification scope.' >> "$GITHUB_STEP_SUMMARY"
       - name: Retain test report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

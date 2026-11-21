@@ -34,10 +34,12 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
     defaults:
       run:
         shell: bash
+    outputs:
+      route: ${{ steps.locator.outputs.route }}
     steps: &native_acquisition_steps
       - name: Allocate isolated acquisition storage
         run: |
@@ -45,6 +47,7 @@ jobs:
           gc_acquire_root="$(mktemp -d "$RUNNER_TEMP/codex-session-gc-native.XXXXXX")"
           echo "GC_ACQUIRE_ROOT=$gc_acquire_root" >> "$GITHUB_ENV"
       - name: Read and verify the declared native component
+        id: locator
         env:
           GC_ACQUIRE_TOKEN: ${{ github.token }}
         run: |
@@ -72,7 +75,13 @@ jobs:
           if not 0 < len(raw) <= 1048576:
               raise ValueError('invalid provenance size')
           value = json.loads(raw, object_pairs_hook=unique)
-          locator = value['build_qualification']['native_candidate']['transport']
+          candidate = value['build_qualification']['native_candidate']
+          if not isinstance(candidate, dict) or set(candidate) not in ({'summary_sha256'}, {'summary_sha256', 'transport'}):
+              raise ValueError('invalid native candidate')
+          if 'transport' not in candidate:
+              print('staged')
+              sys.exit(0)
+          locator = candidate['transport']
           if not isinstance(locator, dict) or set(locator) != {'asset_id', 'sha256', 'bytes'}:
               raise ValueError('invalid native locator')
           asset, digest, size = locator['asset_id'], locator['sha256'], locator['bytes']
@@ -80,14 +89,26 @@ jobs:
               raise ValueError('unbound or invalid native locator')
           if not isinstance(digest, str) or re.fullmatch(r'[0-9a-f]{64}', digest) is None:
               raise ValueError('invalid native digest')
-          print(asset, size, digest)
+          print("qualified", asset, size, digest)
           PY
-          read -r gc_asset gc_bytes gc_sha < "$GC_ACQUIRE_ROOT/locator.txt"
-          printf 'Authorization: Bearer %s\n' "$GC_ACQUIRE_TOKEN" | curl --header @- --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-redirs 5 --max-time 180 --max-filesize "$gc_bytes" --header 'Accept: application/octet-stream' --output "$GC_ACQUIRE_ROOT/native-component.tar.gz" -- "https://api.github.com/repos/YuriyKrasilnikov/codex-session-gc/releases/assets/$gc_asset"
+          read -r gc_route gc_asset gc_bytes gc_sha < "$GC_ACQUIRE_ROOT/locator.txt"
+          printf 'route=%s\n' "$gc_route" >> "$GITHUB_OUTPUT"
+          if [ "$gc_route" = staged ]; then
+            echo 'No native locator: source checks only; no native or installed qualification.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gc_asset_url="https://api.github.com/repos/YuriyKrasilnikov/codex-session-gc/releases/assets/$gc_asset"
+          public_fetch=(curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-redirs 5 --header 'Accept: application/octet-stream')
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            "${public_fetch[@]}" --head --max-time 60 --output /dev/null -- "$gc_asset_url"
+            exit 0
+          fi
+          "${public_fetch[@]}" --max-time 180 --max-filesize "$gc_bytes" --output "$GC_ACQUIRE_ROOT/native-component.tar.gz" -- "$gc_asset_url"
           test -f "$GC_ACQUIRE_ROOT/native-component.tar.gz" && test ! -L "$GC_ACQUIRE_ROOT/native-component.tar.gz"
           test "$(wc -c < "$GC_ACQUIRE_ROOT/native-component.tar.gz")" -eq "$gc_bytes"
           test "$(sha256sum "$GC_ACQUIRE_ROOT/native-component.tar.gz" | cut -d' ' -f1)" = "$gc_sha"
       - name: Transfer the verified component within this run
+        if: steps.locator.outputs.route == 'qualified' && github.event_name != 'workflow_dispatch'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-component-${{ github.run_id }}-${{ github.run_attempt }}
@@ -108,7 +129,7 @@ jobs:
 
   acquire-native-readonly:
     name: Acquire the declared public native component
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'support')
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -116,12 +137,17 @@ jobs:
     defaults:
       run:
         shell: bash
+    outputs:
+      route: ${{ steps.locator.outputs.route }}
     steps: *native_acquisition_steps
 
   matched-artifacts:
     name: Qualified native and installed artifacts
     needs: [acquire-native, acquire-native-readonly]
-    if: ${{ always() && github.event_name != 'workflow_dispatch' }}
+    if: >-
+      ${{ always() && github.event_name != 'workflow_dispatch' &&
+          ((github.event_name == 'push' && (needs.acquire-native.result != 'success' || needs.acquire-native.outputs.route == 'qualified')) ||
+           (github.event_name == 'pull_request' && (needs.acquire-native-readonly.result != 'success' || needs.acquire-native-readonly.outputs.route == 'qualified'))) }}
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -297,6 +323,29 @@ jobs:
             esac
           fi
 
+  staged-source:
+    name: Staged native source checks
+    needs: [acquire-native, acquire-native-readonly]
+    if: >-
+      ${{ always() && ((github.event_name == 'push' && needs.acquire-native.result == 'success' && needs.acquire-native.outputs.route == 'staged') ||
+          (github.event_name == 'pull_request' && needs.acquire-native-readonly.result == 'success' && needs.acquire-native-readonly.outputs.route == 'staged')) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify source qualification and staged route
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          set -eu
+          python3 -m tools.ci_native --route > "$RUNNER_TEMP/native-route.json"
+          python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {"route": "staged"}' "$RUNNER_TEMP/native-route.json"
+          echo 'Staged source checks passed; native and installed qualification was not performed.' >> "$GITHUB_STEP_SUMMARY"
+
   attest-artifacts:
     name: Attest qualified assembly
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.matched-artifacts.result == 'success' }}
@@ -340,27 +389,44 @@ jobs:
 
   attest-support:
     name: Attest selected source support record
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'support'
+    needs: acquire-native-readonly
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'support' }}
     runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
       attestations: write
     steps:
+      - name: Require successful locator acquisition
+        if: needs.acquire-native-readonly.result != 'success'
+        run: exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Determine whether native material is declared
+        id: route
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          set -eu
+          python3 -m tools.ci_native --route > "$RUNNER_TEMP/native-route.json"
+          gc_route="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["route"])' "$RUNNER_TEMP/native-route.json")"
+          test "$gc_route" = '${{ needs.acquire-native-readonly.outputs.route }}'
+          printf 'route=%s\n' "$gc_route" >> "$GITHUB_OUTPUT"
       - name: Validate and prepare exact source bytes
+        if: steps.route.outputs.route == 'qualified'
         env:
           PYTHONPATH: ${{ github.workspace }}/src
         run: |
           set -eu
           python3 -m tools.support_record --output "$RUNNER_TEMP/codex-session-gc-support.json"
       - name: Attest the exact support record
+        if: steps.route.outputs.route == 'qualified'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/codex-session-gc-support.json
       - name: Retain the attested record
+        if: steps.route.outputs.route == 'qualified'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: support-record-${{ github.run_id }}-${{ github.run_attempt }}
