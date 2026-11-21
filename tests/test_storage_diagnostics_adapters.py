@@ -21,12 +21,15 @@ from codex_session_gc.cli.main import INVALID_INPUT_EXIT, main
 from codex_session_gc.cli.storage_diagnostic_screen import StorageDiagnosticScreen
 from codex_session_gc.cli.storage_screen import StorageScreen
 from codex_session_gc.cli.textual_console import SessionApp
-from tests.mcp_native_fixture import CHILD, ROOT, make_home
+from tests.mcp_native_fixture import CHILD, OTHER, ROOT, make_home, retained_provider
 from tests.test_textual_console import CUTOFF
 
 if TYPE_CHECKING:
     from pathlib import Path
     from typing import Any
+
+
+_UNINDEXED = "44444444-4444-4444-8444-444444444444"
 
 
 def _rows(page: dict[str, Any]) -> set[tuple[str, str | None, tuple[str, ...]]]:
@@ -149,3 +152,124 @@ def test_diagnostic_evidence_matches_cli_stdio_and_textual(
     home, expected = _fixture(tmp_path, capsys)
     asyncio.run(asyncio.wait_for(_stdio(home, expected), 90))
     asyncio.run(asyncio.wait_for(_terminal(home, expected), 45))
+
+
+def _used_by(detail: dict[str, Any]) -> str:
+    (witness,) = [item for item in detail["items"] if item.get("interpretation") == "used_by"]
+    return str(witness["source_subject"]["thread_id"])
+
+
+async def _provider_stdio(home: Path) -> None:
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "codex_session_gc", "mcp", "--home", str(home), "--read-only"],
+        env=dict(os.environ),
+    )
+    async with stdio_client(parameters) as streams, ClientSession(*streams) as session:
+        await session.initialize()
+        observed = (await session.call_tool("storage_overview")).structured_content
+        assert observed is not None
+        snapshot = {"storage_snapshot_id": observed["storage_snapshot_id"]}
+        objects = (await session.call_tool("storage_objects", snapshot)).structured_content
+        assert objects is not None
+        row = next(row for row in objects["items"] if CHILD in row["display_path"])
+        ordinary = (await session.call_tool("storage_diagnostics", snapshot)).structured_content
+        assert ordinary is not None
+        assert ordinary["coverage"]["providers"] == "not_requested"
+        opted_in = {**snapshot, "providers": True}
+        measured = (await session.call_tool("storage_diagnostics", opted_in)).structured_content
+        assert measured is not None
+        assert measured["diagnostic_id"] != ordinary["diagnostic_id"]
+        assert (await session.call_tool("storage_diagnostics", opted_in)).structured_content == (
+            measured
+        )
+        evidence = await session.call_tool(
+            "storage_explain",
+            {"diagnostic_id": measured["diagnostic_id"], "subject_id": row["object_id"]},
+        )
+        assert evidence.structured_content is not None
+        assert _used_by(evidence.structured_content) == OTHER
+
+
+async def _provider_terminal(home: Path) -> None:
+    browser = SessionApp(home, CUTOFF, None, home.parent / "receipts")
+    async with browser.run_test(size=(100, 35)) as pilot:
+        assert browser.load_task is not None
+        await browser.load_task
+        await pilot.pause()
+        assert await pilot.click("#storage")
+        await pilot.pause()
+        screen = browser.screen
+        assert isinstance(screen, StorageScreen)
+        await browser.storage.wait_idle()
+        await pilot.pause()
+        table = screen.query_one(DataTable)
+        provider = next(
+            row for row in range(table.row_count) if CHILD in str(table.get_row_at(row)[0])
+        )
+        table.move_cursor(row=provider)
+        table.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        diagnostic = browser.screen
+        assert isinstance(diagnostic, StorageDiagnosticScreen)
+        await browser.storage.wait_idle()
+        await pilot.pause()
+        assert await pilot.click("#diagnostic-providers")
+        await pilot.pause()
+        await browser.storage.wait_idle()
+        await pilot.pause()
+        rows = diagnostic.query_one(DataTable)
+        assert any(
+            "used_by" in str(rows.get_row_at(index)[0]) and OTHER in str(rows.get_row_at(index)[0])
+            for index in range(rows.row_count)
+        )
+
+
+def test_provider_inspection_is_explicit_and_matches_three_frontends(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Distinguish opt-in header reads and show the same consumer through every adapter."""
+    home = tmp_path / "home"
+    paths = make_home(home)
+    retained_provider(paths[OTHER], paths[CHILD])
+    with sqlite3.connect(home / "state_5.sqlite") as connection:
+        connection.execute("UPDATE threads SET history_mode='paginated' WHERE id=?", (OTHER,))
+    unindexed = paths[OTHER].with_name(paths[OTHER].name.replace(OTHER, _UNINDEXED))
+    records = paths[OTHER].read_text().splitlines(keepends=True)
+    header = json.loads(records[0])
+    header["payload"].update(id=_UNINDEXED, session_id=_UNINDEXED)
+    header["payload"]["history_base"].update(
+        thread_id=OTHER, end_byte_offset=paths[OTHER].stat().st_size
+    )
+    records[0] = json.dumps(header) + "\n"
+    unindexed.write_text("".join(records))
+    plan = [
+        "plan",
+        "--online",
+        "--home",
+        str(home),
+        "--cutoff",
+        "2030-01-01T00:00:00Z",
+        "--closed-work",
+        ROOT,
+        "--select-thread",
+        CHILD,
+        "--json",
+    ]
+    assert main(plan) == 0
+    before = json.loads(capsys.readouterr().out)
+    assert CHILD not in before["deletions"]
+    command = ["storage-diagnostics", "--home", str(home), "--rollout", CHILD, "--json"]
+    assert main(command) == 0
+    ordinary = json.loads(capsys.readouterr().out)
+    assert ordinary["coverage"]["providers"] == "not_requested"
+    assert main([*command, "--providers"]) == 0
+    assert _used_by(json.loads(capsys.readouterr().out)["page"]) == OTHER
+    upstream = ["storage-diagnostics", "--home", str(home), "--rollout", OTHER, "--json"]
+    assert main([*upstream, "--providers"]) == 0
+    assert _used_by(json.loads(capsys.readouterr().out)["page"]) == _UNINDEXED
+    assert main(plan) == 0
+    assert json.loads(capsys.readouterr().out) == before
+    asyncio.run(asyncio.wait_for(_provider_stdio(home), 90))
+    asyncio.run(asyncio.wait_for(_provider_terminal(home), 45))

@@ -102,7 +102,9 @@ def diagnostic_evidence_line(evidence: dict[str, Any]) -> str:
     source = _identity(evidence["source_subject"])
     target = _identity(evidence["target_subject"])
     detail = " · ".join(value for key in ("reason", "status") if (value := evidence[key]))
-    relation = f"{evidence['kind']} ({evidence['origin']})"
+    if provider := evidence.get("provider_rollout_id"):
+        target = f"{target} · provider rollout {provider}"
+    relation = f"{evidence.get('interpretation', evidence['kind'])} ({evidence['origin']})"
     return f"{relation}  {source} → {target}" + (f" · {detail}" if detail else "")
 
 
@@ -129,7 +131,9 @@ def run_storage_diagnostics(arguments: Namespace) -> int:
         return 2
     try:
         home = arguments.home.expanduser().resolve()
-        observation = observe_diagnostics(home, observe_storage(home))
+        observation = observe_diagnostics(
+            home, observe_storage(home), providers=arguments.providers
+        )
         bounds = {"offset": arguments.offset, "limit": arguments.limit}
         if arguments.thread is None and arguments.rollout is None:
             page = observation.subjects(reason="problems", **bounds)

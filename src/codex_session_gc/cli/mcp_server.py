@@ -256,10 +256,12 @@ class CatalogueService(CatalogueObservation):
         )
 
     async def storage_diagnostics(
-        self, storage_snapshot_id: str, *, refresh: bool = False
+        self, storage_snapshot_id: str, *, refresh: bool = False, providers: bool = False
     ) -> dict[str, Any]:
         """Build diagnostic evidence for the current storage snapshot."""
-        return await self.storage.diagnostics(storage_snapshot_id, refresh=refresh)
+        return await self.storage.diagnostics(
+            storage_snapshot_id, refresh=refresh, providers=providers
+        )
 
     async def storage_diagnostic_subjects(
         self, diagnostic_id: str, reason: str = "problems", offset: int = 0, limit: int = 100

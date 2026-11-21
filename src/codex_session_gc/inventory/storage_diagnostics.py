@@ -1,5 +1,5 @@
 # Copyright (c) 2026
-# ruff: noqa: C901, PLR0912, PLR0915, SLF001, EM101, TRY003
+# ruff: noqa: C901, PLR0912, PLR0915, SLF001, EM101, TRY003, PLR0913, PLR0917, FBT003
 
 """Detached diagnostic subjects and SQL relationship witnesses."""
 
@@ -16,6 +16,12 @@ from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 from codex_session_gc.domain import RolloutId, ThreadId
+from codex_session_gc.inventory.diagnostic_headers import (
+    HeaderBatch,
+    HeaderReason,
+    HeaderResult,
+    observe_headers,
+)
 from codex_session_gc.inventory.diagnostic_sql import (
     DEFAULT_DIAGNOSTIC_LIMITS,
     DiagnosticLimits,
@@ -61,6 +67,8 @@ class Evidence:
     origin: str
     reason: str | None = None
     status: str | None = None
+    provider_rollout_id: str | None = None
+    related_thread_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +193,10 @@ class DiagnosticObservation:
         for item in result["items"]:
             item["source_subject"] = labels.get(item["source"])
             item["target_subject"] = labels.get(item["target"])
+            if item["kind"] == "needs_provider":
+                item["interpretation"] = (
+                    "used_by" if item["target"] == subject.subject_id else "needs_provider"
+                )
         result["subject"] = asdict(subject)
         result["direction"] = direction
         result["original_association_observation"] = deepcopy(
@@ -298,6 +310,7 @@ def _project(
     sql: SqlFacts,
     limits: DiagnosticLimits,
     cancelled: Callable[[], bool],
+    headers: HeaderBatch | None = None,
 ) -> DiagnosticObservation:
     diagnostic_id = f"diag/{uuid4()}"
     thread_rows = {row.thread_id: row for row in sql.threads}
@@ -328,17 +341,30 @@ def _project(
     evidence_omitted = 0
     evidence_cap_reached = False
 
-    def add(  # noqa: PLR0913, PLR0917
+    def add(
         source: str | None,
         target: str | None,
         kind: str,
         origin: str,
         reason: str | None = None,
         status: str | None = None,
+        provider_rollout_id: str | None = None,
+        related_thread_id: str | None = None,
     ) -> None:
         nonlocal evidence_complete, evidence_omitted, evidence_cap_reached
         if len(evidence) < limits.max_evidence:
-            evidence.append(Evidence(source, target, kind, origin, reason, status))
+            evidence.append(
+                Evidence(
+                    source,
+                    target,
+                    kind,
+                    origin,
+                    reason,
+                    status,
+                    provider_rollout_id,
+                    related_thread_id,
+                )
+            )
         else:
             evidence_complete = False
             evidence_omitted += 1
@@ -504,6 +530,123 @@ def _project(
         )
         if owner in keys:
             add(subject_id, keys[owner], "filename_owner", "filesystem")
+    provider_complete = headers is not None and snapshot._header_names_complete
+    provider_reasons: Counter[str] = Counter()
+    if headers is not None:
+        candidates: dict[str, list[int]] = defaultdict(list)
+        for index, physical_row in enumerate(snapshot._rows):
+            if physical_row.rollout_id is not None:
+                candidates[physical_row.rollout_id].append(index)
+        if len(headers.results) != len(snapshot._rows):
+            provider_complete = False
+        for index, result in enumerate(headers.results):
+            _check_cancelled(cancelled)
+            if result.reason is not HeaderReason.OBSERVED or result.facts is None:
+                provider_complete = False
+                provider_reasons[result.reason.value] += 1
+                subject_index = len(identifiers) + index
+                if index < len(physical_rows):
+                    subject = subjects[subject_index]
+                    subjects[subject_index] = replace(
+                        subject,
+                        reasons=tuple(sorted((*subject.reasons, f"header_{result.reason.value}"))),
+                    )
+                continue
+            if index >= len(physical_rows):
+                provider_complete = False
+                continue
+            source = f"{diagnostic_id}/physical/{index + 1}"
+            facts = result.facts
+            if facts.history_prefix is not None:
+                identifier = str(facts.history_prefix.provider_rollout_id.value)
+                matches = candidates.get(identifier, [])
+                if len(matches) != 1 or any(
+                    snapshot._rows[match].association == "ambiguous" for match in matches
+                ):
+                    # Resolve absence only after all coverage and projection gates are known.
+                    add(
+                        source,
+                        None,
+                        "needs_provider",
+                        "header",
+                        "ambiguous" if matches else "unresolved",
+                        provider_rollout_id=identifier,
+                    )
+                    if matches:
+                        provider_reasons["ambiguous"] += 1
+                else:
+                    target_index = matches[0]
+                    if (
+                        target_index >= len(physical_rows)
+                        or target_index >= len(headers.results)
+                        or not headers.results[target_index].locator_verified
+                    ):
+                        provider_complete = False
+                        add(
+                            source,
+                            None,
+                            "needs_provider",
+                            "header",
+                            "unavailable",
+                            provider_rollout_id=identifier,
+                        )
+                    else:
+                        add(
+                            source,
+                            f"{diagnostic_id}/physical/{target_index + 1}",
+                            "needs_provider",
+                            "header",
+                            reason=(
+                                "provider_header_unavailable"
+                                if headers.results[target_index].reason is not HeaderReason.OBSERVED
+                                else None
+                            ),
+                            provider_rollout_id=identifier,
+                        )
+            if facts.logical_fork is not None:
+                target = str(facts.logical_fork.forked_from_id.value)
+                add(
+                    source,
+                    keys.get(target),
+                    "logical_fork",
+                    "header",
+                    None if target in keys else "unresolved",
+                    related_thread_id=target,
+                )
+            if facts.attachment is not None:
+                target = str(facts.attachment.source_thread_id.value)
+                add(
+                    source,
+                    keys.get(target),
+                    "attachment",
+                    "header",
+                    None if target in keys else "unresolved",
+                    related_thread_id=target,
+                )
+    if headers is not None:
+        evidence = [
+            replace(item, reason="missing" if snapshot._provider_names_complete else "unknown")
+            if item.kind == "needs_provider" and item.reason == "unresolved"
+            else item
+            for item in evidence
+        ]
+        problem_reasons: dict[str, set[str]] = defaultdict(set)
+        for item in evidence:
+            if item.kind == "needs_provider" and item.reason is not None and item.source:
+                problem_reasons[item.source].add(
+                    item.reason
+                    if item.reason.startswith("provider_")
+                    else f"provider_{item.reason}"
+                )
+        subjects = [
+            replace(
+                subject,
+                reasons=tuple(sorted(set(subject.reasons) | problem_reasons[subject.subject_id])),
+            )
+            if subject.subject_id in problem_reasons
+            else subject
+            for subject in subjects
+        ]
     evidence = sorted(
         set(evidence),
         key=lambda e: (
@@ -513,6 +656,8 @@ def _project(
             e.origin,
             e.reason or "",
             e.status or "",
+            e.provider_rollout_id or "",
+            e.related_thread_id or "",
         ),
     )
     budget_remaining = limits.max_bytes
@@ -571,6 +716,7 @@ def _project(
     evidence_total = len(evidence)
     subjects = retained_subjects
     evidence = retained_evidence
+    provider_complete = provider_complete and subjects_complete and evidence_complete
     summary = {
         "coverage": {
             "names": snapshot._summary.history_coverage,
@@ -592,7 +738,13 @@ def _project(
             ),
             "evidence": "complete" if evidence_complete and subjects_complete else "partial",
             "subjects": "complete" if subjects_complete else "partial",
-            "providers": "not_requested",
+            "providers": (
+                "not_requested"
+                if headers is None
+                else "complete"
+                if provider_complete
+                else "partial"
+            ),
         },
         "counts": {
             "physical_names": snapshot._history_names_observed,
@@ -605,6 +757,17 @@ def _project(
             "invalid_ids": sql.invalid_ids,
             "invalid_pointers": sql.invalid_pointers,
             "invalid_endpoints": sql.invalid_endpoints,
+            **(
+                {
+                    "provider_headers": len(headers.results),
+                    "provider_header_reasons": dict(provider_reasons),
+                    "provider_physical_bytes": headers.physical_bytes,
+                    "provider_decoded_bytes": headers.decoded_bytes,
+                    "provider_operations": headers.operations,
+                }
+                if headers is not None
+                else {}
+            ),
         },
         "sql_started_at": sql.started_at,
         "sql_finished_at": sql.finished_at,
@@ -657,8 +820,11 @@ def observe_diagnostics(
     *,
     cancelled: Callable[[], bool] | None = None,
     limits: DiagnosticLimits = DEFAULT_DIAGNOSTIC_LIMITS,
+    providers: bool = False,
 ) -> DiagnosticObservation:
     """Observe SQL separately and bind all results to the supplied storage generation."""
+    if type(providers) is not bool:
+        raise ValueError("Providers must be a boolean.")
     requested_stop = cancelled if cancelled is not None else lambda: False
     deadline = time.monotonic() + 180
 
@@ -677,4 +843,44 @@ def observe_diagnostics(
         scan = replace(base_scan, home=home)
         sql = observe_sql(scan, cancelled=stop, limits=limits)
     _verify_root(home, snapshot._summary.home_identity)
-    return _project(home, snapshot, sql, limits, stop)
+    headers = None
+    if providers:
+        header_scan = snapshot._header_scan
+        if header_scan is None:
+            headers = HeaderBatch((), True, 0, 0, 0)
+        else:
+            scan = replace(header_scan, home=home)
+            by_parts = {entry.parts: entry for entry in scan.entries}
+            rollout_counts = Counter(
+                row.rollout_id for row in snapshot._rows if row.rollout_id is not None
+            )
+            ambiguous = {
+                index
+                for index, row in enumerate(snapshot._rows)
+                if row.rollout_id is not None
+                and (rollout_counts[row.rollout_id] > 1 or row.association == "ambiguous")
+            }
+            positions = [
+                index
+                for index, parts in enumerate(snapshot._diagnostic_paths)
+                if parts in by_parts and index not in ambiguous
+            ]
+            entries = tuple(
+                by_parts[parts]
+                for index in positions
+                if (parts := snapshot._diagnostic_paths[index]) is not None
+            )
+            observed = observe_headers(scan, entries, cancelled=stop)
+            results = [
+                HeaderResult(
+                    HeaderReason.AMBIGUOUS if index in ambiguous else HeaderReason.INVALID_LOCATOR
+                )
+                for index in range(len(snapshot._rows))
+            ]
+            for index, item in zip(positions, observed.results, strict=False):
+                results[index] = item
+            headers = replace(observed, results=tuple(results))
+            if not headers.root_valid:
+                raise StorageScanError("Storage root changed during header observation.")
+    _verify_root(home, snapshot._summary.home_identity)
+    return _project(home, snapshot, sql, limits, stop, headers)

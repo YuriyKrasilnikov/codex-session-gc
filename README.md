@@ -211,6 +211,13 @@ snapshot, then call `storage_diagnostic_subjects` or `storage_explain` with the
 returned diagnostic ID. All pages of that ID share one observation. Coverage
 identifies which sources were complete and where an absent row is inconclusive.
 
+To inspect physical history providers, add `--providers` to
+`storage-diagnostics`, choose **Providers** in Textual, or pass
+`providers: true` to MCP `storage_diagnostics`. This reads bounded metadata
+from history names in the selected snapshot. The report distinguishes
+physical prefix dependencies, logical forks and attachments. An incomplete
+provider observation leaves open the possibility of additional consumers.
+
 ## Browse and select
 
 The browser opens with the largest work groups first. Works mode keeps expandable

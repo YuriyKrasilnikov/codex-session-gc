@@ -26,6 +26,14 @@ class HeaderReadError(ValueError):
     """A complete, stable metadata line was not observed within its bounds."""
 
 
+class HeaderLimitError(HeaderReadError):
+    """The physical or decoded observation limit was exhausted."""
+
+
+class HeaderChangedError(HeaderReadError):
+    """The observed descriptor changed during its metadata read."""
+
+
 def stat_identity(value: os.stat_result) -> FileStatIdentity:
     """Project actual descriptor stat without treating stored bytes as decoded offsets."""
     return FileStatIdentity(
@@ -78,7 +86,7 @@ class _BorrowedInput(io.RawIOBase):
         remaining = self.limit - self.bytes_read
         if remaining <= 0:
             message = "The physical metadata input bound was exhausted."
-            raise HeaderReadError(message)
+            raise HeaderLimitError(message)
         data = os.pread(self.descriptor, min(len(view), READ_CHUNK, remaining), self.bytes_read)
         self.bytes_read += len(data)
         self.charge(len(data))
@@ -92,6 +100,7 @@ def read_bounded_header(
     *,
     limits: HeaderReadLimits,
     charge: Callable[[int], None],
+    charge_decoded: Callable[[int], None] | None = None,
 ) -> DecodedHeader:
     """Borrow an FD, cap reads before buffering and decode only through the first newline.
 
@@ -108,7 +117,7 @@ def read_bounded_header(
     bound = min(limits.maximum_header_bytes, HEADER_LIMIT)
     source = _BorrowedInput(descriptor, min(limits.maximum_physical_bytes, PHYSICAL_LIMIT), charge)
     stream = _stream(source, representation)
-    line = _read_line(stream, bound)
+    line = _read_line(stream, bound, charge_decoded)
     after = os.fstat(descriptor)
     if stat_identity(before) != stat_identity(after):
         if limits.require_stable_extent or (before.st_dev, before.st_ino) != (
@@ -116,22 +125,24 @@ def read_bounded_header(
             after.st_ino,
         ):
             message = "The selected physical history changed during metadata observation."
-            raise HeaderReadError(message)
+            raise HeaderChangedError(message)
         # Unrelated appenders may change body extent/timestamps. Recheck only the
         # immutable metadata prefix, within the original combined input budget.
         verification = _BorrowedInput(descriptor, source.limit - source.bytes_read, charge)
         verify_stream = _stream(verification, representation)
-        verified = _read_line(verify_stream, bound)
+        verified = _read_line(verify_stream, bound, charge_decoded)
         source.bytes_read += verification.bytes_read
         latest = os.fstat(descriptor)
         if verified != line or (after.st_dev, after.st_ino) != (latest.st_dev, latest.st_ino):
             message = "The retained metadata header changed during observation."
-            raise HeaderReadError(message)
+            raise HeaderChangedError(message)
         after = latest
     return DecodedHeader(line, stat_identity(after), source.bytes_read)
 
 
-def _read_line(stream: io.BufferedReader | ZstdFile, bound: int) -> bytes:
+def _read_line(
+    stream: io.BufferedReader | ZstdFile, bound: int, charge_decoded: Callable[[int], None] | None
+) -> bytes:
     line = bytearray()
     try:
         with stream:
@@ -139,6 +150,8 @@ def _read_line(stream: io.BufferedReader | ZstdFile, bound: int) -> bytes:
                 chunk = stream.read1(min(READ_CHUNK, bound - len(line)))
                 if not chunk:
                     break
+                if charge_decoded is not None:
+                    charge_decoded(len(chunk))
                 part, newline, _ = chunk.partition(b"\n")
                 line.extend(part)
                 if newline:
@@ -149,6 +162,8 @@ def _read_line(stream: io.BufferedReader | ZstdFile, bound: int) -> bytes:
         raise HeaderReadError(message) from error
     if not line.endswith(b"\n"):
         message = "A complete decoded metadata line was not observed within its bound."
+        if len(line) >= bound:
+            raise HeaderLimitError(message)
         raise HeaderReadError(message)
     return bytes(line)
 

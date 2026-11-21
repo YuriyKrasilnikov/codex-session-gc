@@ -52,8 +52,8 @@ class StorageService:
         self.home = home
         self.snapshot: StorageSnapshot | None = None
         self._flight: _Flight[StorageSnapshot] | None = None
-        self._diagnostic: DiagnosticObservation | None = None
-        self._diagnostic_flight: _Flight[DiagnosticObservation] | None = None
+        self._diagnostic: tuple[bool, DiagnosticObservation] | None = None
+        self._diagnostic_flight: tuple[bool, _Flight[DiagnosticObservation]] | None = None
         self._closed = False
 
     async def _collect(self, stop: threading.Event) -> StorageSnapshot:
@@ -62,7 +62,7 @@ class StorageService:
             self.snapshot = result
             self._diagnostic = None
             if self._diagnostic_flight is not None:
-                self._diagnostic_flight.stop.set()
+                self._diagnostic_flight[1].stop.set()
         return result
 
     def _finish(self, task: asyncio.Task[StorageSnapshot]) -> None:
@@ -111,38 +111,42 @@ class StorageService:
         )
 
     async def _collect_diagnostic(
-        self, snapshot: StorageSnapshot, stop: threading.Event
+        self, snapshot: StorageSnapshot, stop: threading.Event, *, providers: bool
     ) -> DiagnosticObservation:
         result = await asyncio.to_thread(
-            observe_diagnostics, self.home, snapshot, cancelled=stop.is_set
+            observe_diagnostics, self.home, snapshot, cancelled=stop.is_set, providers=providers
         )
         if self.snapshot is not snapshot or self._closed or stop.is_set():
             msg = "The diagnostic observation stopped before publication."
             raise ValueError(msg)
-        self._diagnostic = result
+        self._diagnostic = (providers, result)
         return result
 
     def _finish_diagnostic(self, task: asyncio.Task[DiagnosticObservation]) -> None:
-        if self._diagnostic_flight is not None and self._diagnostic_flight.task is task:
+        if self._diagnostic_flight is not None and self._diagnostic_flight[1].task is task:
             self._diagnostic_flight = None
         if not task.cancelled():
             task.exception()
 
     async def diagnostics(
-        self, storage_snapshot_id: str, *, refresh: bool = False
+        self, storage_snapshot_id: str, *, refresh: bool = False, providers: bool = False
     ) -> dict[str, Any]:
         """Join a diagnostic worker and publish only for the current storage generation."""
         while True:
             snapshot = self._snapshot(storage_snapshot_id)
-            if not refresh and self._diagnostic is not None:
-                return self._diagnostic.summary()
-            flight = self._diagnostic_flight
-            if flight is None:
+            diagnostic = self._diagnostic
+            if not refresh and diagnostic is not None and diagnostic[0] == providers:
+                return diagnostic[1].summary()
+            active = self._diagnostic_flight
+            if active is None:
                 stop = threading.Event()
-                task = asyncio.create_task(self._collect_diagnostic(snapshot, stop))
+                task = asyncio.create_task(
+                    self._collect_diagnostic(snapshot, stop, providers=providers)
+                )
                 task.add_done_callback(self._finish_diagnostic)
-                flight = self._diagnostic_flight = _Flight(task, stop)
-            if flight.stop.is_set():
+                active = self._diagnostic_flight = (providers, _Flight(task, stop))
+            mode, flight = active
+            if flight.stop.is_set() or mode != providers:
                 await _settle(flight.task)
                 continue
             result = await _joined(flight)
@@ -150,11 +154,11 @@ class StorageService:
             return result.summary()
 
     def _current_diagnostic(self, diagnostic_id: str) -> DiagnosticObservation:
-        diagnostic = self._diagnostic
-        if diagnostic is None or diagnostic.diagnostic_id != diagnostic_id:
+        saved = self._diagnostic
+        if saved is None or saved[1].diagnostic_id != diagnostic_id:
             msg = "The diagnostic observation has expired; request current diagnostics."
             raise ValueError(msg)
-        return diagnostic
+        return saved[1]
 
     def diagnostic_subjects(
         self, diagnostic_id: str, *, reason: str, offset: int, limit: int
@@ -179,14 +183,15 @@ class StorageService:
             await _settle(flight.task)
         diagnostic_flight = self._diagnostic_flight
         if diagnostic_flight is not None:
-            await _settle(diagnostic_flight.task)
+            await _settle(diagnostic_flight[1].task)
 
     async def close(self) -> None:
         """Stop observation and settle outstanding worker ownership."""
         self._closed = True
         self.snapshot = None
         self._diagnostic = None
-        for flight in (self._flight, self._diagnostic_flight):
+        diagnostic_flight = self._diagnostic_flight
+        for flight in (self._flight, diagnostic_flight[1] if diagnostic_flight else None):
             if flight is not None:
                 flight.stop.set()
         await self.wait_idle()
