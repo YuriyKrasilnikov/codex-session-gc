@@ -21,7 +21,7 @@ from codex_session_gc.cli import closed_work_execution
 from codex_session_gc.cli.console_display import preview_lines
 from codex_session_gc.cli.console_tasks import preview_selection
 from codex_session_gc.cli.mcp_capability import McpCapability
-from codex_session_gc.cli.storage_display import run_storage
+from codex_session_gc.cli.storage_display import run_storage, run_storage_diagnostics
 from codex_session_gc.compatibility.intake import SupportIntakeRequest, intake_support
 from codex_session_gc.compatibility.observation import ImportedSupport, observe_record
 from codex_session_gc.compatibility.record import ProducerObservation
@@ -30,7 +30,7 @@ from codex_session_gc.compatibility.store import (
     read_support,
     recorded_origin,
 )
-from codex_session_gc.domain import ThreadId, UtcCutoff
+from codex_session_gc.domain import RolloutId, ThreadId, UtcCutoff
 from codex_session_gc.execution.resource_policy import READ_BYTES, TIMEOUT_SECONDS
 from codex_session_gc.installation.__main__ import InstallerError
 from codex_session_gc.installation.__main__ import main as installer_main
@@ -147,6 +147,16 @@ def _support(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _storage_diagnostic_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--home", type=Path, required=True)
+    parser.add_argument("--json", action="store_true")
+    lookup = parser.add_mutually_exclusive_group()
+    lookup.add_argument("--thread", type=ThreadId.parse)
+    lookup.add_argument("--rollout", type=RolloutId.parse)
+    parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--limit", type=int, default=100)
+
+
 def _parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     """Expose one supported cleanup route and its browsing adapters."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -198,6 +208,11 @@ def _parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     )
     storage.add_argument("--offset", type=int)
     storage.add_argument("--limit", type=int)
+    _storage_diagnostic_arguments(
+        commands.add_parser(
+            "storage-diagnostics", help="Explain observed history names and SQL relationships"
+        )
+    )
     ui = commands.add_parser("ui", help="Browse and select histories with Textual")
     ui.add_argument("--home", type=Path)
     ui.add_argument("--helper", type=Path)
@@ -415,6 +430,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "support": _support,
         "doctor": _doctor,
         "storage": run_storage,
+        "storage-diagnostics": run_storage_diagnostics,
         "mcp": _mcp,
         "catalogue": _catalogue_summary,
     }

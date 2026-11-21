@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from codex_session_gc.cli.main import main
+from codex_session_gc.inventory import storage
 from codex_session_gc.inventory.storage import StorageLimits, observe_storage
 from tests.current_storage_fixture import _A, _catalogue_home
 
@@ -141,3 +142,18 @@ def test_expanded_display_paths_are_bounded_separately_from_totals(tmp_path: Pat
     assert summary["counts_by_reason"]["history_row_limit"] == 1
     assert summary["totals"]["logical_file_bytes"]["known_bytes"] == 1
     assert snapshot.page()["items"] == []
+
+
+def test_private_diagnostic_names_have_independent_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Full names are retained privately without altering visible storage rows."""
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    (sessions / "a.jsonl").write_bytes(b"a")
+    (sessions / "b.jsonl").write_bytes(b"b")
+    monkeypatch.setattr(storage, "_DIAGNOSTIC_PATH_COUNT", 1)
+    snapshot = observe_storage(tmp_path)
+    assert snapshot._diagnostic_paths == (("sessions", "a.jsonl"), None)  # noqa: SLF001
+    assert len(snapshot.page()["items"]) == 2
+    assert "diagnostic_paths" not in snapshot.summary()

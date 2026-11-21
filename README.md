@@ -196,6 +196,21 @@ have separate intervals. Normal SQLite WAL coordination can create or update
 sidecar files. The overview supports inspection. Cleanup uses separate selection and
 confirmation commands.
 
+Use `storage-diagnostics` to inspect observed problems and the relationships
+behind them. A lookup by thread or rollout UUID shows its evidence, or a page of
+candidates if several observed objects share the rollout UUID.
+
+```sh
+codex-session-gc storage-diagnostics --home /absolute/codex-home
+codex-session-gc storage-diagnostics --home /absolute/codex-home --thread UUID --json
+```
+
+In Textual, choose **Problems** in **Storage** or open a history row to inspect
+its evidence. In MCP, start with `storage_diagnostics` for the current storage
+snapshot, then call `storage_diagnostic_subjects` or `storage_explain` with the
+returned diagnostic ID. All pages of that ID share one observation. Coverage
+identifies which sources were complete and where an absent row is inconclusive.
+
 ## Browse and select
 
 The browser opens with the largest work groups first. Works mode keeps expandable

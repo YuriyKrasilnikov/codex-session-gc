@@ -109,6 +109,17 @@ async def _assert_storage_pages(session: ClientSession) -> None:
     assert len(page["items"]) == 1
     assert page["items"][0]["display_path"].startswith("sessions/")
     assert _data(await session.call_tool("storage_overview", {}))["storage_snapshot_id"] == snapshot
+    diagnostic = _data(
+        await session.call_tool("storage_diagnostics", {"storage_snapshot_id": snapshot})
+    )
+    identity = {"diagnostic_id": diagnostic["diagnostic_id"]}
+    subjects = _data(await session.call_tool("storage_diagnostic_subjects", identity))
+    assert subjects["diagnostic_id"] == identity["diagnostic_id"]
+    object_id = page["items"][0]["object_id"]
+    detail = _data(
+        await session.call_tool("storage_explain", {**identity, "subject_id": object_id})
+    )
+    assert detail["subject"]["object_id"] == object_id
 
 
 def test_cache_exact_pages_refresh_and_bounded_details(tmp_path: Path) -> None:
@@ -160,6 +171,9 @@ def test_real_sdk_stdio_current_handshake_tools_and_preview(tmp_path: Path) -> N
             assert {tool.name for tool in tools.tools} == {
                 "storage_overview",
                 "storage_objects",
+                "storage_diagnostics",
+                "storage_diagnostic_subjects",
+                "storage_explain",
                 "query_catalogue",
                 "catalogue_summary",
                 "session_details",
@@ -262,6 +276,9 @@ def test_read_only_sdk_exposes_observation_without_cleanup_operation_or_receipt(
             assert {tool.name for tool in tools.tools} == {
                 "storage_overview",
                 "storage_objects",
+                "storage_diagnostics",
+                "storage_diagnostic_subjects",
+                "storage_explain",
                 "query_catalogue",
                 "catalogue_summary",
                 "session_details",

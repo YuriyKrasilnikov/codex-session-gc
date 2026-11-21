@@ -255,6 +255,33 @@ class CatalogueService(CatalogueObservation):
             storage_snapshot_id, association=association, offset=offset, limit=limit
         )
 
+    async def storage_diagnostics(
+        self, storage_snapshot_id: str, *, refresh: bool = False
+    ) -> dict[str, Any]:
+        """Build diagnostic evidence for the current storage snapshot."""
+        return await self.storage.diagnostics(storage_snapshot_id, refresh=refresh)
+
+    async def storage_diagnostic_subjects(
+        self, diagnostic_id: str, reason: str = "problems", offset: int = 0, limit: int = 100
+    ) -> dict[str, Any]:
+        """Page through subjects from one diagnostic observation."""
+        return self.storage.diagnostic_subjects(
+            diagnostic_id, reason=reason, offset=offset, limit=limit
+        )
+
+    async def storage_explain(
+        self,
+        diagnostic_id: str,
+        subject_id: str,
+        direction: Literal["all", "incoming", "outgoing"] = "all",
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Explain one observed subject with direct and derived evidence."""
+        return self.storage.explain(
+            diagnostic_id, subject_id, direction=direction, offset=offset, limit=limit
+        )
+
     async def compatibility_status(
         self, record_sha256: str | None = None, context_sha256: str | None = None
     ) -> dict[str, Any]:
@@ -520,6 +547,9 @@ def create_server(
     for tool in (
         service.storage_overview,
         service.storage_objects,
+        service.storage_diagnostics,
+        service.storage_diagnostic_subjects,
+        service.storage_explain,
         service.query_catalogue,
         service.catalogue_summary,
         service.session_details,
