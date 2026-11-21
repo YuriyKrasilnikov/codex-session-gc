@@ -269,6 +269,7 @@ class GraphSnapshot:
     history_provider_references: tuple[HistoryProviderReference, ...] = ()
     guardian_associations: tuple[GuardianAssociation, ...] = ()
     attachments: tuple[Attachment, ...] = ()
+    kept_threads: frozenset[ThreadId] = frozenset()
 
     @classmethod
     def from_records(
@@ -308,6 +309,11 @@ class GraphSnapshot:
         except TypeError as exc:
             msg = "Attachments must be iterable."
             raise InvalidGraphError(msg) from exc
+        if type(self.kept_threads) is not frozenset or any(
+            type(item) is not ThreadId for item in self.kept_threads
+        ):
+            message = "Kept threads must be a frozenset of thread identifiers."
+            raise InvalidGraphError(message)
         _validate_snapshot(self)
 
 

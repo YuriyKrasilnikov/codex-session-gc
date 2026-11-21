@@ -1,0 +1,374 @@
+--- a/codex-rs/thread-store/src/local/bounded_cleanup.rs
++++ b/codex-rs/thread-store/src/local/bounded_cleanup.rs
+@@ -414,6 +414,7 @@
+         let _maintenance = try_acquire_rollout_maintenance_lock(&request.codex_home)
+             .map_err(error)?
+             .ok_or_else(|| "native maintenance is busy".to_owned())?;
++        check_keep(&request.codex_home, &selected_ids).await?;
+         let mut lifecycles = Vec::new();
+         let mut local_writers = Vec::new();
+         let mut writers = Vec::new();
+@@ -2086,3 +2087,363 @@
+     }
+     Ok(())
+ }
++
++const KEEP_SCHEMA: &str = "CREATE TABLE kept_threads (thread_id TEXT PRIMARY KEY NOT NULL) STRICT";
++
++struct KeepConnection {
++    conn: sqlx::SqliteConnection,
++    home: PathBuf,
++    home_id: (u64, u64),
++    directory_id: (u64, u64),
++    file_id: (u64, u64),
++}
++
++impl KeepConnection {
++    fn recheck(&self) -> Result<()> {
++        use std::os::unix::fs::MetadataExt;
++        let home = std::fs::metadata(&self.home).map_err(error)?;
++        require(
++            (home.dev(), home.ino()) == self.home_id
++                && std::fs::canonicalize(&self.home).map_err(error)? == self.home,
++            "storage home identity changed",
++        )?;
++        let dir = std::fs::symlink_metadata(self.home.join(".codex-session-gc")).map_err(error)?;
++        let file = std::fs::symlink_metadata(self.home.join(".codex-session-gc/keep.sqlite3"))
++            .map_err(error)?;
++        require(
++            dir.is_dir()
++                && !dir.file_type().is_symlink()
++                && dir.uid() == home.uid()
++                && (dir.dev(), dir.ino()) == self.directory_id,
++            "Keep directory identity changed",
++        )?;
++        require(
++            file.is_file()
++                && !file.file_type().is_symlink()
++                && file.uid() == home.uid()
++                && file.nlink() == 1
++                && (file.dev(), file.ino()) == self.file_id,
++            "Keep database identity changed",
++        )
++    }
++}
++
++async fn keep_connection(
++    home: &std::path::Path,
++    create: bool,
++    writable: bool,
++) -> Result<Option<KeepConnection>> {
++    use sqlx::Connection;
++    use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
++    let home_metadata = std::fs::metadata(home).map_err(error)?;
++    let dir = home.join(".codex-session-gc");
++    let path = dir.join("keep.sqlite3");
++    let existing_directory = match std::fs::symlink_metadata(&dir) {
++        Ok(meta) => {
++            require(
++                meta.is_dir() && !meta.file_type().is_symlink() && meta.uid() == home_metadata.uid(),
++                "invalid Keep directory",
++            )?;
++            Some((meta.dev(), meta.ino()))
++        }
++        Err(err) if err.kind() == std::io::ErrorKind::NotFound && !create => return Ok(None),
++        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
++        Err(err) => return Err(error(err)),
++    };
++    let existing_file = match std::fs::symlink_metadata(&path) {
++        Ok(meta) => {
++            require(
++                meta.is_file() && !meta.file_type().is_symlink(),
++                "invalid Keep database",
++            )?;
++            Some((meta.dev(), meta.ino()))
++        }
++        Err(err) if err.kind() == std::io::ErrorKind::NotFound && !create => return Ok(None),
++        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
++        Err(err) => return Err(error(err)),
++    };
++    if existing_directory.is_none() {
++        require(create && writable, "cannot create Keep directory")?;
++        std::fs::DirBuilder::new()
++            .mode(0o700)
++            .create(&dir)
++            .map_err(error)?;
++        std::fs::File::open(home)
++            .and_then(|f| f.sync_all())
++            .map_err(error)?;
++    }
++    let dir_metadata = std::fs::symlink_metadata(&dir).map_err(error)?;
++    require(
++        dir_metadata.is_dir()
++            && !dir_metadata.file_type().is_symlink()
++            && dir_metadata.uid() == home_metadata.uid()
++            && existing_directory.is_none_or(|id| id == (dir_metadata.dev(), dir_metadata.ino())),
++        "Keep directory changed",
++    )?;
++    let new = existing_file.is_none();
++    if new {
++        require(create && writable, "cannot create Keep database")?;
++        std::fs::OpenOptions::new()
++            .write(true)
++            .create_new(true)
++            .mode(0o600)
++            .open(&path)
++            .and_then(|f| f.sync_all())
++            .map_err(error)?;
++    }
++    let file_metadata = std::fs::symlink_metadata(&path).map_err(error)?;
++    require(
++        file_metadata.is_file()
++            && !file_metadata.file_type().is_symlink()
++            && file_metadata.uid() == home_metadata.uid()
++            && file_metadata.nlink() == 1
++            && existing_file.is_none_or(|id| id == (file_metadata.dev(), file_metadata.ino())),
++        "Keep database identity or ownership changed",
++    )?;
++    let directory_id = (dir_metadata.dev(), dir_metadata.ino());
++    let file_id = (file_metadata.dev(), file_metadata.ino());
++    let options = sqlx::sqlite::SqliteConnectOptions::new()
++        .filename(&path)
++        .create_if_missing(false)
++        .read_only(!writable)
++        .busy_timeout(Duration::from_millis(100));
++    let conn = sqlx::SqliteConnection::connect_with(&options)
++        .await
++        .map_err(error)?;
++    let mut keep = KeepConnection {
++        conn,
++        home: home.to_path_buf(),
++        home_id: (home_metadata.dev(), home_metadata.ino()),
++        directory_id,
++        file_id,
++    };
++    keep.recheck()?;
++    if new {
++        keep.recheck()?;
++        sqlx::query(KEEP_SCHEMA)
++            .execute(&mut keep.conn)
++            .await
++            .map_err(error)?;
++        std::fs::File::open(&dir)
++            .and_then(|f| f.sync_all())
++            .map_err(error)?;
++    }
++    let objects: Vec<(String, String, Option<String>)> = sqlx::query_as(
++        "SELECT type, name, sql FROM sqlite_schema WHERE name != 'sqlite_autoindex_kept_threads_1' ORDER BY name",
++    )
++    .fetch_all(&mut keep.conn)
++    .await
++    .map_err(error)?;
++    require(
++        objects
++            == vec![(
++                "table".to_owned(),
++                "kept_threads".to_owned(),
++                Some(KEEP_SCHEMA.to_owned()),
++            )],
++        "unsupported Keep schema",
++    )?;
++    let integrity: String = sqlx::query_scalar("PRAGMA quick_check")
++        .fetch_one(&mut keep.conn)
++        .await
++        .map_err(error)?;
++    require(integrity == "ok", "Keep database integrity check failed")?;
++    let ids: Vec<String> =
++        sqlx::query_scalar("SELECT thread_id FROM kept_threads ORDER BY thread_id")
++            .fetch_all(&mut keep.conn)
++            .await
++            .map_err(error)?;
++    for id in ids {
++        let parsed = ThreadId::from_string(&id).map_err(error)?;
++        require(parsed.to_string() == id, "invalid Keep thread ID")?;
++    }
++    keep.recheck()?;
++    Ok(Some(keep))
++}
++
++async fn check_keep(home: &std::path::Path, selected: &[ThreadId]) -> Result<()> {
++    if let Some(mut keep) = keep_connection(home, false, false).await? {
++        let ids: Vec<String> = sqlx::query_scalar("SELECT thread_id FROM kept_threads")
++            .fetch_all(&mut keep.conn)
++            .await
++            .map_err(error)?;
++        keep.recheck()?;
++        for id in ids {
++            require(
++                !selected.contains(&ThreadId::from_string(&id).map_err(error)?),
++                "selected thread is kept",
++            )?;
++        }
++    }
++    Ok(())
++}
++
++impl LocalThreadStore {
++    pub async fn keep_once(
++        &self,
++        operation: &str,
++        id: Option<&str>,
++        home_device: u64,
++        home_inode: u64,
++    ) -> std::result::Result<serde_json::Value, String> {
++        self.keep_inner(operation, id, home_device, home_inode)
++            .await
++            .map_err(|e| e.to_string())
++    }
++    async fn keep_inner(
++        &self,
++        operation: &str,
++        id: Option<&str>,
++        home_device: u64,
++        home_inode: u64,
++    ) -> Result<serde_json::Value> {
++        let home = &self.config.codex_home;
++        require(
++            home == self.config.sqlite.home()
++                && std::fs::canonicalize(home).map_err(error)? == *home,
++            "storage homes must be identical and canonical",
++        )?;
++        let id = match id {
++            Some(id) => {
++                let parsed = ThreadId::from_string(id).map_err(error)?;
++                require(parsed.to_string() == id, "thread ID is not canonical")?;
++                Some(parsed)
++            }
++            None => None,
++        };
++        require(
++            matches!(
++                (operation, id),
++                ("keep_list", None) | ("keep_set", Some(_)) | ("keep_clear", Some(_))
++            ),
++            "invalid Keep operation",
++        )?;
++        use std::os::unix::fs::MetadataExt;
++        let home_metadata = std::fs::metadata(home).map_err(error)?;
++        require(
++            std::fs::canonicalize(home).map_err(error)? == *home
++                && home_metadata.dev() == home_device
++                && home_metadata.ino() == home_inode,
++            "storage home identity changed",
++        )?;
++        let _maintenance = if operation == "keep_list" {
++            None
++        } else {
++            Some(
++                try_acquire_rollout_maintenance_lock(home)
++                    .map_err(error)?
++                    .ok_or("native maintenance is busy")?,
++            )
++        };
++        let home_metadata = std::fs::metadata(home).map_err(error)?;
++        require(
++            std::fs::canonicalize(home).map_err(error)? == *home
++                && home_metadata.dev() == home_device
++                && home_metadata.ino() == home_inode,
++            "storage home identity changed",
++        )?;
++        if operation == "keep_clear" {
++            let path = self.config.sqlite.state_db_path();
++            require(
++                path.exists() && !path.is_symlink(),
++                "authoritative state is absent or aliased",
++            )?;
++            let (_pool, mut tx) = self
++                .config
++                .sqlite
++                .begin_existing_cleanup(&path, Duration::from_millis(100))
++                .await
++                .map_err(error)?;
++            self.config
++                .sqlite
++                .validate_cleanup_schema(&path, &mut tx)
++                .await
++                .map_err(error)?;
++        }
++        if operation == "keep_set" {
++            let id = id.ok_or("thread ID required")?;
++            let path = self.config.sqlite.state_db_path();
++            require(
++                path.exists() && !path.is_symlink(),
++                "authoritative state is absent or aliased",
++            )?;
++            let (_pool, mut tx) = self
++                .config
++                .sqlite
++                .begin_existing_cleanup(&path, Duration::from_millis(100))
++                .await
++                .map_err(error)?;
++            self.config
++                .sqlite
++                .validate_cleanup_schema(&path, &mut tx)
++                .await
++                .map_err(error)?;
++            let rollout: String = sqlx::query_scalar("SELECT rollout_path FROM threads WHERE id=?")
++                .bind(id.to_string())
++                .fetch_optional(&mut *tx)
++                .await
++                .map_err(error)?
++                .ok_or("target state is absent")?;
++            let rollout = PathBuf::from(rollout);
++            let resolved = codex_rollout::existing_rollout_path(&rollout)
++                .await
++                .ok_or("target rollout is absent")?;
++            let actual = std::fs::canonicalize(&resolved).map_err(error)?;
++            require(
++                actual == resolved
++                    && (actual.starts_with(home.join("sessions"))
++                        || actual.starts_with(home.join("archived_sessions")))
++                    && codex_rollout::rollout_owner_from_path(&actual) == Some(id),
++                "target rollout identity is invalid",
++            )?;
++            let metadata = codex_rollout::read_session_meta_line(&actual)
++                .await
++                .map_err(error)?;
++            require(
++                metadata.meta.id == id,
++                "target rollout header identity changed",
++            )?;
++            let mut keep = keep_connection(home, true, true)
++                .await?
++                .ok_or("Keep database absent")?;
++            keep.recheck()?;
++            let changed = sqlx::query("INSERT OR IGNORE INTO kept_threads(thread_id) VALUES (?)")
++                .bind(id.to_string())
++                .execute(&mut keep.conn)
++                .await
++                .map_err(error)?
++                .rows_affected();
++            keep.recheck()?;
++            return Ok(
++                serde_json::json!({"status":"confirmed","detail":if changed == 0 { "thread already kept" } else { "thread kept" }}),
++            );
++        }
++        let Some(mut keep) = keep_connection(home, false, operation == "keep_clear").await? else {
++            return Ok(if operation == "keep_list" {
++                serde_json::json!({"status":"confirmed","detail":"no kept threads","thread_ids":[]})
++            } else {
++                serde_json::json!({"status":"confirmed","detail":"thread was not kept"})
++            });
++        };
++        if operation == "keep_clear" {
++            keep.recheck()?;
++            let changed = sqlx::query("DELETE FROM kept_threads WHERE thread_id=?")
++                .bind(id.ok_or("thread ID required")?.to_string())
++                .execute(&mut keep.conn)
++                .await
++                .map_err(error)?
++                .rows_affected();
++            keep.recheck()?;
++            return Ok(
++                serde_json::json!({"status":"confirmed","detail":if changed == 0 { "thread was not kept" } else { "Keep cleared" }}),
++            );
++        }
++        let ids: Vec<String> =
++            sqlx::query_scalar("SELECT thread_id FROM kept_threads ORDER BY thread_id")
++                .fetch_all(&mut keep.conn)
++                .await
++                .map_err(error)?;
++        keep.recheck()?;
++        Ok(serde_json::json!({"status":"confirmed","detail":"kept threads","thread_ids":ids}))
++    }
++}

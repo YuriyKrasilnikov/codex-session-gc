@@ -15,6 +15,16 @@ async fn main() {
     let result = io::stdin()
         .take(MAX_REQUEST_BYTES + 1)
         .read_to_end(&mut bytes);
+    if bytes.len() <= usize::try_from(MAX_REQUEST_BYTES).unwrap_or(0)
+        && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+    {
+        if value.get("operation").is_some() {
+            let reply = keep_request(value).await;
+            let code = if reply["status"] == "confirmed" { 0 } else { 1 };
+            println!("{}", reply);
+            std::process::exit(code);
+        }
+    }
     let digest = Sha256::digest(&bytes).into();
     let outcome = if let Err(error) = result {
         refused(digest, error.to_string())
@@ -71,4 +81,62 @@ fn store_from_request(bytes: &[u8]) -> Result<LocalThreadStore, String> {
         default_model_provider_id: provider,
     })
     .map_err(|error| error.to_string())
+}
+
+async fn keep_request(value: serde_json::Value) -> serde_json::Value {
+    let result: Result<_, String> = async {
+        let object = value.as_object().ok_or("request must be an object")?;
+        if object.keys().any(|key| {
+            ![
+                "operation",
+                "codex_home",
+                "sqlite_home",
+                "thread_id",
+                "home_device",
+                "home_inode",
+            ]
+            .contains(&key.as_str())
+        }) {
+            return Err("unknown Keep request field".to_owned());
+        }
+        let operation = object
+            .get("operation")
+            .and_then(|v| v.as_str())
+            .ok_or("operation required")?;
+        let home = object
+            .get("codex_home")
+            .and_then(|v| v.as_str())
+            .ok_or("codex_home required")?;
+        let sqlite_home = object
+            .get("sqlite_home")
+            .and_then(|v| v.as_str())
+            .ok_or("sqlite_home required")?;
+        let id = match object.get("thread_id") {
+            Some(v) => Some(v.as_str().ok_or("thread_id must be a string")?),
+            None => None,
+        };
+        let home_device = object
+            .get("home_device")
+            .and_then(|v| v.as_u64())
+            .ok_or("home_device required")?;
+        let home_inode = object
+            .get("home_inode")
+            .and_then(|v| v.as_u64())
+            .ok_or("home_inode required")?;
+        let sqlite = SqliteConfig::from_sqlite_home(
+            AbsolutePathBuf::try_from(std::path::PathBuf::from(sqlite_home))
+                .map_err(|e| e.to_string())?,
+        );
+        let store = LocalThreadStore::new_for_bounded_cleanup(LocalThreadStoreConfig {
+            codex_home: home.into(),
+            sqlite,
+            default_model_provider_id: "openai".to_owned(),
+        })
+        .map_err(|e| e.to_string())?;
+        store
+            .keep_once(operation, id, home_device, home_inode)
+            .await
+    }
+    .await;
+    result.unwrap_or_else(|detail| serde_json::json!({"status":"refused","detail":detail}))
 }

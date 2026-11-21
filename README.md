@@ -322,6 +322,30 @@ and review the work roots before applying. Textual lets you select attachments
 from the source review and offers a fresh source preview after confirmed
 attachment removal.
 
+### Protect a history across cleanup runs
+
+Use **Keep** for an exact history that should survive manual selection,
+whole-work cleanup and saved rules in this Codex home. When a kept history
+uses a shared history, the planner also preserves the data it needs.
+
+```console
+codex-session-gc keep set --home /absolute/codex-home --helper /absolute/codex-session-gc-native THREAD_UUID
+codex-session-gc keep status --home /absolute/codex-home
+codex-session-gc keep clear --home /absolute/codex-home --helper /absolute/codex-session-gc-native THREAD_UUID
+```
+
+In Textual, highlight a history and use `k` to set Keep or `u` to clear it.
+MCP offers `keep_status` in both profiles and `keep_set`/`keep_clear` in the cleanup
+profile. A mark applies to the selected storage home and becomes effective when the
+matched helper confirms it. A later cleanup can refuse even if its preview
+predates the mark. Clearing Keep allows a new ordinary review.
+
+Use a Keep-capable installation for every client that deletes from this home.
+Upgrade and restart any older cleanup processes first. Keep is in
+`.codex-session-gc/keep.sqlite3` inside the selected home. Include this state
+when preserving or restoring the home. Offline replacement with a valid older
+copy can roll marks back.
+
 Pass `--timings` to `plan` or `apply` to see elapsed time and observed work
 counts. An interactive terminal shows the current measured stage while the
 command runs. With `--json`, the final response includes a `timings` object.

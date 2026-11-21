@@ -37,6 +37,7 @@ from codex_session_gc.domain import (
     UtcCutoff,
 )
 from codex_session_gc.execution import closed_work_request as collector
+from codex_session_gc.execution.keep_store import KeepStoreError, read_kept_threads
 from codex_session_gc.execution.physical_inventory import observe_inventory
 from codex_session_gc.execution.timing import Count, Phase, count, interval
 from codex_session_gc.inventory.observation import RolloutObservation
@@ -135,6 +136,10 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0913, PLR0915
     if not roots:
         raise collector.PreparationRefused("Closed-work roots are required.")
     collector._absolute(home)
+    try:
+        kept_threads = read_kept_threads(home)
+    except KeepStoreError as error:
+        raise collector.PreparationRefused(str(error)) from error
     budget = collector.CollectionBudget(limits, time.monotonic() + limits.deadline_seconds)
     values = tuple(str(item.value) for item in sorted(roots))
     marks = ",".join("(?)" for _ in values)
@@ -376,6 +381,7 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0913, PLR0915
         spawn_edges=spawn_edges,
         ownership_edges=tuple(item.ownership for item in known),
         guardian_associations=tuple(associations),
+        kept_threads=kept_threads,
         attachments=tuple(
             sorted(
                 {item for item in sql_attachments if item is not None}

@@ -27,6 +27,7 @@ from codex_session_gc.planning.physical_lineage import normalize_history_provide
 class ClosedWorkReason(StrEnum):
     """Why an explicitly scoped thread cannot be selected for deletion."""
 
+    KEEP = "keep"
     NOT_SELECTED = "not_selected"
     BUSY_WORK = "loaded_or_active_work_member"
     PROTECTED_ORIGIN = "unknown_origin"
@@ -130,6 +131,9 @@ def select_closed_work(  # noqa: C901
         )
         if reason is not None:
             retained.setdefault(item, ClosedWorkRetention(item, reason))
+    # Direct marks remain visible even if another local rule also retains the thread.
+    for item in scope & snapshot.kept_threads:
+        retained[item] = ClosedWorkRetention(item, ClosedWorkReason.KEEP)
     candidates = set(scope - retained.keys())
     _retain_attached_sources(snapshot, candidates, retained)
     _propagate_retention(snapshot, candidates, retained, physical_inventory)

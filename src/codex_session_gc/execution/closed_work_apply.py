@@ -199,7 +199,8 @@ def _validate_exact_declaration(  # noqa: PLR0917
                 raise ValueError("Exact-ID physical target differs from its declaration.")
 
 
-def _validate_helper_descriptor(descriptor: int, helper: QualifiedHelperContract) -> None:
+def validate_helper_descriptor(descriptor: int, helper: QualifiedHelperContract) -> None:
+    """Require the opened executable to match the active qualification."""
     metadata = os.fstat(descriptor)
     if not stat.S_ISREG(metadata.st_mode) or not metadata.st_mode & 0o111:
         raise ValueError("The qualified helper must be a regular executable.")
@@ -250,7 +251,7 @@ def apply_closed_work(  # noqa: C901, PLR0912, PLR0915
                 facts, selections, codex_home, helper, collection_limits, attempt_id, declaration
             )
             descriptor = os.open(helper_executable, os.O_RDONLY | os.O_NOFOLLOW)
-            _validate_helper_descriptor(descriptor, helper)
+            validate_helper_descriptor(descriptor, helper)
             attempt = attempt_id or AttemptId(uuid4())
             if progress is not None:
                 progress.publish(ProgressEvent(ProgressKind.OPERATION, attempt))

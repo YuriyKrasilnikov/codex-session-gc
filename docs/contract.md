@@ -32,6 +32,14 @@ An attached thread is a separate relationship. An attachment to a selected sourc
 retains that source; inconsistent or unresolved SQL and header attachment facts
 refuse affected cleanup. An attachment does not select its source or child.
 
+Keep applies to an exact history ID in the selected home. Preview retains marked
+IDs before propagating attachment, cascading ancestor and provider retention.
+The matched native helper serializes setting and clearing a mark and committing
+cleanup under the rollout maintenance lock. It checks current marks against
+each unit before destructive effects, including a mark written after review.
+On a lost Keep reply, inspect its observed status. A new delete request still
+requires its own explicit authorization.
+
 ## Observation and confirmation
 
 Catalogue reads detached SQL metadata and filesystem names/stats without opening

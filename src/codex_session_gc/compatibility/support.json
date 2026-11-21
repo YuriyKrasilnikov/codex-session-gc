@@ -37,19 +37,19 @@
   "coverage_complete": false,
   "coverage_gaps": [
     {
-      "description": "This record covers fixture evidence for the wire 7 helper. Stock lifecycle and installed-client qualification require separate evidence."
+      "description": "The current helper is backed by disposable native fixture evidence. An observed stock producer lifecycle requires a separate assessment."
     }
   ],
   "execution": {
-    "helper_sha256": "53257fcf5593bf207bc025e56cbbbb1ef94900b72aa04787742da6147251e699",
-    "native_inputs_sha256": "cc9d36f7590234d5bf619d7fac8852ed7a9a815d26617ea1c7cc2f119926a03c",
-    "profile_sha256": "ea5c41f89d0e1eddcdfe1b17a0aca45dc6a24555a6a2393d3c5605d0316762eb"
+    "helper_sha256": "8f8cc413182bd9e3fd0f66a052493a496f2e816718474937caa670d8a27a0273",
+    "native_inputs_sha256": "756bb3bf415730e4f6e53c1d8c2869877b88210a1eed5db6fcc1d27167fe535b",
+    "profile_sha256": "15397f1e32ff5630c872bb436b9bf3ec0edf53cb19150b2154c0e174a7bcf117"
   },
   "record_version": 1,
-  "report_sha256": "41ab03b18770aaa91f0edb9fc0a29192be889ca797dadae6d811539e7ae40e59",
+  "report_sha256": "9f07d27ed01f743b6acf2715c987dc7fa9ea0aa8d76c3da9074a2ec751577ab1",
   "review": {
-    "scope": "The current record binds the exact wire-7 helper to native fixture observations. A new-binary stock lifecycle and installed-client assessment remains pending.",
-    "source": "native-fixture-evidence:sha256:41ab03b18770aaa91f0edb9fc0a29192be889ca797dadae6d811539e7ae40e59"
+    "scope": "Matched disposable wire-7 cleanup and Keep fixtures. Current native identity requires separate assessment for a stock live lifecycle.",
+    "source": "native-fixture-evidence:sha256:9f07d27ed01f743b6acf2715c987dc7fa9ea0aa8d76c3da9074a2ec751577ab1"
   },
   "source_origin": {
     "scope": "Selected technically stopped work in the qualified local persistent stock Codex 0.171.0 workflows on matching state and companion storage, after related metadata updates and history-reference publication finish. The observed cases cover a V1 legacy parent with a paginated child, V2 paginated and V2 legacy, and an excluded retained-fork provider.",

@@ -328,3 +328,27 @@ def test_unselected_guardian_does_not_invent_association_from_sql(tmp_path: Path
     assert facts.snapshot.threads[0].origin is ThreadOrigin.GUARDIAN
     assert facts.snapshot.guardian_associations == ()
     assert facts.headers == ()
+
+
+def test_observed_keep_marks_retain_selected_work(tmp_path: Path) -> None:
+    _native_home(tmp_path)
+    directory = tmp_path / ".codex-session-gc"
+    directory.mkdir()
+    with sqlite3.connect(directory / "keep.sqlite3") as connection:
+        connection.execute("CREATE TABLE kept_threads (thread_id TEXT PRIMARY KEY NOT NULL) STRICT")
+        connection.execute("INSERT INTO kept_threads VALUES (?)", (_GRANDCHILD,))
+    facts = read_closed_work_facts(tmp_path, _CUTOFF, _ROOTS, None, collection_limits())
+    selection = select_closed_work(facts.snapshot, _CUTOFF, _ROOTS)
+    marked = ThreadId.parse(_GRANDCHILD)
+    assert marked in facts.snapshot.kept_threads
+    assert marked not in selection.conditional_candidates
+    assert next(item.reason for item in selection.retained if item.thread_id == marked) == "keep"
+
+
+def test_malformed_keep_store_refuses_observation(tmp_path: Path) -> None:
+    _native_home(tmp_path)
+    directory = tmp_path / ".codex-session-gc"
+    directory.mkdir()
+    (directory / "keep.sqlite3").write_bytes(b"invalid")
+    with pytest.raises(PreparationRefused, match="Keep storage"):
+        read_closed_work_facts(tmp_path, _CUTOFF, _ROOTS, None, collection_limits())

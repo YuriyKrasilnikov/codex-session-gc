@@ -21,6 +21,7 @@ from codex_session_gc.cli.console_tasks import parse_cutoff
 from codex_session_gc.cli.main import main
 from codex_session_gc.cli.textual_console import SessionApp
 from codex_session_gc.domain import ArchiveState, ThreadId
+from codex_session_gc.execution.keep_store import read_kept_threads
 from codex_session_gc.recovery import LaunchStatus, inspect
 from tests.mcp_native_fixture import (
     CHILD,
@@ -567,6 +568,34 @@ async def _textual_apply(browser: SessionApp, pilot: Pilot[tuple[str, int]]) -> 
     assert await pilot.click("#execute")
     assert browser.dispatch_task is not None
     await browser.dispatch_task
+
+
+def test_textual_sets_and_clears_keep_for_the_highlighted_history(
+    tmp_path: Path, native_helper: Path
+) -> None:
+    """Observe protection written by the UI in the shared home registry."""
+    storage = tmp_path / "home"
+    paths = make_home(storage)
+
+    async def check() -> None:
+        browser = SessionApp(storage, None, native_helper, tmp_path / "receipts")
+        async with browser.run_test(size=(170, 55)) as pilot:
+            assert browser.load_task is not None
+            await browser.load_task
+            table = browser.query_one(DataTable)
+            table.focus()
+            current = browser._current()  # noqa: SLF001
+            assert current is not None
+            expected = current[1] or current[0].root.id
+            await pilot.press("k")
+            await pilot.pause()
+            assert read_kept_threads(storage) == frozenset({expected})
+            await pilot.press("u")
+            await pilot.pause()
+            assert not read_kept_threads(storage)
+
+    asyncio.run(asyncio.wait_for(check(), 90))
+    assert all(path.exists() for path in paths.values())
 
 
 def _apply(
