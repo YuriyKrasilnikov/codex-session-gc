@@ -443,6 +443,7 @@ class CatalogueService(CatalogueObservation):
         """Preview scoped metadata for exact IDs without dispatch or journal creation."""
         if not thread_ids or len(thread_ids) > _SELECTION:
             raise ValueError("Preparation requires a bounded nonempty exact selection.")
+        self._require_startup_home()
         selected = tuple(ThreadId.parse(value) for value in thread_ids)
         if len(set(selected)) != len(selected):
             raise ValueError("Selection contains duplicate histories.")
@@ -458,6 +459,7 @@ class CatalogueService(CatalogueObservation):
             roots.add(entry.root_id)
         intent = Intent(self.home, policy, tuple(sorted(roots)), selected)
         report = await async_preview(intent)
+        self._require_startup_home()
         encoded = json.dumps(report, ensure_ascii=False, sort_keys=True).encode()
         if len(encoded) > _REPORT_BYTES:
             raise ValueError(
@@ -494,6 +496,11 @@ class CatalogueService(CatalogueObservation):
                 "Complete preparation exceeds the response bound; reduce the selection."
             )
         return prepared
+
+    def _require_startup_home(self) -> None:
+        metadata = self.home.stat()
+        if (metadata.st_dev, metadata.st_ino) != self.operations.home_identity:
+            raise ValueError("The startup home identity has changed; restart the server.")
 
     async def apply_cleanup(self, operation_id: str, digest: str) -> dict[str, Any]:
         """Apply the exact server-held preparation referenced by two unchanged strings."""
@@ -577,12 +584,16 @@ def create_server(
         lifespan=lifespan,
         instructions=(
             "Read-only mode exposes catalogue, details, conditional preview and saved status. "
-            "Preparation creates no cleanup operation. Apply and reconciliation are unavailable."
+            "Preparation creates no cleanup operation. Apply and reconciliation are unavailable. "
+            "Attachment guidance is advisory and does not authorize cleanup."
             if service.capability is McpCapability.READ_ONLY
             else "Review prepare_cleanup report and confirmation before explicitly calling "
             "apply_cleanup. A digest binds the payload and does not prove human consent. "
             "After unknown or response loss, use cleanup_status/reconcile_cleanup; "
-            "never create a replacement operation to retry deletion."
+            "never create a replacement operation to retry deletion. Attachment guidance is "
+            "advisory: explicitly select child IDs and prepare and authorize that operation "
+            "separately. Observe its result, refresh the catalogue, then prepare the exact "
+            "source IDs again and obtain separate authorization before applying them."
         ),
     )
     annotations = ToolAnnotations(

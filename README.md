@@ -306,6 +306,22 @@ Unknown origin, age, archive state, missing history and ambiguous topology remai
 visible as retention or refusal. Known MAIN and archive states are not automatic
 policy exclusions; the native contract determines supported effects.
 
+### Clean up an attachment and its source
+
+Select the exact source history and preview it. The report lists observed
+attachments retaining that source and shows the work root where it can be
+resolved. Each attachment needs an explicit selection. Review and remove the
+chosen attachments first. After verifying the first receipt and its exact
+effects, open a fresh preview of the original source. A surviving attachment
+or another dependency can still retain the source. Authorize its removal
+separately and save a distinct receipt.
+
+The CLI prints read-only `plan` commands for resolved histories. Each command
+reads current storage independently. Compare the reported home device and inode
+and review the work roots before applying. Textual lets you select attachments
+from the source review and offers a fresh source preview after confirmed
+attachment removal.
+
 Pass `--timings` to `plan` or `apply` to see elapsed time and observed work
 counts. An interactive terminal shows the current measured stage while the
 command runs. With `--json`, the final response includes a `timings` object.
@@ -473,6 +489,12 @@ histories unless their own facts match. Changing filters does not reread storage
 `prepare_cleanup` requires explicit `thread_ids`; its `cutoff` may be omitted or
 null to request exactly those IDs without an age filter. A report with no deletion
 candidates has no confirmation and cannot be applied.
+When `attachment_cleanup` appears in the report, use its observed IDs to review
+the attachments. Prepare the explicitly chosen attachments in a separate call.
+After checking the saved first result and its exact effects, refresh the
+catalogue and prepare the original source IDs with the new snapshot and the
+original date policy. Review and authorize that new confirmation separately.
+Read-only clients can inspect guidance and read saved status.
 Preparation reads fresh scoped facts and returns a conditional report without a
 journal or deletion. Pages contain at most 100 histories; preparation accepts at
 most 200 distinct IDs per request. Larger selections can use the terminal UI.

@@ -1,5 +1,5 @@
 # Copyright (c) 2026
-# ruff: noqa: D100, D103, S101
+# ruff: noqa: D100, D103, S101, SLF001, PLR2004
 
 from __future__ import annotations
 
@@ -551,7 +551,7 @@ def test_review_locks_selection_and_resets_confirmation(
             await pilot.click("#preview")
             await pilot.pause()
             assert browser.query_one("#confirm", Input).value == ""
-            assert preview_calls == 2  # noqa: PLR2004
+            assert preview_calls == 2
             assert browser.timing is not first_timing
             assert not browser.query_one("#progress").display
             assert browser.receipt is None
@@ -1249,5 +1249,109 @@ def test_clearing_date_previews_exact_selected_ids(
             assert captured
             assert isinstance(captured[0].cutoff, ExactIds)
             assert captured[0].cutoff.ids == frozenset(captured[0].selected)
+
+    asyncio.run(scenario())
+
+
+def test_guided_progress_requires_exact_confirmed_child_effects(tmp_path: Path) -> None:
+    """A partial or different result cannot authorize the next preview."""
+    child = str(AGENT.value)
+    target = SimpleNamespace(
+        thread_id=child, rollouts=(SimpleNamespace(rollout_path="/observed/child"),)
+    )
+    intent = SimpleNamespace(
+        selected=(AGENT,),
+        roots=(ROOT,),
+        confirmation=lambda: SimpleNamespace(physical_manifest=(target,), operation_id="operation"),
+    )
+    browser = ui.SessionApp(tmp_path, CUTOFF, None, tmp_path)
+    browser.guided_child_roots = {AGENT: ROOT}
+    report = {
+        "outcome": "confirmed",
+        "attemptId": "operation",
+        "lifecycleUnresolved": False,
+        "roots": [
+            {
+                "status": "confirmed",
+                "root": str(ROOT.value),
+                "selectedThreads": [child],
+                "nativeReceipt": {"removed_rollouts": ["/observed/child"]},
+            }
+        ],
+    }
+    assert browser._matching_child_result(intent, report, 0)
+    assert not browser._matching_child_result(intent, {**report, "outcome": "partial"}, 0)
+    assert not browser._matching_child_result(intent, {**report, "lifecycleUnresolved": True}, 0)
+    report["roots"][0]["nativeReceipt"]["removed_rollouts"] = ["/different"]
+    assert not browser._matching_child_result(intent, report, 0)
+
+
+@pytest.mark.parametrize("current_source", [None, _A])
+def test_guided_child_preview_refuses_changed_attachment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, current_source: ThreadId | None
+) -> None:
+    """A new preview cannot carry the old attachment relation into confirmation."""
+    browser = app(tmp_path, monkeypatch)
+    source = str(ROOT.value)
+    child = str(AGENT.value)
+    metadata = tmp_path.stat()
+
+    async def preview(intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
+        assert mode is PreviewMode.CONFIRM
+        answer = report(intent)
+        if intent.selected == (ROOT,):
+            answer["attachment_cleanup"] = {
+                "home_identity": [metadata.st_dev, metadata.st_ino],
+                "truncated": False,
+                "sources": [
+                    {
+                        "id": source,
+                        "root_id": source,
+                        "children": [{"id": child, "root_id": source, "selected": False}],
+                    }
+                ],
+            }
+        else:
+            assert intent.selected == (AGENT,)
+            answer["selected_attachments"] = (
+                {} if current_source is None else {child: str(current_source.value)}
+            )
+        return answer
+
+    async def scenario() -> None:
+        async with browser.run_test(size=(160, 55)):
+            browser.selected = {ROOT: ROOT}
+            browser._start_preview()
+            assert browser.preview_task is not None
+            await browser.preview_task
+            browser.query_one("#child-ids", Input).value = child
+            browser._choose_children()
+            assert browser.preview_task is not None
+            await browser.preview_task
+            assert browser.reviewed is None
+            assert not browser.query_one("#confirm", Input).display
+            assert "Child attachments changed" in str(browser.query_one("#notice", Static).render())
+
+    monkeypatch.setattr(ui, "async_preview", preview)
+    asyncio.run(scenario())
+
+
+def test_console_rejects_replacement_before_any_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Selections made on the original home never prepare a replacement home."""
+    codex_dir = tmp_path / "home"
+    codex_dir.mkdir()
+    browser = app(codex_dir, monkeypatch)
+
+    async def scenario() -> None:
+        async with browser.run_test(size=(160, 55)):
+            browser.selected = {ROOT: ROOT}
+            await asyncio.to_thread(codex_dir.rename, tmp_path / "original")
+            await asyncio.to_thread(codex_dir.mkdir)
+            browser._start_preview()
+            assert browser.preview_task is None
+            assert browser.reviewed is None
+            assert "Home changed" in str(browser.query_one("#notice", Static).render())
 
     asyncio.run(scenario())

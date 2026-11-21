@@ -36,11 +36,77 @@ from tests.mcp_native_fixture import (
     CHILD,
     OTHER,
     ROOT,
+    attach_history,
     logical_rows,
     make_guardian_home,
     make_home,
     retained_provider,
 )
+
+
+@pytest.mark.parametrize("new_blocker", [False, True])
+def test_native_attachment_guidance_separate_operations(
+    tmp_path: Path, native_helper: Path, *, new_blocker: bool
+) -> None:
+    """Confirm two separate exact effects or retain a source with a new blocker."""
+    home, receipts = tmp_path / "home", tmp_path / "receipts"
+    paths = make_home(home)
+    attach_history(paths, CHILD, ROOT, standalone=True)
+
+    async def check() -> None:
+        async with server(home, native_helper, receipts) as session:
+            snapshot = (await call(session, "query_catalogue", {}))["snapshot_id"]
+            source = await call(
+                session, "prepare_cleanup", {"snapshot_id": snapshot, "thread_ids": [ROOT]}
+            )
+            guidance = source["report"]["attachment_cleanup"]
+            assert guidance["sources"][0]["id"] == ROOT
+            assert guidance["sources"][0]["children"][0]["id"] == CHILD
+            assert guidance["sources"][0]["children"][0]["selected"] is False
+            assert "confirmation" not in source
+            child = await call(
+                session, "prepare_cleanup", {"snapshot_id": snapshot, "thread_ids": [CHILD]}
+            )
+            assert child["report"]["deletions"] == [CHILD]
+            assert child["report"]["selected_attachments"] == {CHILD: ROOT}
+            declaration = child["confirmation"]
+            result = await call(session, "apply_cleanup", declaration)
+            assert result["outcome"] == "confirmed", result
+            status = await call(
+                session, "cleanup_status", {"operation_id": declaration["operation_id"]}
+            )
+            assert status["outcome"] == "confirmed"
+            assert not paths[CHILD].exists()
+            assert paths[ROOT].exists()
+            if new_blocker:
+                attach_history(paths, OTHER, ROOT)
+            refreshed = await call(session, "query_catalogue", {"refresh": True})
+            source = await call(
+                session,
+                "prepare_cleanup",
+                {"snapshot_id": refreshed["snapshot_id"], "thread_ids": [ROOT]},
+            )
+            if new_blocker:
+                assert source["report"]["deletions"] == []
+                assert "confirmation" not in source
+                assert (
+                    source["report"]["attachment_cleanup"]["sources"][0]["children"][0]["id"]
+                    == OTHER
+                )
+                assert paths[ROOT].exists()
+                return
+            assert source["report"]["deletions"] == [ROOT]
+            separate = source["confirmation"]
+            assert separate["operation_id"] != declaration["operation_id"]
+            result = await call(session, "apply_cleanup", separate)
+            assert result["outcome"] == "confirmed", result
+            assert not paths[ROOT].exists()
+
+    asyncio.run(asyncio.wait_for(check(), 90))
+    assert paths[OTHER].is_file()
+    remaining = logical_rows(home)["state_5.sqlite"]["threads"]
+    assert {row[0] for row in remaining} == ({ROOT, OTHER} if new_blocker else {OTHER})
+    assert len(list(receipts.glob("*.sqlite"))) == (1 if new_blocker else 2)
 
 
 @pytest.fixture

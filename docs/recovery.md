@@ -22,6 +22,13 @@ a server restart. A completed pre-dispatch refusal is retained by that process;
 without a durable receipt, a restarted process reports unknown. Missing/unreadable
 receipt means unknown, including when an original call might still be preparing. Do not create a new UUID to retry uncertainty.
 
+For guided attachment cleanup, keep the first receipt and its exact selection.
+Use that receipt or operation UUID to inspect a lost reply. Read-only MCP can
+read status. Reconciliation can append evidence and requires the cleanup
+capability. When the intended attachment removals are confirmed, preview the
+original source again. Any subsequent source removal has its own authorization,
+attempt and receipt.
+
 ## Receipt format and evidence
 
 Only the current schema-2 receipt identity is supported. `recovery/journal.py`

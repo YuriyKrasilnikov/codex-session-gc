@@ -40,6 +40,7 @@ from codex_session_gc.execution import closed_work_request as collector
 from codex_session_gc.execution.physical_inventory import observe_inventory
 from codex_session_gc.execution.timing import Count, Phase, count, interval
 from codex_session_gc.inventory.observation import RolloutObservation
+from codex_session_gc.planning.attachment_cleanup import ADVISORY_PROJECTION_LIMIT, AdvisoryAncestry
 
 
 def _source_facts(value: object) -> tuple[ThreadOrigin, ThreadId | None]:
@@ -117,12 +118,14 @@ def _sql_attachment(identifier: ThreadId, value: object) -> Attachment | None:
         raise collector.PreparationRefused("The SQL attachment source is invalid.") from error
 
 
-def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
+def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0913, PLR0915
     home: Path,
     cutoff: UtcCutoff | ExactIds,
     roots: frozenset[ThreadId],
     selected: frozenset[ThreadId] | None,
     limits: collector.CollectionLimits,
+    *,
+    advisory_ancestry: AdvisoryAncestry | None = None,
 ) -> collector.ClosedWorkFacts:
     """Read scoped SQL and selected headers once; leave global proof to native."""
     count(Count.ROOTS_REQUESTED, len(roots))
@@ -174,6 +177,65 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
                 scope,
             )
         }
+        if advisory_ancestry is not None and selected is not None:
+            # Seed only actual incoming SQL blockers for explicit source IDs.
+            related = sorted(
+                (
+                    item
+                    for item in sql_attachments
+                    if item is not None and item.source_thread_id in selected
+                ),
+                key=lambda item: (item.source_thread_id, item.child_thread_id),
+            )
+            if len(related) > ADVISORY_PROJECTION_LIMIT:
+                advisory_ancestry.truncated = True
+            seeds = sorted(
+                {
+                    str(identifier.value)
+                    for item in related[:ADVISORY_PROJECTION_LIMIT]
+                    for identifier in (item.source_thread_id, item.child_thread_id)
+                }
+            )
+            if seeds:
+                seed_marks = ",".join("(?)" for _ in seeds)
+                limit = ADVISORY_PROJECTION_LIMIT + 1
+                ancestry = tuple(
+                    connection.execute(
+                        f"WITH RECURSIVE ancestry(id) AS (VALUES {seed_marks} UNION "
+                        "SELECT e.parent_thread_id FROM thread_spawn_edges e "
+                        "JOIN ancestry a ON e.child_thread_id=a.id LIMIT ?) "
+                        "SELECT id,source FROM threads "
+                        "WHERE id IN (SELECT id FROM ancestry) LIMIT ?",
+                        (*seeds, limit, limit),
+                    )
+                )
+                ids = tuple(row[0] for row in ancestry[:ADVISORY_PROJECTION_LIMIT])
+                if ids:
+                    ancestry_marks = ",".join("?" for _ in ids)
+                    ancestry_edges = tuple(
+                        connection.execute(
+                            "SELECT parent_thread_id,child_thread_id FROM thread_spawn_edges "
+                            f"WHERE child_thread_id IN ({ancestry_marks}) LIMIT ?",
+                            (*ids, limit),
+                        )
+                    )
+                else:
+                    ancestry_edges = ()
+                advisory_ancestry.truncated |= (
+                    len(ancestry) > ADVISORY_PROJECTION_LIMIT
+                    or len(ancestry_edges) > ADVISORY_PROJECTION_LIMIT
+                )
+                projected = []
+                for identifier, source in ancestry[:ADVISORY_PROJECTION_LIMIT]:
+                    try:
+                        origin, parent = _source_facts(collector._session_source(source))
+                    except TypeError, ValueError:
+                        continue
+                    projected.append((identifier, origin, parent))
+                advisory_ancestry.rows = tuple(projected)
+                advisory_ancestry.edges = tuple(
+                    (row[0], row[1]) for row in ancestry_edges[:ADVISORY_PROJECTION_LIMIT]
+                )
         current_rows = {
             row[0]: {"rollout_path": row[1]}
             for row in connection.execute("SELECT id,rollout_path FROM threads")
@@ -237,11 +299,28 @@ def read_closed_work_facts(  # noqa: C901, PLR0912, PLR0915
         header = current_headers[current.physical.path]
         metadata = header.metadata
         header_attachment = current.attachment
+        if advisory_ancestry is not None:
+            sql_source = collector._session_source(rows[str(identifier.value)]["source"])
+            _, sql_parent = _source_facts(sql_source)
+            header_parent = metadata.get("parent_thread_id")
+            if metadata.get("source") != sql_source or (
+                header_parent is not None and header_parent != str(sql_parent.value)
+                if sql_parent is not None
+                else header_parent is not None
+            ):
+                advisory_ancestry.conflicts.add(str(identifier.value))
         sql_attachment = _sql_attachment(
             identifier, rows[str(identifier.value)]["attached_thread_parent_id"]
         )
         if header_attachment != sql_attachment:
             raise collector.PreparationRefused("Selected attachment SQL/header disagree.")
+        if (
+            advisory_ancestry is not None
+            and selected is not None
+            and identifier in selected
+            and header_attachment is not None
+        ):
+            advisory_ancestry.selected_attachments[identifier] = header_attachment.source_thread_id
         src, parent, association = _selected_provenance(
             identifier, metadata, rows[str(identifier.value)]["source"], records[identifier].origin
         )
