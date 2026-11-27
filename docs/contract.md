@@ -68,6 +68,15 @@ values prefer complete observations, then ascending UUID. Adapters consume the
 same complete ordered history sequence before pagination. Reordering preserves
 selected IDs and cannot add context to the selection.
 
+The selection view projects every selected ID from the current catalogue snapshot,
+including IDs outside the current filter and IDs no longer resolved by the
+snapshot. It permits removal of an individual ID or clearing the selection.
+An invalid filter makes visible and hidden counts unavailable, not zero. Ordinary
+refresh preserves selected IDs; rule mode retains its separate narrowing behavior.
+Selection totals distinguish exact bytes from known lower bounds and avoid counting
+the same physical object twice. Preview receives the selected IDs, not additional
+context rows.
+
 Preview is read-only and non-executable. Apply observes fresh facts rather than
 executing a saved preview. Textual and MCP confirmation bind the home identity,
 exact qualified profile, operation UUID, cutoff, roots, selected IDs, physical

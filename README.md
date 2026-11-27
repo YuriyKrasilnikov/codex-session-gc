@@ -14,7 +14,17 @@ Explicit Guardian histories can also be selected. Their historical parent associ
 does not select or require deletion of the parent. Age is a caller-supplied filter,
 not a fixed retention policy.
 
-## What is new in 0.6.1
+## What is new in 0.7.0
+
+- Review the complete accumulated selection, including histories outside the
+  current filter and unresolved IDs, before previewing cleanup.
+- See recorded removed file counts and logical bytes from validated receipt
+  evidence, with partial or unavailable evidence identified explicitly.
+
+This release retains the qualified helper and storage profile described for
+0.6.1. The effect summary does not measure reclaimed disk space.
+
+## What was new in 0.6.1
 
 The bundled compatibility assessment covers selected stopped local work from
 Codex CLI 0.172.0. The release uses the same qualified wire-7 helper and storage
@@ -64,7 +74,7 @@ its content scrolls in compact windows.
 
 ## Download and install
 
-The 0.6.1 installation workflow uses a matched Linux x86_64
+The 0.7.0 installation workflow uses a matched Linux x86_64
 bundle and a standard-library installer. Obtain the published assets and independently
 verify their attestations before using them. Python 3.14 or newer, `uv` and a
 separately trusted GitHub CLI (`gh`) are prerequisites. The qualified deployment
@@ -83,10 +93,10 @@ bootstrap before executing it; an unverified installer cannot verify itself:
 set -eu
 mkdir codex-session-gc-download
 cd codex-session-gc-download
-curl --fail --location --output codex-session-gc-installer-0.6.1.pyz \
-  https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.6.1/codex-session-gc-installer-0.6.1.pyz
+curl --fail --location --output codex-session-gc-installer-0.7.0.pyz \
+  https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.7.0/codex-session-gc-installer-0.7.0.pyz
 GC_ASSEMBLY_COMMIT=FULL_40_CHARACTER_ASSEMBLY_COMMIT
-gh attestation verify codex-session-gc-installer-0.6.1.pyz \
+gh attestation verify codex-session-gc-installer-0.7.0.pyz \
   --repo YuriyKrasilnikov/codex-session-gc \
   --signer-workflow YuriyKrasilnikov/codex-session-gc/.github/workflows/artifacts.yml \
   --source-digest "$GC_ASSEMBLY_COMMIT" --source-ref refs/heads/main \
@@ -104,13 +114,13 @@ prints an installation ID; retain that exact ID for activation and recovery.
 Substitute your actual existing Codex home and receipt directory:
 
 ```sh
-python3.14 -I codex-session-gc-installer-0.6.1.pyz --release v0.6.1 \
+python3.14 -I codex-session-gc-installer-0.7.0.pyz --release v0.7.0 \
   --action stage --gh /absolute/path/to/gh --uv /absolute/path/to/uv \
   --python /absolute/path/to/python3.14
-python3.14 -I codex-session-gc-installer-0.6.1.pyz --action activate \
+python3.14 -I codex-session-gc-installer-0.7.0.pyz --action activate \
   --installation-id INSTALLATION_UUID --home /absolute/codex-home \
   --receipt-dir /absolute/receipt-directory
-python3.14 -I codex-session-gc-installer-0.6.1.pyz --action status \
+python3.14 -I codex-session-gc-installer-0.7.0.pyz --action status \
   --installation-id INSTALLATION_UUID
 ```
 
@@ -282,7 +292,16 @@ editable; it does not select anything automatically.
 
 Enter expands a group. Space toggles the focused matching history; Select matches
 selects matching histories without selecting a contextual parent automatically.
-Changing filters preserves selected IDs. Refresh cannot add deletion IDs.
+Changing filters preserves selected IDs. Choose **Review selection** to review all
+selected histories, including those outside the current filter, remove an
+individual history or clear the selection. The view shows unresolved IDs if a
+selected history is no longer present in the current snapshot. An invalid filter
+leaves visible and hidden counts unavailable; the complete selection remains
+available. Ordinary Refresh preserves the selected IDs and cannot add deletion
+IDs. Rule selection retains its separate narrowing behavior. Selection sizes
+separate known stored bytes from an exact total when observations are incomplete.
+CLI preview and MCP preparation include a `selection_summary` with history count,
+known and exact stored bytes, incomplete-history count and missing-ID count.
 
 Preview reads scoped SQL metadata and bounded metadata headers across the managed
 physical namespace, including orphan consumers. It does
@@ -448,6 +467,16 @@ skipped root produces a partial aggregate. When no selected history is eligible,
 no helper or receipt is created. `--default-provider` defaults to `openai`;
 individual stored providers are checked separately.
 
+Cleanup results also summarize recorded removed files and their logical bytes
+when the saved request and native result provide valid evidence. Partial or
+unavailable evidence is shown explicitly alongside the operation outcome. The
+reviewed logical byte total describes the recorded confirmation manifest when
+available; execution may have been narrower. These figures are not allocated
+blocks or reclaimed filesystem space. The report observation time is when the
+receipt was read, not when a file was removed. JSON results include `effects`,
+`reviewed_logical_bytes`, `observed_at` and `recommended_action`; effect counts
+and bytes can be null when the evidence is unavailable.
+
 ## Results after interruption
 
 Use only the saved receipt:
@@ -460,6 +489,9 @@ Reconcile accepts no home, helper or selection override. It never sends another
 deletion request or continues work that was not dispatched. Its scope is
 `saved_journal_units`; roots skipped before receipt creation are outside that
 scope. Original delivery outcomes and observed final states remain distinct.
+Reconciliation may establish that targets are now absent without proving which
+invocation removed them; a missing native result therefore remains unavailable
+for recorded removal counts and bytes.
 
 Completed current-format journal records can be displayed using their saved
 metadata even after the qualified helper changes. A fresh observation of an

@@ -358,7 +358,7 @@ source is intended for maintainers changing or validating the native contract.
 A digest mismatch remains a refusal, even after a successful build.
 
 Run these commands from the source checkout after the candidate helper and exact
-bundled profile have been qualified and the package version is set to 0.6.0.
+bundled profile have been qualified and the package version is set to 0.7.0.
 Synchronize the Python development environment and build the source distribution first. The
 commands below assume the already-qualified release helper has been retained at
 `/absolute/qualified/codex-session-gc-native` and the output directories are absent:
@@ -366,13 +366,13 @@ commands below assume the already-qualified release helper has been retained at
 ```sh
 set -eu
 uv sync --locked --group build --no-install-project --no-build --no-python-downloads
-test ! -e build/release-0.6.0
-mkdir -p build/release-0.6.0
-uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.6.0
-uv build --wheel build/release-0.6.0/codex_session_gc-0.6.0.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.6.0
-PYTHONPATH=src .venv/bin/python -m tools.build_release --wheel build/release-0.6.0/codex_session_gc-0.6.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.6.0/codex-session-gc-0.6.0-linux-x86_64
-PYTHONPATH=src .venv/bin/python -m tools.ci_release --sdist build/release-0.6.0/codex_session_gc-0.6.0.tar.gz --wheel build/release-0.6.0/codex_session_gc-0.6.0-py3-none-any.whl --bundle build/release-0.6.0/codex-session-gc-0.6.0-linux-x86_64 --helper /absolute/qualified/codex-session-gc-native
-PYTHONPATH=src .venv/bin/python -m tools.build_installer --output "$PWD/build/release-0.6.0/codex-session-gc-installer-0.6.0.pyz"
+test ! -e build/release-0.7.0
+mkdir -p build/release-0.7.0
+uv build --sdist --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.7.0
+uv build --wheel build/release-0.7.0/codex_session_gc-0.7.0.tar.gz --no-config --no-python-downloads --no-build-isolation --python .venv/bin/python --out-dir build/release-0.7.0
+PYTHONPATH=src .venv/bin/python -m tools.build_release --wheel build/release-0.7.0/codex_session_gc-0.7.0-py3-none-any.whl --helper /absolute/qualified/codex-session-gc-native --output build/release-0.7.0/codex-session-gc-0.7.0-linux-x86_64
+PYTHONPATH=src .venv/bin/python -m tools.ci_release --sdist build/release-0.7.0/codex_session_gc-0.7.0.tar.gz --wheel build/release-0.7.0/codex_session_gc-0.7.0-py3-none-any.whl --bundle build/release-0.7.0/codex-session-gc-0.7.0-linux-x86_64 --helper /absolute/qualified/codex-session-gc-native
+PYTHONPATH=src .venv/bin/python -m tools.build_installer --output "$PWD/build/release-0.7.0/codex-session-gc-installer-0.7.0.pyz"
 ```
 
 The build group pins the existing Hatchling backend in `pyproject.toml`; its
@@ -403,9 +403,9 @@ shared archiver writes the v2 manifest before the payload and checks the archive
 against it; use the same archiver for local and CI releases:
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m tools.build_release --archive build/release-0.6.0/codex-session-gc-0.6.0-linux-x86_64 --output build/release-0.6.0/codex-session-gc-0.6.0-linux-x86_64.tar.gz
-cd build/release-0.6.0
-sha256sum codex-session-gc-0.6.0-linux-x86_64.tar.gz codex_session_gc-0.6.0-py3-none-any.whl codex_session_gc-0.6.0.tar.gz codex-session-gc-installer-0.6.0.pyz > SHA256SUMS
+PYTHONPATH=src .venv/bin/python -m tools.build_release --archive build/release-0.7.0/codex-session-gc-0.7.0-linux-x86_64 --output build/release-0.7.0/codex-session-gc-0.7.0-linux-x86_64.tar.gz
+cd build/release-0.7.0
+sha256sum codex-session-gc-0.7.0-linux-x86_64.tar.gz codex_session_gc-0.7.0-py3-none-any.whl codex_session_gc-0.7.0.tar.gz codex-session-gc-installer-0.7.0.pyz > SHA256SUMS
 ```
 
 Ship those four assets and `SHA256SUMS` together with the same version/tag.

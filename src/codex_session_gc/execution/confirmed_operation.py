@@ -9,6 +9,7 @@ import hashlib
 import json
 import threading
 from contextlib import contextmanager, suppress
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -30,6 +31,7 @@ from codex_session_gc.execution.confirmed_declaration import (
 )
 from codex_session_gc.execution.operation_status import project_operation_status
 from codex_session_gc.execution.physical_manifest import decode_targets
+from codex_session_gc.execution.receipt_effects import project_receipt_effects
 from codex_session_gc.execution.timing import Phase, interval, measured_to_thread
 from codex_session_gc.recovery import RecoveryError, inspect
 
@@ -117,6 +119,10 @@ class ConfirmedOperations:
             "roots": [],
             "receipt": str(path),
             "dispatch_replayed": False,
+            "effects": None,
+            "reviewed_logical_bytes": None,
+            "observed_at": datetime.now(UTC).isoformat(),
+            "recommended_action": "inspect_receipt",
         }
         if not path.exists():
             completed = self._results.get(_identifier(operation_id))
@@ -158,9 +164,14 @@ class ConfirmedOperations:
                 detail=str(error),
                 skipped_roots=None,
                 lifecycle_unresolved=project_operation_status(stored).lifecycle_unresolved,
+                recommended_action="inspect_receipt",
             )
             return report
         projected = project_operation_status(stored, skipped_roots=skipped)
+        projection = project_receipt_effects(stored, outcome=projected.outcome)
+        for row, effects in zip(report["roots"], projection.pop("units"), strict=True):
+            row["effects"] = effects
+        report.update(projection)
         report.update(
             outcome=projected.outcome.value,
             lifecycle_unresolved=projected.lifecycle_unresolved,
@@ -237,12 +248,18 @@ class ConfirmedOperations:
                     with suppress(OSError, RecoveryError, ValueError, TypeError):
                         report = self.status(declaration.operation_id)
         result = {
+            "effects": None,
+            "reviewed_logical_bytes": None,
+            "observed_at": datetime.now(UTC).isoformat(),
+            "recommended_action": "inspect_receipt",
             **report,
             "operation_id": declaration.operation_id,
             "dispatch_replayed": False,
         }
         if not path.exists():
             result["state"] = "completed_without_receipt"
+            if result["outcome"] == "refused":
+                result["recommended_action"] = "none"
         return result
 
     def apply_reference(self, operation_id: str, digest: str) -> dict[str, Any]:
@@ -302,6 +319,18 @@ class ConfirmedOperations:
             self.status(operation_id)
             report, _ = execute(ExecutionRequest(command="reconcile", receipt=path))
             whole = self.status(operation_id)
+            saved_by_unit = {row["unit_id"]: row for row in whole["roots"]}
+            for row in report.get("roots", []):
+                if row.get("unitId") in saved_by_unit:
+                    saved_row = saved_by_unit[row["unitId"]]
+                    row["originalNativeOutcome"] = saved_row["original_native_outcome"]
+                    row["status"] = saved_row["outcome"]
+                    row["effects"] = saved_row.get("effects")
+                    row["finalObservedState"] = (
+                        row["effects"]["observed_final_state"]
+                        if row["effects"] is not None
+                        else None
+                    )
             return {
                 **report,
                 "operation_id": _identifier(operation_id),
@@ -309,6 +338,10 @@ class ConfirmedOperations:
                 "outcome": whole["outcome"],
                 "lifecycle_unresolved": whole.get("lifecycle_unresolved"),
                 "skipped_roots": whole.get("skipped_roots", []),
+                "effects": whole.get("effects"),
+                "reviewed_logical_bytes": whole.get("reviewed_logical_bytes"),
+                "observed_at": whole.get("observed_at"),
+                "recommended_action": whole.get("recommended_action"),
             }
 
     async def apply_owned(self, operation_id: str, digest: str) -> dict[str, Any]:

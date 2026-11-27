@@ -14,7 +14,7 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -1232,8 +1232,23 @@ def test_engine_exception_preserves_saved_outcome_or_unknown_without_replay(
     reference = {"operation_id": declaration.operation_id, "digest": declaration.digest}
     result = operations.apply_reference(**reference)
     assert result["outcome"] == ("confirmed" if claimed else "unknown")
-    assert operations.status(declaration.operation_id) == result
-    assert operations.apply_reference(**reference) == result
+    status = operations.status(declaration.operation_id)
+    repeated = operations.apply_reference(**reference)
+    if claimed:
+        observed_times = [
+            datetime.fromisoformat(item["observed_at"]) for item in (result, status, repeated)
+        ]
+        assert all(value.utcoffset() == UTC.utcoffset(value) for value in observed_times)
+        assert observed_times == sorted(observed_times)
+        assert {key: value for key, value in status.items() if key != "observed_at"} == {
+            key: value for key, value in result.items() if key != "observed_at"
+        }
+        assert {key: value for key, value in repeated.items() if key != "observed_at"} == {
+            key: value for key, value in result.items() if key != "observed_at"
+        }
+    else:
+        assert status == result
+        assert repeated == result
     assert calls == 1
     path = receipts / f"{declaration.operation_id}.sqlite"
     if claimed:

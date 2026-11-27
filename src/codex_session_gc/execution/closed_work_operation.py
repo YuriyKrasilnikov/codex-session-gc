@@ -8,7 +8,7 @@ import json
 import math
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -40,6 +40,7 @@ from codex_session_gc.execution.confirmed_declaration import (
 from codex_session_gc.execution.operation_status import project_operation_status
 from codex_session_gc.execution.physical_manifest import manifest_bytes, validate_reviewed_manifest
 from codex_session_gc.execution.progress import ProgressChannel, checked_channel
+from codex_session_gc.execution.receipt_effects import project_receipt_effects
 from codex_session_gc.execution.resource_policy import (
     READ_BYTES,
     TIMEOUT_SECONDS,
@@ -271,6 +272,10 @@ def execute(
         "receipt": str(arguments.receipt),
         "attemptId": None,
         "roots": [],
+        "effects": None,
+        "reviewed_logical_bytes": None,
+        "observed_at": datetime.now(UTC).isoformat(),
+        "recommended_action": "inspect_receipt",
     }
     try:
         progress = checked_channel(progress)
@@ -283,6 +288,12 @@ def execute(
             _reconcile(arguments, collection, report)
     except Exception as error:  # noqa: BLE001
         report["detail"] = str(error)
+    if (
+        arguments.command == "apply"
+        and report["outcome"] == "refused"
+        and report["attemptId"] is None
+    ):
+        report["recommended_action"] = "none"
     return report, _exit(str(report["outcome"]))
 
 
@@ -396,11 +407,36 @@ def _apply(  # noqa: PLR0915
         (stored,) = inspect(arguments.receipt)
     skipped = saved_skipped_roots(stored)
     projected = project_operation_status(stored, skipped_roots=skipped)
+    _attach_effects(report, stored, projected.outcome)
     report.update(
         outcome=projected.outcome.value,
         lifecycleUnresolved=projected.lifecycle_unresolved,
         skipped_roots=list(skipped),
     )
+
+
+def _attach_effects(report: dict[str, Any], stored: AttemptStatus, outcome: TerminalKind) -> None:
+    projection = project_receipt_effects(stored, outcome=outcome)
+    by_unit = {
+        str(unit.unit.unit_id.value): (unit, effects)
+        for unit, effects in zip(stored.units, projection.pop("units"), strict=True)
+    }
+    for row in report["roots"]:
+        if row.get("unitId") in by_unit:
+            unit, effects = by_unit[row["unitId"]]
+            if row.get("observationSource") == "fresh" and row.get("evidenceRecorded") is False:
+                row["freshUnrecordedObservedState"] = row.get("finalObservedState")
+            row["effects"] = effects
+            row["finalObservedState"] = effects["observed_final_state"]
+            row["originalNativeOutcome"] = unit.terminal_kind.value if unit.terminal_kind else None
+            row["status"] = (
+                unit.effective_terminal_kind.value
+                if unit.effective_terminal_kind
+                else "unknown"
+                if unit.request is not None
+                else "not_dispatched"
+            )
+    report.update(projection)
 
 
 def _root_result(row: dict[str, Any], native: RootResult) -> None:
@@ -530,6 +566,7 @@ def _reconcile(
         raise ValueError(message)
     skipped = saved_skipped_roots(refreshed)
     projected = project_operation_status(refreshed, skipped_roots=skipped)
+    _attach_effects(report, refreshed, projected.outcome)
     report.update(
         outcome=projected.outcome.value,
         lifecycleUnresolved=projected.lifecycle_unresolved,
