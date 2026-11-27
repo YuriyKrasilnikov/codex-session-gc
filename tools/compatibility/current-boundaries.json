@@ -1,8 +1,8 @@
 {
   "format": "codex-session-gc-compatibility-boundaries-v1",
   "baseline_commit": "ccf9be8cc458bd6b8336fe84d68d8893f2691a5e",
-  "baseline_profile_sha256": "6ac727487130177d5a57e9b28fa497214c718b03bc51604717d0dba53cf367e3",
-  "baseline_native_inputs_sha256": "e254868253af0e6ff4ae459628a4d59b96f51e7489daf3a4334d27911ca91cb1",
+  "baseline_profile_sha256": "15397f1e32ff5630c872bb436b9bf3ec0edf53cb19150b2154c0e174a7bcf117",
+  "baseline_native_inputs_sha256": "756bb3bf415730e4f6e53c1d8c2869877b88210a1eed5db6fcc1d27167fe535b",
   "boundaries": [
     {
       "name": "state-schema",
@@ -67,7 +67,11 @@
         "codex-rs/thread-store/src/local/paginated_fork.rs",
         "codex-rs/thread-store/src/local/rollout_migration.rs",
         "codex-rs/thread-store/src/local/rollout_migration/startup.rs",
-        "codex-rs/cli/src/migrate_rollouts.rs"
+        "codex-rs/cli/src/migrate_rollouts.rs",
+        "codex-rs/thread-store/src/local/rollout_migration/rollback.rs",
+        "codex-rs/thread-store/src/local/rollout_migration/rollback_plan.rs",
+        "codex-rs/thread-store/src/local/rollout_migration/rollback_replay.rs",
+        "codex-rs/thread-store/src/local/thread_history_materialization.rs"
       ],
       "witnesses": [
         "physical-storage:actual-reverted",
@@ -75,7 +79,8 @@
         "physical-storage:retained-original-provider",
         "physical-storage:history-effect-overrun",
         "guardian-retention:all20",
-        "direct-closed-work:retained-provider"
+        "direct-closed-work:retained-provider",
+        "required:realtime-rollback-fork-and-retained-provider"
       ]
     },
     {
@@ -88,7 +93,14 @@
         "codex-rs/thread-store/src/local/thread_history.rs",
         "codex-rs/message-board/src/local/lifecycle.rs",
         "codex-rs/message-board/src/local/setup.rs",
-        "codex-rs/state/thread_history_migrations/0009_realtime_observation_indexes.sql"
+        "codex-rs/state/thread_history_migrations/0009_realtime_observation_indexes.sql",
+        "codex-rs/message-board/src/local/options.rs",
+        "codex-rs/agent-message-board-host/src/lib.rs",
+        "codex-rs/ext/guardian-v3/src/actor.rs",
+        "codex-rs/ext/guardian-v3/src/host.rs",
+        "codex-rs/ext/guardian-v3/src/housekeeper.rs",
+        "codex-rs/ext/guardian-v3/src/housekeeper_sampler.rs",
+        "codex-rs/ext/guardian-v3/src/lib.rs"
       ],
       "witnesses": [
         "native-contract:board-root",
@@ -97,7 +109,8 @@
         "native-contract:board-wrong-template-bound",
         "native-contract:board-extra-trigger",
         "native-contract:sqlite-busy",
-        "physical-storage:history-effect-overrun"
+        "physical-storage:history-effect-overrun",
+        "required:ordinary-and-guardian-board-storage-and-retention"
       ]
     },
     {
@@ -160,7 +173,14 @@
         "codex-rs/thread-store/src/local/thread_rollout_resolver.rs",
         "codex-rs/thread-store/src/local/model_context.rs",
         "codex-rs/thread-store/src/local/history_revision.rs",
-        "codex-rs/rollout/src/compression.rs"
+        "codex-rs/rollout/src/compression.rs",
+        "codex-rs/thread-store/src/local/thread_history/realtime.rs",
+        "codex-rs/thread-store/src/local/thread_history/realtime_stream.rs",
+        "codex-rs/core/src/realtime_history.rs",
+        "codex-rs/core/src/realtime_history/handoff.rs",
+        "codex-rs/core/src/session/realtime_history.rs",
+        "codex-rs/core/src/session/realtime_handoff.rs",
+        "codex-rs/core/src/session/rollout_reconstruction.rs"
       ],
       "witnesses": [
         "required:persistent-writer-and-fresh-resume-source-and-runtime"
@@ -183,10 +203,12 @@
         "codex-rs/core/src/session/turn_input.rs",
         "codex-rs/core/src/tasks/mod.rs",
         "codex-rs/core/src/tasks/lifecycle.rs",
-        "codex-rs/state/src/model/graph.rs"
+        "codex-rs/state/src/model/graph.rs",
+        "codex-rs/core/src/agent/control/sender_context.rs"
       ],
       "witnesses": [
-        "required:v2-custody-status-source-and-runtime"
+        "required:v2-custody-status-source-and-runtime",
+        "required:interrupted-parent-queued-child-reply-publication"
       ]
     },
     {

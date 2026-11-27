@@ -23,7 +23,10 @@ from pathlib import Path
 from uuid import UUID, uuid4
 from unittest.mock import patch
 
-STOCK_SHA = 'b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0'
+STOCK_SHA256_BY_VERSION = {
+    '0.171.0': 'b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0',
+    '0.172.0': 'ad83b94c093f0cdd8176a6bc8005a461bdf23a759863e157d40f562b8a9d664d',
+}
 MAX_TRACE = 16 * 1024 * 1024
 MAX_RPC_LINE = 4 * 1024 * 1024
 MAX_HTTP_BODY = 4 * 1024 * 1024
@@ -32,6 +35,10 @@ MAX_HTTP_BODY = 4 * 1024 * 1024
 def digest(path: Path) -> str:
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def qualified_stock_identity(path: Path, expected_sha256: str) -> bool:
+    return expected_sha256 in STOCK_SHA256_BY_VERSION.values() and digest(path) == expected_sha256
 
 
 def require(value: object, message: str) -> None:
@@ -386,7 +393,7 @@ def main() -> None:
     parser.add_argument('--wake', action='store_true', help='request V2 child durable sleep')
     parser.add_argument('--expect-native', choices=('confirmed', 'old-closed-refusal'), default='confirmed')
     parser.add_argument('--stock', type=Path, required=True)
-    parser.add_argument('--stock-sha256', required=True)
+    parser.add_argument('--stock-sha256', required=True, help='pinned SHA-256 of the stock executable')
     parser.add_argument('--fixture', type=Path, required=True)
     parser.add_argument('--native', type=Path, required=True)
     parser.add_argument('--native-sha256', required=True)
@@ -397,7 +404,7 @@ def main() -> None:
     root = args.root.resolve(strict=True)
     require(root.name.startswith('gc-root-closure-') and root.parent == Path('/tmp')
             and not any(root.iterdir()), 'root must be an empty task-owned probe directory')
-    require(args.stock_sha256 == STOCK_SHA and digest(args.stock) == args.stock_sha256
+    require(qualified_stock_identity(args.stock, args.stock_sha256)
             and digest(args.fixture) == args.fixture_sha256
             and digest(args.native) == args.native_sha256, 'qualified executable identity differs')
     home = root / 'home'
@@ -681,7 +688,7 @@ def main() -> None:
                 require(not server_thread.is_alive(), 'loopback server did not terminate')
     if signal_state['interrupted']:
         raise KeyboardInterrupt('probe was interrupted')
-    print(json.dumps({'status': status, 'trace_sha256': digest(trace.path), 'model': 'scripted_loopback', 'stock_sha256': STOCK_SHA, 'fixture_sha256': args.fixture_sha256, 'native_sha256': args.native_sha256, 'mode': args.mode, 'history_mode': args.history_mode, 'turn_outcome': args.turn_outcome, 'scope': 'stock clean archive, guarded admission and direct native child-only apply'}))
+    print(json.dumps({'status': status, 'trace_sha256': digest(trace.path), 'model': 'scripted_loopback', 'stock_sha256': args.stock_sha256, 'fixture_sha256': args.fixture_sha256, 'native_sha256': args.native_sha256, 'mode': args.mode, 'history_mode': args.history_mode, 'turn_outcome': args.turn_outcome, 'scope': 'stock clean archive, guarded admission and direct native child-only apply'}))
 
 
 if __name__ == '__main__':
