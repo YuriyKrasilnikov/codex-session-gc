@@ -14,7 +14,14 @@ Explicit Guardian histories can also be selected. Their historical parent associ
 does not select or require deletion of the parent. Age is a caller-supplied filter,
 not a fixed retention policy.
 
-## What is new in 0.6.0
+## What is new in 0.6.1
+
+The bundled compatibility assessment covers selected stopped local work from
+Codex CLI 0.172.0. The release uses the same qualified wire-7 helper and storage
+profile as v0.6.0. See the supported storage configurations and exclusions
+before applying cleanup. [Compatibility details](docs/compatibility.md#061-contract)
+
+## What was new in 0.6.0
 
 - See which projects and histories take up space, including files outside the
   catalogue. Inspect the dependency that keeps a history in use.
@@ -57,7 +64,7 @@ its content scrolls in compact windows.
 
 ## Download and install
 
-The 0.6.0 installation workflow uses a matched Linux x86_64
+The 0.6.1 installation workflow uses a matched Linux x86_64
 bundle and a standard-library installer. Obtain the published assets and independently
 verify their attestations before using them. Python 3.14 or newer, `uv` and a
 separately trusted GitHub CLI (`gh`) are prerequisites. The qualified deployment
@@ -76,10 +83,10 @@ bootstrap before executing it; an unverified installer cannot verify itself:
 set -eu
 mkdir codex-session-gc-download
 cd codex-session-gc-download
-curl --fail --location --output codex-session-gc-installer-0.6.0.pyz \
-  https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.6.0/codex-session-gc-installer-0.6.0.pyz
+curl --fail --location --output codex-session-gc-installer-0.6.1.pyz \
+  https://github.com/YuriyKrasilnikov/codex-session-gc/releases/download/v0.6.1/codex-session-gc-installer-0.6.1.pyz
 GC_ASSEMBLY_COMMIT=FULL_40_CHARACTER_ASSEMBLY_COMMIT
-gh attestation verify codex-session-gc-installer-0.6.0.pyz \
+gh attestation verify codex-session-gc-installer-0.6.1.pyz \
   --repo YuriyKrasilnikov/codex-session-gc \
   --signer-workflow YuriyKrasilnikov/codex-session-gc/.github/workflows/artifacts.yml \
   --source-digest "$GC_ASSEMBLY_COMMIT" --source-ref refs/heads/main \
@@ -97,13 +104,13 @@ prints an installation ID; retain that exact ID for activation and recovery.
 Substitute your actual existing Codex home and receipt directory:
 
 ```sh
-python3.14 -I codex-session-gc-installer-0.6.0.pyz --release v0.6.0 \
+python3.14 -I codex-session-gc-installer-0.6.1.pyz --release v0.6.1 \
   --action stage --gh /absolute/path/to/gh --uv /absolute/path/to/uv \
   --python /absolute/path/to/python3.14
-python3.14 -I codex-session-gc-installer-0.6.0.pyz --action activate \
+python3.14 -I codex-session-gc-installer-0.6.1.pyz --action activate \
   --installation-id INSTALLATION_UUID --home /absolute/codex-home \
   --receipt-dir /absolute/receipt-directory
-python3.14 -I codex-session-gc-installer-0.6.0.pyz --action status \
+python3.14 -I codex-session-gc-installer-0.6.1.pyz --action status \
   --installation-id INSTALLATION_UUID
 ```
 
@@ -179,9 +186,8 @@ permission to delete; execution still requires native ownership and fresh checks
 The source-support claim is separate from these local observations. Producer
 identity supplied on the command line remains an unverified caller observation;
 an unknown running binary origin is not inferred from a version string.
-By default, doctor observes the bundled support record. The reissued 0.6.0
-package bundles `supported_within_scope`; an earlier installation retains its
-original `review_required` record. To compare an explicitly imported record
+By default, doctor observes the bundled support record. Version 0.6.1 bundles
+the assessment for Codex CLI 0.172.0. To compare an explicitly imported record
 against the current profile and helper, use the returned record and context
 digests:
 
@@ -501,7 +507,7 @@ writer guard does not independently certify their completion. Selected descripto
 remain open for the checks immediately before unlink. History bodies are not
 scanned or hashed.
 
-The 0.6.0 native contract is wire 7 and the exact bundled state schema
+The 0.6.1 native contract uses wire 7 and the exact bundled state schema
 through migration 64, thread history through migration 9, and the companion
 schemas. Its bounded path supports plain JSONL and Zstandard, legacy and paginated history,
 and every observed pre/post-revert rollout belonging to a selected owner.
@@ -514,11 +520,11 @@ or be closed; selecting that parent never implicitly selects the Guardian. Exact
 selected-owner rows in `guardian_review_feedback` and `thread_read_receipts` are
 deleted for both ordinary and Guardian histories; unselected opaque rows remain
 untouched. Matched retained Guardians keep their existing physical writer guards.
-Post-release stock observations for the wire-7 helper cover stopped local Codex
-0.171.0 work in the named V1 and V2 history modes described in
-[compatibility](docs/compatibility.md). Custom
-internal controllers and arbitrary direct ephemeral-library access are outside this
-boundary. It is not a guarantee of business success or an empty runtime heap.
+Stock observations for the wire-7 helper cover stopped local Codex CLI 0.172.0
+work in the named V1 and V2 history modes described in
+[the 0.6.1 compatibility contract](docs/compatibility.md#061-contract).
+The separate file-backed Guardian V3 board, custom internal controllers and
+arbitrary direct ephemeral-library access are outside the qualified scope.
 
 `--max-read-bytes` defaults to 256 GiB and `--timeout-seconds` to six hours per
 collection or dispatch. These are cooperative limits, not memory reservations or
