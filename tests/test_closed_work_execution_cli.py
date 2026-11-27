@@ -168,7 +168,8 @@ def test_direct_cli_keeps_requested_retention_and_reconciles_admitted_scope_with
     assert main(["reconcile", "--online", "--receipt", str(options["journal"]), "--json"]) == 0
     reconciled = json.loads(capsys.readouterr().out)
     assert reconciled["outcome"] == "confirmed"
-    assert reconciled["roots"][0]["finalObservedState"] == "CONFIRMED_FINAL_STATE"
+    assert reconciled["roots"][0]["finalObservedState"] is None
+    assert reconciled["roots"][0]["evidence"]["state"] == "CONFIRMED_FINAL_STATE"
     assert observed.read_bytes() == consumed
     assert len(observations) == 1
     with sqlite3.connect(options["codex_home"] / "state_5.sqlite") as connection:
@@ -340,13 +341,15 @@ def test_reconcile_never_replays_and_distinguishes_original_from_final_state(
     assert main(replay) == 4
     unknown = json.loads(capsys.readouterr().out)
     assert unknown["roots"][0]["originalNativeOutcome"] == "partial"
-    assert unknown["roots"][0]["finalObservedState"] == "UNKNOWN"
+    assert unknown["roots"][0]["finalObservedState"] is None
+    assert unknown["roots"][0]["evidence"]["state"] == "UNKNOWN"
     _delete_selected(options["codex_home"])
     assert main(replay) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["scope"] == "saved_journal_units"
     assert report["roots"][0]["originalNativeOutcome"] == "partial"
-    assert report["roots"][0]["finalObservedState"] == "CONFIRMED_FINAL_STATE"
+    assert report["roots"][0]["finalObservedState"] is None
+    assert report["roots"][0]["evidence"]["state"] == "CONFIRMED_FINAL_STATE"
     assert observed.read_bytes() == before
     (stored,) = inspect(options["journal"])
     assert stored.units[0].terminal_kind is TerminalKind.PARTIAL
@@ -397,6 +400,7 @@ def test_all_retained_work_is_reported_without_journal_or_launch(
     assert main(argv) == 3
     report = json.loads(capsys.readouterr().out)
     assert report["roots"][0]["selectedThreads"] == []
+    assert report["recommended_action"] == "none"
     assert report["roots"][0]["retained"]
     assert report["roots"][0]["status"] == "not_dispatched"
     assert not options["journal"].exists()
@@ -516,7 +520,8 @@ def test_positive_reconciliation_reports_refreshed_lifecycle_projection(
     assert not after.lifecycle_unresolved
     assert report["lifecycleUnresolved"] is False
     assert report["roots"][0]["originalNativeOutcome"] == "partial"
-    assert report["roots"][0]["finalObservedState"] == "CONFIRMED_FINAL_STATE"
+    assert report["roots"][0]["finalObservedState"] is None
+    assert report["roots"][0]["evidence"]["state"] == "CONFIRMED_FINAL_STATE"
     assert observed.read_bytes() == consumed
 
 
@@ -604,7 +609,7 @@ def test_cli_refuses_noncurrent_unresolved_profile_without_observation_or_redisp
     assert row["ownershipScope"] == scope["ownership_scope"]
     assert row["selectedThreads"] == scope["deletion_scope"]
     assert row["originalNativeOutcome"] == "partial"
-    assert row["status"] == "unknown"
+    assert row["status"] == "partial"
     assert row["observationSource"] == "unavailable"
     assert row["finalObservedState"] is None
     assert row["detail"] == report["detail"]
@@ -753,6 +758,7 @@ def test_unclassified_engine_entry_failure_is_unknown_without_a_receipt(
     report = json.loads(capsys.readouterr().out)
     assert report["outcome"] == "unknown"
     assert report["detail"] == "unclassified engine failure"
+    assert report["recommended_action"] == "inspect_receipt"
     assert report["roots"][0]["status"] == "unknown"
     assert report["roots"][0]["originalNativeOutcome"] is None
     assert calls == [True]
@@ -776,6 +782,7 @@ def test_helper_admission_failure_remains_a_known_refusal_without_dispatch(
     assert main(argv) == 3
     report = json.loads(capsys.readouterr().out)
     assert report["outcome"] == "refused"
+    assert report["recommended_action"] == "none"
     assert not options["journal"].exists()
     assert not observed.exists()
 

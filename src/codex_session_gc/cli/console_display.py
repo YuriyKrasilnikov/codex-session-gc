@@ -257,6 +257,32 @@ def result_text(report: dict[str, Any]) -> str:
             f"  Retained {clean(item['threadId'])}: {clean(item['reason'])}"
             for item in row.get("retained", [])
         )
-    if report["outcome"] in {"unknown", "partial"}:
+    effects = report.get("effects")
+    if isinstance(effects, dict):
+        count = effects["recorded_removed_rollout_count"]
+        size = effects["recorded_removed_logical_bytes"]
+        recorded = (
+            f"{count} files; their logical volume: {size} bytes"
+            if count is not None and size is not None
+            else "unavailable"
+        )
+        lines.append(
+            f"Recorded removed files: {recorded} "
+            f"({effects['completeness']}; partial units: {effects['partial_unit_count']}; "
+            f"unavailable units: {effects['unavailable_unit_count']})"
+        )
+        reviewed = report.get("reviewed_logical_bytes")
+        lines.append(
+            f"Reviewed logical bytes: {reviewed if reviewed is not None else 'unavailable'}"
+        )
+        lines.append(
+            f"Observed at: {report.get('observed_at')}; "
+            f"recommended action: {report.get('recommended_action')}"
+        )
+    elif report.get("recommended_action"):
+        lines.append(f"Recommended action: {clean(report['recommended_action'])}")
+    if report.get("recommended_action") == "reconcile" or (
+        "recommended_action" not in report and report["outcome"] in {"unknown", "partial"}
+    ):
         lines.append("Keep the receipt and reconcile; do not retry automatically.")
     return "\n".join(lines)

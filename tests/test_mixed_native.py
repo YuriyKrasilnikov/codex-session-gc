@@ -1,5 +1,5 @@
 # Copyright (c) 2026
-# ruff: noqa: S101, PLR2004, ASYNC110
+# ruff: noqa: S101, PLR2004
 
 """Qualified mixed-format physical effects through actual public cleanup adapters."""
 
@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
-from textual.widgets import DataTable, Input, Select, Static
+from textual.widgets import Button, DataTable, Input, Select, Static
 
 from codex_session_gc.cli.console_tasks import parse_cutoff
 from codex_session_gc.cli.main import main
@@ -390,13 +390,9 @@ def test_actual_adapters_remove_all_owned_revert_formats_and_preserve_provider( 
             await pilot.pause()
             await pilot.click("#select")
             assert {str(identifier.value) for identifier in browser.selected} == {CHILD}
-            await pilot.click("#preview")
-            while not browser.query_one("#confirm", Input).display:
-                await pilot.pause(0.01)
-            browser.query_one("#confirm", Input).value = "DELETE"
-            await pilot.click("#execute")
-            while browser.completed_result is None:
-                await asyncio.sleep(0.01)
+            await _textual_preview(browser, pilot, "#preview")
+            assert browser.reviewed is not None
+            await _textual_apply(browser, pilot)
         assert browser.completed_result is not None
         assert browser.completed_result[1] == 0, browser.completed_result
         assert browser.receipt is not None
@@ -619,3 +615,125 @@ def _apply(
     assert status == 0, value
     assert value["outcome"] == "confirmed"
     return value
+
+
+def test_accumulated_project_selection_reaches_real_receipt_after_restart(  # noqa: PLR0915
+    tmp_path: Path, native_helper: Path
+) -> None:
+    """Review hidden selections, prepare their union, and observe recorded effects again."""
+    home, receipts = tmp_path / "home", tmp_path / "receipts"
+    paths = make_home(home)
+    second_child = str(UUID(int=777))
+    second_path = home / "sessions" / f"rollout-2026-06-01T00-00-00-{second_child}.jsonl"
+    first_project, second_project = str(home / "project-a"), str(home / "project-b")
+    for owner, parent, project in (
+        (CHILD, ROOT, first_project),
+        (second_child, OTHER, second_project),
+    ):
+        source_lines = paths[CHILD].read_text().splitlines()
+        header = json.loads(source_lines[0])
+        header["payload"].update(id=owner, session_id=owner, parent_thread_id=parent, cwd=project)
+        header["payload"]["source"]["subagent"]["thread_spawn"]["parent_thread_id"] = parent
+        header["payload"].update(
+            history_mode="paginated",
+            history_base={
+                "thread_id": parent,
+                "end_ordinal_exclusive": 1,
+                "end_byte_offset": len(paths[parent].read_bytes().splitlines(keepends=True)[0]),
+            },
+        )
+        path = paths[CHILD] if owner == CHILD else second_path
+        path.write_text(json.dumps(header) + "\n" + "\n".join(source_lines[1:]) + "\n")
+        paths[owner] = path
+        with sqlite3.connect(home / "state_5.sqlite") as connection:
+            if owner == CHILD:
+                connection.execute(
+                    "UPDATE threads SET cwd=?,history_mode='paginated' WHERE id=?", (project, owner)
+                )
+            else:
+                source = json.dumps(header["payload"]["source"])
+                connection.execute(
+                    "INSERT INTO threads(id,rollout_path,created_at,updated_at,source,"
+                    "model_provider,cwd,title,sandbox_policy,approval_mode,created_at_ms,"
+                    "updated_at_ms,history_mode) "
+                    "SELECT ?,?,created_at,updated_at,?,model_provider,?,title,sandbox_policy,"
+                    "approval_mode,created_at_ms,updated_at_ms,history_mode FROM threads "
+                    "WHERE id=?",
+                    (owner, str(path), source, project, CHILD),
+                )
+                connection.execute(
+                    "INSERT INTO thread_spawn_edges VALUES(?,?,'closed')", (parent, owner)
+                )
+    selected = {CHILD, second_child}
+    parents = {ROOT, OTHER}
+    retained = {owner: paths[owner].read_bytes() for owner in parents}
+    expected_paths = {str(paths[owner]) for owner in selected}
+    expected_bytes = sum(paths[owner].stat().st_size for owner in selected)
+
+    async def check() -> None:
+        browser = SessionApp(home, parse_cutoff("2030-01-01"), native_helper, receipts)
+        async with browser.run_test(size=(180, 60)) as pilot:
+            assert browser.load_task is not None
+            await browser.load_task
+            browser.query_one("#scope", Select).value = "agents"
+            browser.query_one("#cwd", Select).value = first_project
+            await pilot.pause()
+            assert await pilot.click("#select")
+            assert {str(item.value) for item in browser.selected} == {CHILD}
+            browser.query_one("#cwd", Select).value = second_project
+            while browser.query_one("#select", Button).has_class("-active") or {
+                str(item.id.value) for item in browser.matching_histories
+            } != {second_child}:
+                await pilot.pause(0.01)
+            assert await pilot.click("#select")
+            assert {str(item.value) for item in browser.selected} == selected
+            assert await pilot.click("#selection")
+            await pilot.pause()
+            table = browser.screen.query_one("#selection-table", DataTable)
+            assert table.row_count == 2
+            rows = [table.get_row_at(row) for row in range(table.row_count)]
+            assert {str(row[0]) for row in rows} == selected
+            assert {str(row[3]) for row in rows} == parents
+            await pilot.click("#selection-back")
+            await _textual_preview(browser, pilot, "#preview")
+            assert browser.reviewed is not None
+            assert {str(item.value) for item in browser.reviewed.selected} == selected
+        async with server(home, native_helper, receipts) as session:
+            catalogue = await call(session, "query_catalogue", {})
+            prepared = await call(
+                session,
+                "prepare_cleanup",
+                {
+                    "snapshot_id": catalogue["snapshot_id"],
+                    "thread_ids": sorted(selected),
+                    "cutoff": "2030-01-01",
+                },
+            )
+            assert set(prepared["report"]["selected"]) == selected
+            assert set(prepared["report"]["deletions"]) == selected
+            assert set(prepared["report"]["roots"]) == parents
+            result = await call(session, "apply_cleanup", prepared["confirmation"])
+            assert result["outcome"] == "confirmed", result
+            effects = result["effects"]
+            assert effects["recorded_removed_rollout_count"] == 2
+            assert effects["recorded_removed_logical_bytes"] == expected_bytes
+            assert effects["completeness"] == "complete"
+            assert {
+                path
+                for root in result["roots"]
+                for path in root["nativeReceipt"]["removed_rollouts"]
+            } == expected_paths
+            operation = prepared["confirmation"]["operation_id"]
+        async with server(home, native_helper, receipts) as session:
+            status = await call(session, "cleanup_status", {"operation_id": operation})
+            reconciled = await call(session, "reconcile_cleanup", {"operation_id": operation})
+            assert status["effects"] == effects
+            assert reconciled["effects"] == effects
+            assert reconciled["dispatch_replayed"] is False
+        assert all(not paths[owner].exists() for owner in selected)
+        assert {owner: paths[owner].read_bytes() for owner in parents} == retained
+        (saved,) = inspect(receipts / f"{operation}.sqlite")
+        assert all(launch.status is LaunchStatus.CLOSED for launch in saved.launches)
+        assert len(saved.launches) == 2
+
+    asyncio.run(asyncio.wait_for(check(), 120))

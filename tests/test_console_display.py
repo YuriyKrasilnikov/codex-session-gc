@@ -189,3 +189,26 @@ def test_guardian_review_displays_and_freezes_historical_parent(tmp_path: Path) 
     reviewed = tasks.confirmed_intent(intent, report)
     report["guardian_associations"][0]["associated_parent_thread_id"] = str(_ROOT.value)
     assert reviewed.reviewed_guardian_associations == (GuardianAssociation(_AGENT, _UNKNOWN),)
+
+
+def test_result_formats_unavailable_effects_and_uses_only_recommended_action() -> None:
+    text = ui.result_text(
+        {
+            "outcome": "unknown",
+            "roots": [],
+            "effects": {
+                "recorded_removed_rollout_count": None,
+                "recorded_removed_logical_bytes": None,
+                "completeness": "unavailable",
+                "partial_unit_count": 0,
+                "unavailable_unit_count": 1,
+            },
+            "recommended_action": "inspect_receipt",
+            "observed_at": "now",
+            "reviewed_logical_bytes": None,
+        }
+    )
+    assert "unavailable" in text
+    assert "None bytes" not in text
+    assert "inspect_receipt" in text
+    assert "reconcile" not in text

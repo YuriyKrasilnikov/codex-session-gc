@@ -68,6 +68,16 @@ settle ownership without inventing an original clean-shutdown event. Reviewed
 roots without a journal unit remain skipped; they are not freshly observed. A
 confirmed unit alongside skipped or undispatched work keeps the operation partial.
 
+A receipt-based effects report counts recorded removed physical files and their
+logical bytes when validated saved evidence supports the attribution; a proven
+undispatched unit has zero recorded removals.
+It distinguishes complete, partial and unavailable evidence from the operation
+outcome. A reviewed logical byte total, when available, comes from the recorded
+confirmation manifest and may exceed the executed selection. The observation time
+is when the receipt was read. These logical sizes do not measure allocated blocks
+or reclaimed disk space. Later observation of absent targets does not reconstruct a
+missing native result or attribute those removals to the original invocation.
+
 Unknown/partial effects block dependent mutation until their safety is established;
 independent read-only work may continue. There is no blind replay or whole-store
 rollback.
