@@ -139,22 +139,25 @@ def test_physical_budget_is_shared_across_files(tmp_path: Path) -> None:
     directory = tmp_path / "sessions"
     directory.mkdir()
     first = directory / NAME
-    second = directory / NAME.replace(OWNER, "22222222-2222-4222-8222-222222222222")
+    second_owner = "22222222-2222-4222-8222-222222222222"
+    second = directory / NAME.replace(OWNER, second_owner)
     raw = json.dumps({"type": "session_meta", "payload": {"id": OWNER}}).encode() + b"\n"
     first.write_bytes(raw)
-    second.write_bytes(raw)
+    second.write_bytes(raw.replace(OWNER.encode(), second_owner.encode()))
     snapshot = _scan(tmp_path)
     entries = tuple(x for x in snapshot.entries if x.parts[-1:] in ((first.name,), (second.name,)))
-    result = observe_headers(
-        snapshot,
-        entries,
-        cancelled=lambda: False,
-        limits=HeaderLimits(max_physical_bytes=len(raw) + 5),
-    )
-    assert result.root_valid
-    assert result.results[0].reason == HeaderReason.OBSERVED
-    assert result.results[1].reason == HeaderReason.LIMIT
-    assert result.physical_bytes == len(raw) + 5
+    assert len(entries) == 2
+    for order in (entries, entries[::-1]):
+        result = observe_headers(
+            snapshot,
+            order,
+            cancelled=lambda: False,
+            limits=HeaderLimits(max_physical_bytes=len(raw) + 5),
+        )
+        assert result.root_valid
+        assert result.results[0].reason == HeaderReason.OBSERVED
+        assert result.results[1].reason == HeaderReason.LIMIT
+        assert result.physical_bytes == len(raw) + 5
 
 
 def test_six_operations_reserve_root_rebinding(tmp_path: Path) -> None:
