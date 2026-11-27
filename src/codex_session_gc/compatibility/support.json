@@ -31,10 +31,16 @@
       "description": "Ordinary cache, plugin, process and output paths do not alias selected storage locations."
     },
     {
-      "description": "Stock tests used a local scripted model provider and the observed 0.171.0 producer. Additional Guardian and attachment representations have disposable storage-fixture coverage. All clients deleting from a home must use the Keep-capable helper to enforce Keep marks."
+      "description": "Stock tests used a local scripted model provider and the observed 0.172.0 producer. Additional Guardian and attachment representations have disposable storage-fixture coverage. All clients deleting from a home must use the Keep-capable helper to enforce Keep marks."
     },
     {
       "description": "The observed producer executable digest identifies the executable exercised. It does not attest the build provenance of a caller-provided producer."
+    },
+    {
+      "description": "The released profile covers the ordinary on-disk agent board. A home using the separate Guardian V3 board message_board_guardian_1.sqlite is outside this cleanup assessment. Check the effective producer SQLite directory and its configuration separately from doctor."
+    },
+    {
+      "description": "Realtime storage checks cover seeded canonical rows and retained stock reads. Live voice transport and the full checkpoint rollback and realtime recovery lifecycle were not qualified."
     }
   ],
   "coverage_complete": true,
@@ -45,22 +51,22 @@
     "profile_sha256": "15397f1e32ff5630c872bb436b9bf3ec0edf53cb19150b2154c0e174a7bcf117"
   },
   "record_version": 1,
-  "report_sha256": "691c34879d976867e564166d7fba495d7362c6955cdc465199e4de68a5901691",
+  "report_sha256": "536fb08a35d11daa85a37bb86a20ca9e074732b2f406bffdd39d9d32f83e2d53",
   "review": {
-    "scope": "Selected technically stopped persistent local work from stock Codex CLI 0.171.0 with the published 0.6.0 helper on the qualified Linux x86_64 host. Stock cases cover V1 legacy parent and paginated child, V2 legacy and paginated work, and a retained paginated fork that depends on its provider. The stock producer source is unchanged from the previous 0.171.0 assessment. Compared with the 0.5.2 helper, wire 7 separately validates age policy and exact-ID ceilings. Keep is checked under the same maintenance ownership before deletion. The writer, incoming attachment and physical-provider checks, fresh SQL validation and rollout-before-state ordering are retained.",
-    "source": "scoped-source-assessment:sha256:691c34879d976867e564166d7fba495d7362c6955cdc465199e4de68a5901691"
+    "scope": "Selected technically stopped persistent local work produced by stock Codex CLI 0.172.0 on the qualified Ubuntu 26.04 LTS x86_64 host. The released wire-7 helper, raw profile and native inputs remain the qualified execution identities. This scope covers V1 legacy and V2 legacy and paginated histories, retained providers, and ordinary board storage. File-backed Guardian V3 boards and live realtime transport are outside the observed scope.",
+    "source": "scoped-source-assessment:sha256:536fb08a35d11daa85a37bb86a20ca9e074732b2f406bffdd39d9d32f83e2d53"
   },
   "source_origin": {
-    "scope": "Selected technically stopped persistent local work from stock Codex CLI 0.171.0 with the published 0.6.0 helper on the qualified Linux x86_64 host. Stock cases cover V1 legacy parent and paginated child, V2 legacy and paginated work, and a retained paginated fork that depends on its provider.",
-    "source": "https://github.com/openai/codex/tree/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e"
+    "scope": "Selected technically stopped persistent local work produced by stock Codex CLI 0.172.0 on the qualified Ubuntu 26.04 LTS x86_64 host. The released wire-7 helper, raw profile and native inputs remain the qualified execution identities. This scope covers V1 legacy and V2 legacy and paginated histories, retained providers, and ordinary board storage. File-backed Guardian V3 boards and live realtime transport are outside the observed scope.",
+    "source": "https://github.com/openai/codex/tree/3d86e43b075adeba2193ec5c22ac92f55afd82e6"
   },
   "status": "supported_within_scope",
   "target": {
-    "observed_binary_sha256": "b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0",
+    "observed_binary_sha256": "ad83b94c093f0cdd8176a6bc8005a461bdf23a759863e157d40f562b8a9d664d",
     "repository": "openai/codex",
     "source": {
-      "commit": "ccf9be8cc458bd6b8336fe84d68d8893f2691a5e",
-      "ref": "refs/tags/rust-v0.171.0"
+      "commit": "3d86e43b075adeba2193ec5c22ac92f55afd82e6",
+      "ref": "refs/tags/rust-v0.172.0"
     }
   },
   "witnesses": [
@@ -69,24 +75,44 @@
       "scope": "Matched wire-7 helper and Keep. Disposable native storage fixtures cover qualified representation, ownership, writer and exact-effect checks."
     },
     {
-      "reference": "stock-trace:sha256:7b74aef28d0b0982c596a6b5c820f34171ace71d820161349dc090ba524264e1",
-      "scope": "V1 legacy parent with paginated child. With a live writer, the released helper refused without effects. After the work stopped, deletion removed only the chosen child. The retained parent and unrelated thread remained readable."
+      "reference": "stock-trace:sha256:eaef6ce7d691fdb3bdd460f142b772c3041b3d460997ca72b0e479e8c6f89a10",
+      "scope": "V1 legacy on stock 0.172.0 refused a live writer, removed only the stopped child, and let an unrelated turn complete. A retained parent resumed."
     },
     {
-      "reference": "stock-trace:sha256:6ebe2c83c51f3dc8589d5a3558533e943905d31d04ac0043a84ea7e8012b65a6",
-      "scope": "V2 paginated. With a live writer, the released helper refused without effects. After the work stopped, deletion removed only the chosen child. The retained parent and unrelated thread remained readable."
+      "reference": "stock-trace:sha256:9c41a141662c47ddb860e8fa9c7c351528134ddb5508a481832aafbc4a98e458",
+      "scope": "V2 legacy on stock 0.172.0 refused a live writer, removed only the stopped child, and let an unrelated turn complete. A retained parent resumed."
     },
     {
-      "reference": "stock-installed-cli-mcp:sha256:8a8915038ed46c7337a343e1e374b7d24a2f2e62fc9348847d44121d36f47cef",
-      "scope": "Installed CLI protected a selected child with Keep, then cleared, removed and reconciled it. Installed MCP confirmed the selected V2 paginated child and observed the original attempt after restart without redispatch. Retained rollouts kept their original bytes."
+      "reference": "stock-trace:sha256:4dad99739deb453599d999fa3a3087c617bb6d9123ae311bd91a1976f935e6a2",
+      "scope": "V2 paginated on stock 0.172.0 refused a live writer, removed only the stopped child, and let an unrelated turn complete. A retained parent resumed."
     },
     {
-      "reference": "stock-v2-legacy-interfaces:sha256:a04fa995207aeff487f5aff285f643063191c8568708a274a2d559d69af5942b",
-      "scope": "On separate V2 legacy homes, CLI, Textual and MCP each removed one selected child. Fresh stock processes read and resumed each retained parent and refused the removed child."
+      "reference": "installed-cli-mcp:sha256:0f87d6a2e665d069cc6769c45e4e6a1f27349244ba4dedd4596ef1b47cee3e2f",
+      "scope": "The installed CLI enforced Keep and removed one selected child after the mark was cleared. The installed MCP removed one child and returned the original outcome after restart without re-dispatch."
     },
     {
-      "reference": "stock-retained-fork:sha256:8843fe6f15e76f31a9ab93cc28a1198d3e86b5b7ad4397d382334fb3e3228567",
-      "scope": "An installed preview retained a selected provider needed by an excluded paginated fork. Both histories stayed intact and could be read and resumed by stock Codex."
+      "reference": "realtime-projection:sha256:540fca38db37708b121f069ddb98411d4283f53e74af85e63b25369d722b7962",
+      "scope": "Stock Codex projected explicit canonical realtime seed records from the parent and child. The installed GC removed only the selected child’s rows and rollout. The retained parent returned the same realtime page from a fresh producer."
+    },
+    {
+      "reference": "interrupted-parent:sha256:12bc71e9d54befd36be60637727386a6e4dec2c5781482727153ce02d05607ee",
+      "scope": "A stock V2 parent accepted a test child reply before interruption. The helper refused the live work, then removed the selected child after shutdown. The next turn in the retained parent observed the reply exactly once."
+    },
+    {
+      "reference": "retained-fork:sha256:ac0d3205798298da7bd89ab7b996999a19633a01dac40ce3e8ce71b7e5046c1d",
+      "scope": "The preview protected the provider required by a paginated fork. After exact removal of a sibling child, both retained rollouts kept their bytes and a fresh stock process read and resumed them."
+    },
+    {
+      "reference": "distinct-revert:sha256:8b6df6121e61bccade5012d02cc5575c242b2dfb1f64ffd18c7467de159b59c2",
+      "scope": "A stock revert wrote a different physical rollout ID. The installed plan identified both the original and current rollout as one logical thread’s history."
+    },
+    {
+      "reference": "ordinary-board:sha256:c86def71625f338b0c70f0de584855ae5a21ccb0d85a7d6fd70cd6e189482b2b",
+      "scope": "The published helper preserved an unrelated root, bounded ordinary board cleanup, rejected the old schema and extra trigger, and prevented late root writes in native storage fixtures."
+    },
+    {
+      "reference": "stock-mcp-calls:sha256:8cb9558b673e642c97f4902f6f139bac9e924f20367a92b1959c26b75f536436",
+      "scope": "A fresh app-server discovered the server, called the installed compatibility tool in its first test thread, and called it again from a second thread in the same process."
     }
   ]
 }

@@ -11,6 +11,36 @@ The pinned native source is OpenAI Codex commit
 source profile uses wire 7 for dated and exact-ID selections. Its qualification
 covers the separate helper and the documented storage boundaries.
 
+## 0.6.1 contract
+
+The bundled `supported_within_scope` record covers selected stopped persistent
+local work produced by stock Codex CLI 0.172.0. This release reuses the qualified
+wire-7 helper, raw profile and execution schemas from 0.6.0. Related metadata
+updates and history-reference publication must finish before cleanup. Unrelated
+work can continue on the same qualified local filesystem.
+
+Disposable stock cases exercised live-writer refusal and one-child removal in V1
+legacy, V2 legacy and V2 paginated trees. Retained parents and branches remained
+readable. An excluded paginated fork kept its provider. After removing only
+the selected child, stock Codex read and resumed both retained histories. A
+separate revert produced distinct logical and physical identities. A stock process projected seeded realtime
+items and re-read the retained projection after exact cleanup. A separate
+stock interruption check observed the accepted test reply in the retained
+parent's next turn. These cases identify the observed storage effects. The
+automated upstream comparison has unresolved source-coverage gaps.
+
+The profile covers the ordinary `agent_message_board_1.sqlite` representation.
+Homes using the additional file-backed Guardian V3 board
+`message_board_guardian_1.sqlite` under the effective SQLite home are outside
+this cleanup assessment. Check the producer's storage and configuration before
+cleanup in such a home. The named file is outside the profile's database list,
+so an apparently matching `doctor` result does not establish its coverage.
+
+The installed CLI, Textual and MCP exercise the shared cleanup path. Stock
+Codex can call the compatibility tool once MCP discovery reports it ready.
+The tool catalogue cache belongs to the running Codex process. After switching
+registrations, a fresh Codex process discovers the newly installed server.
+
 ## 0.6.0 contract
 
 The wire-7 helper and profile are qualified against bounded disposable native
