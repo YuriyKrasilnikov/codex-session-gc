@@ -85,6 +85,13 @@ def test_preview_and_cli_share_exact_conditional_selection(
     intent = work_home(tmp_path)
     expected = preview(intent)
     assert expected["deletions"] == [str(AGENT.value)]
+    summary = expected["selection_summary"]
+    assert summary["history_count"] == 1
+    assert (
+        summary["stored_bytes"]
+        == next((tmp_path / "sessions").glob(f"*-{AGENT.value}.jsonl")).stat().st_size
+    )
+    assert summary["missing"] == 0
     assert expected["incomingReferencesComplete"]
     assert not expected["closureCertified"]
     assert not expected["executable"]
@@ -113,6 +120,31 @@ def test_preview_and_cli_share_exact_conditional_selection(
         == 0
     )
     assert json.loads(capsys.readouterr().out) == expected
+
+
+def test_cli_preview_text_shows_fresh_selection_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The normal text preview shows the selected histories and observed size."""
+    intent = work_home(tmp_path)
+    result = main(
+        [
+            "plan",
+            "--online",
+            "--home",
+            str(tmp_path),
+            "--cutoff",
+            CUTOFF.timestamp.isoformat(),
+            "--closed-work",
+            str(ROOT.value),
+            "--select-thread",
+            str(AGENT.value),
+        ]
+    )
+    size = next((tmp_path / "sessions").glob(f"*-{AGENT.value}.jsonl")).stat().st_size
+    assert result == 0
+    assert f"Selected histories: 1; {size} stored bytes" in capsys.readouterr().out
+    assert intent.selected == (AGENT,)
 
 
 def test_preview_reads_selected_headers_independently_of_history_body_size(tmp_path: Path) -> None:

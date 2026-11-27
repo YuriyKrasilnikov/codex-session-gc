@@ -35,6 +35,7 @@ from codex_session_gc.cli.console_tasks import (
     parse_cutoff,
 )
 from codex_session_gc.cli.policy_preview import preview_policy as evaluate_policy
+from codex_session_gc.cli.selection_screen import SelectionScreen
 from codex_session_gc.cli.storage_screen import StorageScreen
 from codex_session_gc.cli.storage_service import StorageService
 from codex_session_gc.cli.timing_display import terminal as timing_terminal
@@ -50,6 +51,7 @@ from codex_session_gc.inventory.query import (
     CatalogueQuery,
     CatalogueScope,
 )
+from codex_session_gc.inventory.selection import SelectionProjection, project_selection
 from codex_session_gc.inventory.selection_rule import SelectionRule, parse_rule_json
 
 if TYPE_CHECKING:
@@ -135,7 +137,7 @@ class SessionApp(App[tuple[str, int]]):
     #sessions { height: 1fr; min-height: 3; }
     #details-panel { height: auto; min-height: 3; }
     #details { height: auto; }
-    #actions { height: 6; layout: grid; grid-size: 4 2; grid-columns: 1fr; }
+    #actions { height: 6; layout: grid; grid-size: 5 2; grid-columns: 1fr; }
     #actions Button { width: 100%; min-width: 8; }
     #review { height: auto; display: none; }
     #review-text { height: auto; }
@@ -143,7 +145,9 @@ class SessionApp(App[tuple[str, int]]):
     #execute { display: none; }
     #child-ids, #choose-children, #source-preview { display: none; }
     .reviewing .filters, .reviewing #sessions, .reviewing #details-panel { display: none; }
-    .reviewing #project-summary { display: none; }
+    .reviewing #project-summary, .reviewing #select, .reviewing #clear,
+    .reviewing #selection, .reviewing #preview, .reviewing #refresh,
+    .reviewing #storage { display: none; }
     """
 
     def __init__(
@@ -296,6 +300,7 @@ class SessionApp(App[tuple[str, int]]):
         with Horizontal(id="actions"):
             yield Button("Select matches", id="select")
             yield Button("Clear selection", id="clear")
+            yield Button("Review selection", id="selection")
             yield Button("Preview", id="preview", variant="primary")
             yield Button("Cancel / Back", id="cancel")
             yield Button("Execute DELETE", id="execute", variant="error")
@@ -527,12 +532,23 @@ class SessionApp(App[tuple[str, int]]):
                 self._history_row(table, group, entry)
         if table.row_count:
             table.move_cursor(row=min(cursor, table.row_count - 1))
+        projection = self._selection_projection()
         self._notice(
             f"{len(self.groups):,} work groups; {len(self.selected):,} exact histories selected "
+            f"({projection.visible} visible, {projection.hidden} hidden, "
+            f"{projection.missing} unavailable); "
             "(selection persists across filters). "
             + ("Enter expands; " if self.order_target == "work" else "Globally ranked histories; ")
             + "Space toggles matches."
         )
+
+    def _selection_projection(self) -> SelectionProjection:
+        if self.index is None:
+            raise RuntimeError("Catalogue is unavailable.")
+        visible = (
+            frozenset(entry.id for entry in self.matching_histories) if self.valid_filters else None
+        )
+        return project_selection(self.index, frozenset(self.selected), visible)
 
     def _history_row(
         self,
@@ -698,6 +714,21 @@ class SessionApp(App[tuple[str, int]]):
             if current:
                 self._select((current[0],), current[1])
 
+    def _open_selection(self) -> None:
+        if self.index is None or (self.load_task is not None and not self.load_task.done()):
+            self._notice("Wait for the catalogue to finish loading.")
+            return
+
+        def remove(identifier: ThreadId | None) -> None:
+            if identifier is not None:
+                self.selected.pop(identifier, None)
+                if self.valid_filters:
+                    self._render_rows()
+                else:
+                    self._notice("Selection updated; filter visibility unavailable.")
+
+        self.push_screen(SelectionScreen(self._selection_projection()), remove)
+
     async def on_button_pressed(self, event: Button.Pressed) -> None:  # noqa: C901, PLR0912
         """Route explicit browsing and execution actions."""
         action = event.button.id
@@ -715,7 +746,9 @@ class SessionApp(App[tuple[str, int]]):
             "source-preview",
         }:
             return
-        if action == "project-summary":
+        if action == "selection":
+            self._open_selection()
+        elif action == "project-summary":
             if self.index is None or (self.load_task is not None and not self.load_task.done()):
                 self._notice("Wait for the catalogue to finish loading.")
                 return
@@ -933,7 +966,7 @@ class SessionApp(App[tuple[str, int]]):
         self.query_one("#child-ids").display = False
         self.query_one("#choose-children").display = False
         self.query_one("#source-preview").display = False
-        for identifier in ("select", "clear", "refresh", "preview", "storage"):
+        for identifier in ("select", "clear", "selection", "refresh", "preview", "storage"):
             self.query_one("#" + identifier, Button).disabled = enabled
         for widget in self.query(".filters Input, .filters Select"):
             widget.disabled = enabled

@@ -48,6 +48,7 @@ from codex_session_gc.execution.timing import (
     observe,
     signal_worker_summary,
 )
+from codex_session_gc.inventory.selection import project_preview_selection
 
 if TYPE_CHECKING:
     from codex_session_gc.execution.progress import ProgressChannel
@@ -135,7 +136,10 @@ def preview(intent: Intent, *, mode: PreviewMode = PreviewMode.OBSERVE) -> dict[
         metadata = intent.home.stat()
         home_identity = (metadata.st_dev, metadata.st_ino)
     report = preview_selection(
-        intent.home, intent.cutoff, frozenset(intent.roots), frozenset(intent.selected)
+        intent.home,
+        intent.cutoff,
+        frozenset(intent.roots),
+        frozenset(intent.selected),
     )
     if mode is PreviewMode.CONFIRM and not report["errors"] and report["deletions"]:
         current = intent.home.stat()
@@ -199,6 +203,11 @@ def preview_selection(
         )
         candidates = sorted(selection.conditional_candidates)
         targets = review_targets(facts, selection, home, collection_limits())
+    selection_summary = (
+        project_preview_selection(facts.snapshot, facts.physical_inventory, selected)
+        if selected is not None
+        else None
+    )
     count(Count.ROOTS, len(roots))
     count(Count.CANDIDATES, len(candidates))
     sizes = {
@@ -242,6 +251,7 @@ def preview_selection(
         **intent.payload(),
         "kind": "closed_work_selection",
         "home_identity": list(home_identity),
+        "selection_summary": selection_summary,
         "attachment_cleanup": attachment_cleanup(facts.snapshot, selected, ancestry, home_identity),
         "selected_attachments": {
             str(child.value): str(source.value)

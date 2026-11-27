@@ -126,13 +126,30 @@ def test_filters_groups_and_exact_bulk_selection(
     async def scenario() -> None:
         browser = app(tmp_path, monkeypatch)
         captured = []
+        presented = []
+        original_preview_lines = ui.preview_lines
 
         async def preview(intent: Intent, *, mode: PreviewMode) -> dict[str, Any]:
             assert mode is PreviewMode.CONFIRM
             captured.append(intent)
-            return report(intent)
+            result = report(intent)
+            result["selection_summary"] = {
+                "history_count": 1,
+                "stored_bytes": 123456,
+                "known_stored_bytes": 123456,
+                "incomplete_history_count": 0,
+                "visible": None,
+                "hidden": None,
+                "missing": 0,
+            }
+            return result
+
+        def preview_lines(value: dict[str, Any]) -> list[str]:
+            presented.append(value["selection_summary"])
+            return original_preview_lines(value)
 
         monkeypatch.setattr(ui, "async_preview", preview)
+        monkeypatch.setattr(ui, "preview_lines", preview_lines)
         async with browser.run_test(size=(150, 45)) as pilot:
             await pilot.pause()
             browser.query_one("#scope", Select).value = "agents"
@@ -148,6 +165,7 @@ def test_filters_groups_and_exact_bulk_selection(
             await pilot.pause()
             await pilot.click("#preview")
             await pilot.pause()
+            assert presented[0]["stored_bytes"] == 123456
             assert captured[0].selected == (AGENT,)
             assert captured[0].roots == (ROOT,)
             assert browser.reviewed is not None
@@ -387,10 +405,44 @@ def test_narrow_terminal_contains_essential_controls(
         async with browser.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             footer = browser.query_one("Footer").region.y
-            for identifier in ("select", "clear", "preview", "cancel", "refresh", "quit"):
+            for identifier in (
+                "select",
+                "clear",
+                "selection",
+                "preview",
+                "cancel",
+                "refresh",
+                "storage",
+                "project-summary",
+                "quit",
+            ):
                 region = browser.query_one("#" + identifier).region
                 assert region.x >= 0
                 assert region.right <= browser.size.width
+                assert region.width > 0
+                assert region.height > 0
+                assert region.y >= 0
+                assert region.bottom <= footer
+
+    asyncio.run(scenario())
+
+
+def test_narrow_review_actions_remain_reachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        browser = app(tmp_path, monkeypatch)
+        async with browser.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            browser._review_mode(enabled=True)
+            for identifier in ("execute", "choose-children", "source-preview"):
+                browser.query_one("#" + identifier).display = True
+            await pilot.pause()
+            footer = browser.query_one("Footer").region.y
+            for identifier in ("cancel", "quit", "execute", "choose-children", "source-preview"):
+                region = browser.query_one("#" + identifier).region
+                assert region.width > 0
+                assert region.height > 0
                 assert region.y >= 0
                 assert region.bottom <= footer
 
@@ -1429,3 +1481,65 @@ def test_rule_rechecks_resolved_location_before_read(tmp_path: Path) -> None:
     outside.symlink_to(inside)
     with pytest.raises(ValueError, match="outside"):
         ui._read_rule_file(outside, home)
+
+
+def test_accumulated_selection_screen_keeps_invalid_filter_and_removes_exact_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scans = 0
+
+    def read_catalogue(_home: Path) -> ui.SessionCatalogue:
+        nonlocal scans
+        scans += 1
+        return catalogue()
+
+    async def scenario() -> None:
+        browser = app(tmp_path, monkeypatch)
+        monkeypatch.setattr(ui, "read_session_catalogue", read_catalogue)
+        async with browser.run_test(size=(150, 45)) as pilot:
+            await pilot.pause()
+            assert scans == 1
+            browser.selected = {ROOT: ROOT, AGENT: ROOT}
+            browser.query_one("#minimum", Input).value = "invalid"
+            await pilot.pause()
+            assert not browser.valid_filters
+            await pilot.click("#selection")
+            await pilot.pause()
+            screen = browser.screen
+            assert isinstance(screen, ui.SelectionScreen)
+            assert screen.projection.visible is None
+            assert len(screen.projection.rows) == 2
+            removed = screen.rows[0][0]
+            await pilot.click("#remove-selection")
+            await pilot.pause()
+            assert set(browser.selected) == {ROOT, AGENT} - {removed}
+            assert scans == 1
+
+    asyncio.run(scenario())
+
+
+def test_selection_controls_remain_reachable_with_many_rows_on_narrow_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def scenario() -> None:
+        browser = app(tmp_path, monkeypatch)
+        async with browser.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            browser.selected = {ThreadId(UUID(int=n)): ROOT for n in range(1, 101)}
+            await pilot.click("#selection")
+            await pilot.pause()
+            screen = browser.screen
+            assert isinstance(screen, ui.SelectionScreen)
+            assert screen.query_one("#selection-table", DataTable).row_count == 100
+            for identifier in ("remove-selection", "selection-back"):
+                region = screen.query_one("#" + identifier).region
+                assert region.y >= 0
+                assert region.bottom <= browser.size.height
+                assert region.height > 0
+            removed = screen.rows[0][0]
+            await pilot.click("#remove-selection")
+            await pilot.pause()
+            assert removed not in browser.selected
+            assert len(browser.selected) == 99
+
+    asyncio.run(scenario())
