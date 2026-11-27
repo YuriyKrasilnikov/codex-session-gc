@@ -144,6 +144,30 @@ def attachment_plan_lines(report: dict[str, Any]) -> list[str]:
     return output
 
 
+def _selection_lines(summary: dict[str, Any] | None) -> list[str]:
+    if summary is None:
+        return []
+    total = summary["stored_bytes"]
+    size = (
+        f"{total} stored bytes"
+        if total is not None
+        else f"at least {summary['known_stored_bytes']} stored bytes; "
+        f"{summary['incomplete_history_count']} histories incomplete"
+    )
+    visible, hidden = summary["visible"], summary["hidden"]
+    visibility = (
+        f"visible: {visible}; hidden: {hidden}"
+        if visible is not None and hidden is not None
+        else "visible and hidden counts unavailable"
+    )
+    return [
+        (
+            f"Selected histories: {summary['history_count']}; {size}; {visibility}; "
+            f"missing: {summary['missing']}"
+        )
+    ]
+
+
 def preview_lines(report: dict[str, Any]) -> list[str]:
     """Expose the exact consequential declaration and every retained selection."""
     sizes = report["sizes"]
@@ -151,6 +175,7 @@ def preview_lines(report: dict[str, Any]) -> list[str]:
     associations = reviewed_associations(report["guardian_associations"])
     return [
         "CONDITIONAL PREVIEW - not proof that work is closed or deletable",
+        *_selection_lines(report.get("selection_summary")),
         f"Home: {report['home']}",
         (
             f"UTC upper boundary: {report['cutoff']}"

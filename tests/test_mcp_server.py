@@ -14,6 +14,7 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -579,9 +580,26 @@ def test_changed_advisory_still_prepares_exact_fresh_selection(tmp_path: Path) -
         listed = await service.query_catalogue()
         assert service.index is not None
         service.index = CatalogueIndex(replace(service.index.catalogue, source_changed=True))
+        child_id = ThreadId.parse(CHILD)
+        observed = service.index.entries[child_id]
+        path = observed.physical_rollouts[0].path
+        with path.open("ab") as stream:
+            stream.write(b"\n")
         prepared = await service.prepare_cleanup(listed["snapshot_id"], [CHILD], "2030-01-01")
+        fresh = preview(
+            Intent(
+                home,
+                UtcCutoff(datetime.fromisoformat("2030-01-01T00:00:00+00:00")),
+                (ThreadId.parse(ROOT),),
+                (child_id,),
+            )
+        )
+        assert prepared["report"]["selection_summary"] == fresh["selection_summary"]
+        assert prepared["report"]["selection_summary"]["stored_bytes"] == observed.stored_bytes + 1
         assert prepared["source_changed"]
         assert prepared["report"]["selected"] == [CHILD]
+        assert prepared["report"]["selection_summary"]["history_count"] == 1
+        assert prepared["report"]["selection_summary"]["missing"] == 0
         assert prepared["report"]["deletions"] == [CHILD]
         assert prepared["can_apply_via_mcp"]
         assert set(prepared["confirmation"]) == {"operation_id", "digest"}

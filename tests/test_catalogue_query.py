@@ -14,6 +14,7 @@ from codex_session_gc.inventory.query import (
     CatalogueScope,
     summarize_catalogue,
 )
+from codex_session_gc.inventory.selection import project_selection
 from tests.current_storage_fixture import _stored_rollout
 
 _A = ThreadId.parse("11111111-1111-4111-8111-111111111111")
@@ -526,3 +527,39 @@ def test_summary_rank_and_literal_cwd() -> None:
         "",
         "/a",
     ]
+
+
+def test_selection_projection_preserves_missing_and_invalid_visibility() -> None:
+    index = _index()
+    selected = frozenset({_A, _B, _D, _E})
+    projected = project_selection(index, selected, frozenset({_B}))
+    assert [identifier for identifier, _ in projected.rows] == sorted(selected)
+    assert (projected.visible, projected.hidden, projected.missing) == (1, 1, 2)
+    assert projected.totals.history_count == 4
+    assert projected.totals.known_stored_bytes == 400
+    assert projected.totals.stored_bytes is None
+    assert projected.totals.incomplete_history_count == 2
+    unavailable = project_selection(index, selected)
+    assert unavailable.visible is None
+    assert unavailable.hidden is None
+    assert unavailable.rows == projected.rows
+
+
+def test_selection_projection_never_counts_duplicate_physical_identity_twice() -> None:
+    first = _entry(_A, 100)
+    second = replace(_entry(_B, 100), physical_rollouts=first.physical_rollouts)
+    index = CatalogueIndex(SessionCatalogue((first, second), (), source_changed=False))
+    projected = project_selection(index, frozenset({_A, _B}))
+    assert projected.totals.known_stored_bytes == 100
+
+
+def test_selection_unresolved_work_is_unavailable_even_when_history_exists() -> None:
+    entry = replace(_entry(_A, 100), root_id=_E)
+    index = CatalogueIndex(SessionCatalogue((entry,), (), source_changed=False))
+    result = project_selection(index, frozenset({_A}), frozenset({_A}))
+    assert result.rows == ((_A, entry),)
+    assert result.unavailable_ids == frozenset({_A})
+    assert (result.visible, result.hidden, result.missing) == (0, 0, 1)
+    assert result.totals.known_stored_bytes == 100
+    assert result.totals.stored_bytes is None
+    assert result.totals.incomplete_history_count == 1
